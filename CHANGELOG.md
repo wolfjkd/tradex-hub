@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
 
+## [2.3.2] - 2026-06-29
+
+### Changed
+- 清理 workbuddy 遗留路径，4个硬编码文件改为相对路径/项目目录
+- 删除 .workbuddy/ 目录及遗留文件
+- 更新 config/mcp-servers.json，移除 WorkBuddy 引用
+- 新增 limit_up_board.py 涨停板分析模块
+
 ## [2.3.1] - 2026-06-24
 
 ### Fixed
