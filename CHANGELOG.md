@@ -43,9 +43,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0
 - 覆盖率：新模块 80-91%（smart_router 91%、tick_store 90%、etf 81%、convertible_bond 89%）
 
 ## [2.2.0] - 2026-06-23
-and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/).
 
-## [2.2.0] - 2026-06-23
+The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/).
 
 ### Added
 - 新增 `astock_signals/northbound.py` — 北向资金流向模块（同花顺 hsgtApi，含本地 CSV 缓存历史）

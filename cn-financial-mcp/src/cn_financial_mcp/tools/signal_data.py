@@ -60,6 +60,9 @@ from astock_signals import (  # noqa: E402
     get_etf_kline_json,
     get_cb_realtime_json,
     get_cb_value_analysis_json,
+    get_limit_up_board_json,
+    get_board_sentiment_json,
+    get_limit_up_insight,
 )
 
 
@@ -730,4 +733,101 @@ def register(mcp: FastMCP):
         except Exception as e:
             return error_response(
                 f"获取可转债价值分析失败: {e}", "get_cb_value_analysis_data"
+            )
+
+    # ----------------------------------------------------------------
+    # V0.9: 打板层 — 涨停四池 + 情绪速算（a-stock-data 融合）
+    # ----------------------------------------------------------------
+
+    @mcp.tool()
+    async def get_limit_up_board(board_type: str = "zt") -> str:
+        """
+        获取涨停板数据（东财 push2ex）。
+
+        支持四种类型：涨停池/炸板池/跌停池/昨日涨停池。
+
+        Args:
+            board_type: 板类型，可选 zt(涨停)/zb(炸板)/dt(跌停)/prev_zt(昨日涨停)。
+
+        Returns:
+            板数据 (JSON)，含股票列表及对应字段。
+        """
+        board_type = board_type.lower().strip()
+        if board_type not in ["zt", "zb", "dt", "prev_zt"]:
+            return error_response(
+                f"无效的板类型: {board_type}。可选: zt, zb, dt, prev_zt",
+                "get_limit_up_board",
+            )
+
+        cache_key = f"limit_up_board:{board_type}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        try:
+            result = get_limit_up_board_json(board_type)
+            output = dict_to_json(result)
+            if result.get("data"):
+                cache.set(cache_key, output, TTL_REALTIME)
+            return output
+        except Exception as e:
+            return error_response(
+                f"获取涨停板数据失败: {e}", "get_limit_up_board"
+            )
+
+    @mcp.tool()
+    async def get_board_sentiment() -> str:
+        """
+        获取打板情绪数据（炸板率/连板梯队/晋级率）。
+
+        综合涨停四池数据，计算市场打板情绪指标：炸板率、连板梯队、
+        昨日涨停晋级率、平均溢价、热门题材等。
+
+        Returns:
+            打板情绪数据 (JSON)，含涨停数/炸板数/跌停数/炸板率/
+            连板梯队/晋级率/平均溢价/热门题材。
+        """
+        cache_key = "board_sentiment"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        try:
+            result = get_board_sentiment_json()
+            output = dict_to_json(result)
+            if not result.get("error"):
+                cache.set(cache_key, output, TTL_REALTIME)
+            return output
+        except Exception as e:
+            return error_response(
+                f"获取打板情绪数据失败: {e}", "get_board_sentiment"
+            )
+
+    @mcp.tool()
+    async def get_limit_up_insight(code: str = "") -> str:
+        """
+        获取涨停揭秘数据（同花顺）。
+
+        包含涨停原因题材、封板成功率、板型（一字/换手/T字）、封单额等。
+
+        Args:
+            code: 股票代码（可选，不传则返回当日全部涨停揭秘）。
+
+        Returns:
+            涨停揭秘数据 (JSON)，含题材原因/封板成功率/板型/封单额/换手率。
+        """
+        cache_key = f"limit_up_insight:{code or 'all'}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        try:
+            result = get_limit_up_insight(code)
+            output = dict_to_json(result)
+            if result.get("data"):
+                cache.set(cache_key, output, TTL_DAILY)
+            return output
+        except Exception as e:
+            return error_response(
+                f"获取涨停揭秘数据失败: {e}", "get_limit_up_insight"
             )

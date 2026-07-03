@@ -4,7 +4,7 @@
 
 ## 1. 系统概览
 
-trader-finance-hub 是为 AI Agent（WorkBuddy / Claude Code / Cursor）提供 A 股金融数据 MCP 接口的统一数据层。
+trader-finance-hub 是为 AI Agent（Trae / Claude Code / Cursor）提供 A 股金融数据 MCP 接口的统一数据层。
 
 - **MCP 工具总数**：61 个
 - **数据源**：AKShare（主） + eltdx 通达信协议 + 东财直连 + 同花顺
@@ -22,10 +22,10 @@ trader-finance-hub 是为 AI Agent（WorkBuddy / Claude Code / Cursor）提供 A
 
 | 数据源 | 类型 | 用途 | 优先级 |
 |--------|------|------|--------|
-| AKShare | Python 库 | 主力数据源：行情/财务/估值/行业/新闻/宏观（42 工具） | P0 |
+| AKShare | Python 库 | 主力数据源：行情/财务/估值/行业/新闻/宏观（42 工具）+ 信号数据中 ETF/可转债/技术指标（6 工具） | P0 |
 | eltdx 1.0.2 | TCP 通达信协议 | 独有数据：集合竞价/逐笔/F10/分时/K线（5 工具） | P0 |
-| 东财直连 (push2/datacenter) | HTTP | 信号数据：资金流/龙虎榜/行业对比/北向/解禁（astock_signals） | P1 |
-| 同花顺 (hsgtApi/editorial) | HTTP | 信号数据：北向资金/涨停归因/一致预期（astock_signals） | P1 |
+| 东财直连 (push2/datacenter) | HTTP | 信号数据：资金流/龙虎榜/行业对比/解禁/概念归属（astock_signals，4 工具） | P1 |
+| 同花顺 (hsgtApi/editorial) | HTTP | 信号数据：北向资金/涨停归因/一致预期（astock_signals，3 工具） | P1 |
 | 腾讯行情 (qt.gtimg.cn) | HTTP | 个股实时报价（辅助一致预期估值计算） | P2 |
 
 **一主一备架构**：每个数据类型至少有 1 主 + 1 备，主力源失败时自动降级到备用源。
@@ -89,7 +89,7 @@ cn-financial-mcp (v2.3.0) ── FastMCP Server, 61 MCP 工具
 ## 3. 数据流
 
 ```
-AI Agent (WorkBuddy / Claude Code / Cursor)
+AI Agent (Trae / Claude Code / Cursor)
         │  MCP 协议 (stdio, JSON-RPC 2.0)
         ▼
   cn-financial-mcp server.py
@@ -105,13 +105,13 @@ AI Agent (WorkBuddy / Claude Code / Cursor)
 
 | 组件 | 位置 | 关系 |
 |------|------|------|
-| trader-data-router | `~/.workbuddy/skills/trader-data-router/` | CLI 工具，17 个命令，薄壳调用 astock_signals |
-| Wind MCP | `~/.workbuddy/skills/wind-mcp-skill/` | 独立 MCP，通过 WorkBuddy connector 接入 |
-| 通达信 MCP | WorkBuddy connector | 独立 connector (tdx-connector) |
+| trader-data-router | 独立项目 | CLI 工具，17 个命令，薄壳调用 astock_signals |
+| Wind MCP | 独立项目 | 独立 MCP Server，通过 AI Agent connector 接入 |
+| 通达信 MCP | 独立项目 | 独立 connector (tdx-connector) |
 
 ## 5. 配置
 
-编辑 `~/.workbuddy/mcp.json` 注册 MCP Server：
+编辑 MCP 配置文件（如 `~/.trae-cn/mcp.json` 或对应 AI Agent 的配置文件）注册 MCP Server：
 
 ```json
 {

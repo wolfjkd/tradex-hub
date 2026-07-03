@@ -1388,7 +1388,8 @@ def cmd_report():
         print("  [SKIP] eltdx库未安装")
 
     # 输出
-    output_path = f"C:/Users/wolfj/WorkBuddy/Claw/reports/market_report_{datetime.now().strftime('%Y%m%d_%H%M')}.json"
+    _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    output_path = os.path.join(_project_root, "reports", f"market_report_{datetime.now().strftime('%Y%m%d_%H%M')}.json")
 
     import os
     os.makedirs(os.path.dirname(output_path), exist_ok=True)

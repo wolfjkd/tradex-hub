@@ -20,9 +20,12 @@
 为 AI Agent（WorkBuddy / Claude Code / Cursor）提供 **A 股金融数据的 MCP 接口**。
 
 **当前数据源**：
-- **AKShare**：56 个金融工具（42 个基础工具 + 14 个信号数据中的 AKShare 部分）
+- **AKShare**：42 个基础金融工具（行情/财务/估值/行业/新闻/宏观）
 - **eltdx 1.0.2**：5 个通达信独有工具（集合竞价/逐笔/F10/分时/K线）
-- **东财/同花顺直连**：6 个信号工具（涨停归因/一致预期/北向资金/个股资金流/龙虎榜/行业对比）
+- **信号数据（混合源）**：14 个信号工具，数据来自东财直连 + 同花顺 + AKShare
+  - 东财直连：个股资金流/龙虎榜/行业对比/解禁日历/概念归属
+  - 同花顺：涨停归因/一致预期/北向资金
+  - AKShare：ETF实时+K线/可转债实时+价值分析/技术指标
 
 **不吹牛**：这不是"多源智能路由"，就是两个数据源的 MCP 壳。  
 多源聚合是规划目标，代码里还没实现。
@@ -37,7 +40,7 @@ AI Agent (WorkBuddy / Claude Code / Cursor)
         ▼
   cn-financial-mcp ── FastMCP Server
         │
-        ├── AKShare 封装（56 工具）
+        ├── AKShare 封装（42 工具）
         │     ├── company_info (4)   → 搜索/概况/竞品
         │     ├── price_data (4)     → 实时行情/历史K线/市值/列表
         │     ├── financial_stmt (8) → 三表+财务指标+增长率+每股+分拆营收
@@ -45,9 +48,11 @@ AI Agent (WorkBuddy / Claude Code / Cursor)
         │     ├── industry (5)       → 行业板块/成分股/概念/板块资金流/行业PE
         │     ├── market (5)         → 指数快照/资金流/北向/涨跌停/龙虎榜
         │     ├── news_events (4)    → 个股新闻/财报日历/公告/关键词搜索
-        │     ├── macro_fx (8)       → GDP/CPI/PMI/M2/汇率/国债/两融/增减持
-        │     └── signal_data (14)   → 涨停归因/解禁/概念/预期/技术指标/北向/资金流/龙虎榜/行业/ETF/可转债
-        │           └─ 混合数据源：AKShare + 东财直连 + 同花顺
+        │     └── macro_fx (8)       → GDP/CPI/PMI/M2/汇率/国债/两融/增减持
+        │
+        ├── 信号数据 — 混合数据源（14 工具）
+        │     ├── signal_data (14)   → 涨停归因/解禁/概念/预期/技术指标/北向/资金流/龙虎榜/行业/ETF/可转债
+        │     └─ 数据源：东财直连 + 同花顺 + AKShare
         │
         └── eltdx 1.0.2 封装（5 工具）
               ├── 集合竞价 (auction)    — AKShare 无此功能
@@ -142,7 +147,7 @@ AI Agent (WorkBuddy / Claude Code / Cursor)
 | `get_margin_trading` | 融资融券余额（市场汇总/个股） |
 | `get_insider_trading` | 股东/高管增减持（内部交易） |
 
-### 9. A股信号+品种（15 个）— `signal_data`
+### 9. A股信号+品种（14 个）— `signal_data`
 
 | 工具名 | 功能 | 数据源 |
 |--------|------|--------|
@@ -206,9 +211,9 @@ pip install akshare mcp pandas pydantic eltdx
 
 ---
 
-## 配置到 WorkBuddy
+## 配置到 AI Agent
 
-编辑 `~/.workbuddy/mcp.json`：
+编辑 MCP 配置文件（如 `~/.trae-cn/mcp.json` 或对应 AI Agent 的配置文件）：
 
 ```json
 {
@@ -222,7 +227,7 @@ pip install akshare mcp pandas pydantic eltdx
 }
 ```
 
-保存后重启 WorkBuddy，连接器页面 `cn-financial-mcp` 应显示绿色。
+保存后重启 AI Agent，连接器页面 `cn-financial-mcp` 应显示绿色。
 
 ---
 
@@ -243,7 +248,7 @@ AI 会调用 `mcp__cn-financial-mcp__eltdx_get_kline`，返回 100 根日 K 线�
 1. **eltdx 逐笔数据不带时间字段**（`time: null`），只有价格/量/方向
 2. **eltdx F10 延迟高**（~2 秒），但数据独有（题材归因是 AKShare 没有的）
 3. **没有智能路由**：每个工具写死一个数据源，不会自动择优
-4. **Wind/通达信 MCP 不在本项目里**：通过 WorkBuddy connector/skill 系统接入
+4. **Wind/通达信 MCP 不在本项目里**：通过独立 MCP Server 或 AI Agent 的 connector 系统接入
 
 ---
 

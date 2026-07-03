@@ -95,11 +95,9 @@ def test_command(cmd: str) -> dict:
             f.write(cmd)
             script_path = f.name
         try:
-            venv_python = os.path.expanduser(
-                "~/.workbuddy/binaries/python/envs/default/Scripts/python.exe"
-            )
+            import sys
             result = subprocess.run(
-                [venv_python, script_path],
+                [sys.executable, script_path],
                 capture_output=True, timeout=30
             )
         finally:

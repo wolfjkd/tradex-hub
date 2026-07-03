@@ -28,7 +28,7 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_DB_DIR = os.path.join(os.path.expanduser("~"), ".workbuddy", "data")
+_DEFAULT_DB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data")
 _DEFAULT_DB_NAME = "tick_store.db"
 
 # 表名合法字符白名单：仅允许字母、数字、下划线

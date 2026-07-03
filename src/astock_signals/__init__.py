@@ -46,6 +46,16 @@ from .dragon_tiger import get_dragon_tiger_board, get_dragon_tiger_board_json
 from .industry import get_industry_comparison, get_industry_comparison_json
 from .etf import get_etf_realtime, get_etf_realtime_json, get_etf_kline, get_etf_kline_json, get_etf_list, get_etf_list_json
 from .convertible_bond import get_cb_realtime, get_cb_realtime_json, get_cb_value_analysis, get_cb_value_analysis_json, get_cb_comparison, get_cb_comparison_json, get_cb_info, get_cb_info_json
+from .limit_up_board import (
+    get_limit_up_pool,
+    get_break_board_pool,
+    get_limit_down_pool,
+    get_prev_limit_up_pool,
+    get_limit_up_insight,
+    calculate_board_sentiment,
+    get_limit_up_board_json,
+    get_board_sentiment_json,
+)
 
 __all__ = [
     # anti_ban_client
@@ -98,6 +108,15 @@ __all__ = [
     "get_cb_comparison_json",
     "get_cb_info",
     "get_cb_info_json",
+    # limit_up_board
+    "get_limit_up_pool",
+    "get_break_board_pool",
+    "get_limit_down_pool",
+    "get_prev_limit_up_pool",
+    "get_limit_up_insight",
+    "calculate_board_sentiment",
+    "get_limit_up_board_json",
+    "get_board_sentiment_json",
 ]
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"
