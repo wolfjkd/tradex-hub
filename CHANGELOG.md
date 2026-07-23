@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
 
+## [2.4.0] - 2026-07-23
+
+### Fixed
+- 修复6个核心接口失败问题（东财风控导致的 Connection aborted）
+- get_money_flow: 改用东财push2直连API，保留AKShare兜底
+- get_market_overview: 改用新浪财经作为主源，东财兜底
+- get_sector_fund_flow: 增加同花顺作为备用数据源
+- get_technical_indicator: K线数据源增加腾讯备用
+- get_north_bound_flow: 添加日期排序，确保最新数据在前
+- get_margin_trading: 增加东财市场汇总接口作为主源
+
+### Changed
+- 新增 em_client.py: 从astock_signals提取东财push2防封客户端到MCP utils
+- astock_signals/__init__.py: ETF/可转债模块改为延迟导入，避免akshare缺失导致整个包无法导入
+- 工具总数: 61 → 65（新增3个涨停板工具）
+
 ## [2.3.2] - 2026-06-29
 
 ### Changed

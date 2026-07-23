@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cn-financial-mcp"
-version = "2.3.2"
+version = "2.4.0"
 description = "China Financial Data MCP Server based on AKShare - Free alternative to commercial financial data MCPs"
 readme = "README.md"
 license = "Apache-2.0"

@@ -4,12 +4,14 @@ Category 2: Price & Quote Data (V0.1)
 Tools:
   5. get_realtime_quote       - Real-time A-share quote
   6. get_historical_price     - Historical OHLCV (daily/weekly/monthly)
-  7. get_market_capitalization - Total & free-float market cap
-  8. get_stock_list            - Full A-share list with basic data
+  7. get_intraday_data        - Intraday minute data (today)
+  8. get_market_capitalization - Total & free-float market cap
+  9. get_stock_list            - Full A-share list with basic data
 
 Data source fallback chain:
   实时行情: 东方财富(push2) → 新浪全量 → 新浪单股(stock_zh_a_daily)
   历史K线:  东方财富 → 腾讯(stock_zh_a_hist_tx)
+  分时数据:  东方财富(stock_intraday_em) → eltdx(minutes.today)
   股票列表: 东方财富 → 新浪全量
 """
 
@@ -143,6 +145,103 @@ def register(mcp: FastMCP):
             return error_response(
                 f"获取历史K线失败 ({symbol}): {e}", "get_historical_price"
             )
+
+    @mcp.tool()
+    async def get_intraday_data(symbol: str) -> str:
+        """
+        获取A股股票当日分时数据（1分钟K线）。
+
+        返回当天从开盘到当前的每分钟价格、均价、成交量数据，
+        可用于绘制分时图。
+
+        Args:
+            symbol: 6位股票代码，如 "600519"
+
+        Returns:
+            分时数据 (JSON)，包含时间、价格、均价、成交量。
+        """
+        symbol = normalize_symbol(symbol)
+        cache_key = f"intraday:{symbol}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        try:
+            df = ak.stock_intraday_em(symbol=symbol)
+            if df is not None and not df.empty:
+                col_map = {
+                    "时间": "time", "time": "time",
+                    "开盘": "open", "open": "open",
+                    "收盘": "close", "close": "close", "价格": "close", "price": "close",
+                    "最高": "high", "high": "high",
+                    "最低": "low", "low": "low",
+                    "均价": "avg_price", "avg_price": "avg_price",
+                    "成交量": "volume", "volume": "volume",
+                    "成交额": "amount", "amount": "amount",
+                }
+                
+                df = df.rename(columns={k: v for k, v in col_map.items() if k in df.columns})
+                
+                points = []
+                for _, row in df.iterrows():
+                    time_val = str(row.get("time", ""))
+                    price_val = float(row.get("close", row.get("price", 0)))
+                    avg_val = float(row.get("avg_price", 0))
+                    vol_val = int(row.get("volume", 0))
+                    
+                    if time_val and price_val > 0:
+                        points.append({
+                            "time": time_val,
+                            "price": price_val,
+                            "avg_price": avg_val,
+                            "volume": vol_val,
+                        })
+                
+                if points:
+                    data = {
+                        "code": symbol,
+                        "point_count": len(points),
+                        "points": points,
+                    }
+                    from ..utils.formatter import dict_to_json
+                    result_json = dict_to_json(data)
+                    cache.set(cache_key, result_json, TTL_REALTIME)
+                    return result_json
+        except Exception as e:
+            logger.debug(f"东方财富分时数据失败: {e}")
+
+        try:
+            from .eltdx_data import _get_client, _normalize_code
+
+            client = _get_client()
+            if client is not None:
+                norm_code = _normalize_code(symbol)
+                result = client.minutes.today(norm_code)
+                points = getattr(result, "points", None) or []
+                if points:
+                    data = {
+                        "code": norm_code,
+                        "point_count": len(points),
+                        "points": [
+                            {
+                                "time": getattr(p, "time_label", None) or getattr(p, "time", None),
+                                "price": getattr(p, "price", None),
+                                "avg_price": getattr(p, "avg_price", None),
+                                "volume": getattr(p, "volume", None),
+                            }
+                            for p in points
+                        ],
+                    }
+                    from ..utils.formatter import dict_to_json
+                    result_json = dict_to_json(data)
+                    cache.set(cache_key, result_json, TTL_REALTIME)
+                    return result_json
+        except Exception as e:
+            logger.debug(f"eltdx分时数据失败: {e}")
+
+        return error_response(
+            f"获取分时数据失败 ({symbol}): 所有数据源均不可用", "get_intraday_data"
+        )
 
     @mcp.tool()
     async def get_market_capitalization(symbol: str) -> str:

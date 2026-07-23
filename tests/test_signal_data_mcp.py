@@ -22,9 +22,9 @@ class TestSignalDataSyntax:
         tree = ast.parse(source)
         assert tree is not None
 
-    def test_has_14_tools(self):
-        """signal_data.py 注册了 14 个 MCP 工具。"""
+    def test_has_17_tools(self):
+        """signal_data.py 注册了 17 个 MCP 工具。"""
         with open(_SIGNAL_DATA_PY, "r", encoding="utf-8") as f:
             source = f.read()
         count = source.count("@mcp.tool()")
-        assert count == 14, f"Expected 14 @mcp.tool(), got {count}"
+        assert count == 17, f"Expected 17 @mcp.tool(), got {count}"

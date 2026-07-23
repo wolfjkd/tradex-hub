@@ -44,8 +44,6 @@ from .northbound import get_northbound_flow, get_northbound_flow_json
 from .fund_flow import get_fund_flow, get_fund_flow_json
 from .dragon_tiger import get_dragon_tiger_board, get_dragon_tiger_board_json
 from .industry import get_industry_comparison, get_industry_comparison_json
-from .etf import get_etf_realtime, get_etf_realtime_json, get_etf_kline, get_etf_kline_json, get_etf_list, get_etf_list_json
-from .convertible_bond import get_cb_realtime, get_cb_realtime_json, get_cb_value_analysis, get_cb_value_analysis_json, get_cb_comparison, get_cb_comparison_json, get_cb_info, get_cb_info_json
 from .limit_up_board import (
     get_limit_up_pool,
     get_break_board_pool,
@@ -56,6 +54,11 @@ from .limit_up_board import (
     get_limit_up_board_json,
     get_board_sentiment_json,
 )
+
+_ETF_LOADED = False
+_CB_LOADED = False
+_ETF_MODULE = None
+_CB_MODULE = None
 
 __all__ = [
     # anti_ban_client
@@ -92,14 +95,14 @@ __all__ = [
     # industry
     "get_industry_comparison",
     "get_industry_comparison_json",
-    # etf
+    # etf (lazy loaded)
     "get_etf_realtime",
     "get_etf_realtime_json",
     "get_etf_kline",
     "get_etf_kline_json",
     "get_etf_list",
     "get_etf_list_json",
-    # convertible_bond
+    # convertible_bond (lazy loaded)
     "get_cb_realtime",
     "get_cb_realtime_json",
     "get_cb_value_analysis",
@@ -119,4 +122,36 @@ __all__ = [
     "get_board_sentiment_json",
 ]
 
-__version__ = "0.3.2"
+
+def __getattr__(name):
+    global _ETF_LOADED, _CB_LOADED, _ETF_MODULE, _CB_MODULE
+
+    etf_funcs = [
+        "get_etf_realtime", "get_etf_realtime_json",
+        "get_etf_kline", "get_etf_kline_json",
+        "get_etf_list", "get_etf_list_json",
+    ]
+    cb_funcs = [
+        "get_cb_realtime", "get_cb_realtime_json",
+        "get_cb_value_analysis", "get_cb_value_analysis_json",
+        "get_cb_comparison", "get_cb_comparison_json",
+        "get_cb_info", "get_cb_info_json",
+    ]
+
+    if name in etf_funcs:
+        if not _ETF_LOADED:
+            from . import etf as _etf_mod
+            _ETF_MODULE = _etf_mod
+            _ETF_LOADED = True
+        return getattr(_ETF_MODULE, name)
+
+    if name in cb_funcs:
+        if not _CB_LOADED:
+            from . import convertible_bond as _cb_mod
+            _CB_MODULE = _cb_mod
+            _CB_LOADED = True
+        return getattr(_CB_MODULE, name)
+
+    raise AttributeError(f"module 'astock_signals' has no attribute '{name}'")
+
+__version__ = "0.4.0"

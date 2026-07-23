@@ -207,39 +207,31 @@ def register(mcp: FastMCP):
 
         try:
             import datetime
-            today = datetime.date.today().strftime("%Y%m%d")
+
+            df = None
 
             if symbol:
                 symbol = normalize_symbol(symbol)
                 exchange = get_exchange(symbol)
+                today = datetime.date.today().strftime("%Y%m%d")
 
-                df = None
-                # Try the appropriate exchange API based on stock code
+                sources = []
                 if exchange == "sh":
-                    try:
-                        df = ak.stock_margin_detail_sse(date=today)
-                    except Exception:
-                        pass
+                    sources.append(("上交所明细", ak.stock_margin_detail_sse, {"date": today}))
+                    sources.append(("深交所明细", ak.stock_margin_detail_szse, {"date": today}))
                 else:
-                    try:
-                        df = ak.stock_margin_detail_szse(date=today)
-                    except Exception:
-                        pass
+                    sources.append(("深交所明细", ak.stock_margin_detail_szse, {"date": today}))
+                    sources.append(("上交所明细", ak.stock_margin_detail_sse, {"date": today}))
 
-                # If first exchange fails, try the other
-                if df is None or df.empty:
+                for name, fn, kwargs in sources:
                     try:
-                        alt_func = (
-                            ak.stock_margin_detail_szse
-                            if exchange == "sh"
-                            else ak.stock_margin_detail_sse
-                        )
-                        df = alt_func(date=today)
+                        df = fn(**kwargs)
+                        if df is not None and not df.empty:
+                            break
                     except Exception:
-                        pass
+                        continue
 
                 if df is not None and not df.empty:
-                    # Filter for specific stock
                     code_cols = [
                         c for c in df.columns
                         if "代码" in c or "证券代码" in c or "标的" in c
@@ -247,11 +239,18 @@ def register(mcp: FastMCP):
                     if code_cols:
                         df = df[df[code_cols[0]].astype(str).str.contains(symbol)]
             else:
-                # Return market-level summary
-                try:
-                    df = ak.stock_margin_detail_sse(date=today)
-                except Exception:
-                    df = ak.stock_margin_detail_szse(date=today)
+                sources = [
+                    ("东财市场汇总", ak.stock_margin_em, {}),
+                    ("上交所明细", ak.stock_margin_detail_sse, {}),
+                    ("深交所明细", ak.stock_margin_detail_szse, {}),
+                ]
+                for name, fn, kwargs in sources:
+                    try:
+                        df = fn(**kwargs)
+                        if df is not None and not df.empty:
+                            break
+                    except Exception:
+                        continue
 
             if df is None or df.empty:
                 return error_response(

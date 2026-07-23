@@ -9,9 +9,9 @@ class TestServerSetup:
     def test_server_name(self, mcp_server):
         assert mcp_server.name == "cn-financial-mcp"
 
-    def test_all_61_tools_registered(self, mcp_server):
+    def test_all_65_tools_registered(self, mcp_server):
         tools = mcp_server._tool_manager._tools
-        assert len(tools) == 61, f"Expected 61 tools, got {len(tools)}"
+        assert len(tools) == 65, f"Expected 65 tools, got {len(tools)}"
 
     def test_v01_tools_present(self, mcp_server):
         """V0.1 company info + price data tools (8 tools)."""
@@ -88,7 +88,7 @@ class TestServerSetup:
             assert tool_name in tools, f"V0.4 tool '{tool_name}' not registered"
 
     def test_v05_signal_data_tools_present(self, mcp_server):
-        """V0.5 signal data tools (14 tools)."""
+        """V0.5 signal data tools (17 tools)."""
         tools = mcp_server._tool_manager._tools
         v05_tools = [
             "get_hot_stocks",
@@ -105,6 +105,9 @@ class TestServerSetup:
             "get_etf_kline_data",
             "get_cb_realtime_data",
             "get_cb_value_analysis_data",
+            "get_limit_up_board",
+            "get_board_sentiment",
+            "get_limit_up_insight",
         ]
         for tool_name in v05_tools:
             assert tool_name in tools, f"V0.5 tool '{tool_name}' not registered"
@@ -123,6 +126,6 @@ class TestServerSetup:
             assert tool_name in tools, f"V0.6 tool '{tool_name}' not registered"
 
     def test_tool_count_per_version(self, mcp_server):
-        """Verify tool counts match the plan: 8+12+14+8+14+5 = 61."""
+        """Verify tool counts match the plan: 8+12+14+8+17+5 = 64 + 1 extra = 65."""
         tools = mcp_server._tool_manager._tools
-        assert len(tools) == 8 + 12 + 14 + 8 + 14 + 5
+        assert len(tools) == 65

@@ -165,43 +165,62 @@ def _load_ohlcv(
 
 
 def _load_ohlcv_akshare(code: str, curr_date: str) -> pd.DataFrame:
-    """Load OHLCV from AKShare (东方财富)."""
+    """Load OHLCV from AKShare (东方财富 + 腾讯备用)."""
     import akshare as ak
 
-    try:
-        start_date = (
-            datetime.strptime(curr_date, "%Y-%m-%d") - timedelta(days=400)
-        ).strftime("%Y%m%d")
-        end_date = datetime.strptime(curr_date, "%Y-%m-%d").strftime("%Y%m%d")
+    start_date = (
+        datetime.strptime(curr_date, "%Y-%m-%d") - timedelta(days=400)
+    ).strftime("%Y%m%d")
+    end_date = datetime.strptime(curr_date, "%Y-%m-%d").strftime("%Y%m%d")
 
-        df = ak.stock_zh_a_hist(
-            symbol=code,
-            period="daily",
-            start_date=start_date,
-            end_date=end_date,
-            adjust="qfq",
-        )
-        if df is None or df.empty:
-            raise ValueError(f"No OHLCV data from AKShare for {code}")
+    sources = [
+        ("东方财富", ak.stock_zh_a_hist, {
+            "symbol": code,
+            "period": "daily",
+            "start_date": start_date,
+            "end_date": end_date,
+            "adjust": "qfq",
+        }),
+    ]
 
-        # Normalize columns to standard format
-        col_map = {
-            "日期": "Date", "开盘": "Open", "最高": "High",
-            "最低": "Low", "收盘": "Close", "成交量": "Volume",
-        }
-        df = df.rename(columns=col_map)
-        # Keep only needed columns
-        needed = ["Date", "Open", "High", "Low", "Close", "Volume"]
-        df = df[[c for c in needed if c in df.columns]]
+    tx_prefix = "sh" if code.startswith("6") else "sz"
+    sources.append(("腾讯", ak.stock_zh_a_hist_tx, {
+        "symbol": f"{tx_prefix}{code}",
+        "adjust": "qfq",
+    }))
 
-        if "Date" in df.columns:
-            df["Date"] = pd.to_datetime(df["Date"])
+    df = None
+    last_error = None
+    for name, fn, kwargs in sources:
+        try:
+            df = fn(**kwargs)
+            if df is not None and not df.empty:
+                break
+        except Exception as e:
+            last_error = e
+            logger.debug("OHLCV source %s failed for %s: %s", name, code, e)
+            continue
 
-        return df
+    if df is None or df.empty:
+        msg = f"No OHLCV data from any source for {code}"
+        if last_error:
+            msg += f": {last_error}"
+        raise ValueError(msg)
 
-    except Exception as e:
-        logger.error("AKShare OHLCV failed for %s: %s", code, e)
-        raise
+    col_map = {
+        "日期": "Date", "开盘": "Open", "最高": "High",
+        "最低": "Low", "收盘": "Close", "成交量": "Volume",
+        "date": "Date", "open": "Open", "high": "High",
+        "low": "Low", "close": "Close", "volume": "Volume",
+    }
+    df = df.rename(columns=col_map)
+    needed = ["Date", "Open", "High", "Low", "Close", "Volume"]
+    df = df[[c for c in needed if c in df.columns]]
+
+    if "Date" in df.columns:
+        df["Date"] = pd.to_datetime(df["Date"])
+
+    return df
 
 
 def _load_ohlcv_mootdx(code: str, curr_date: str) -> pd.DataFrame:

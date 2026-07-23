@@ -18,6 +18,8 @@ import akshare as ak
 from mcp.server.fastmcp import FastMCP
 
 from ..utils.cache import TTL_DAILY, TTL_REALTIME, cache
+from ..utils.em_client import em_push2_fund_flow, em_push2his_fund_flow
+from ..utils.fallback import call_with_fallback
 from ..utils.formatter import df_to_json, error_response, slim_df
 from ..utils.symbol import get_exchange, normalize_symbol
 
@@ -42,8 +44,10 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            # 东方财富指数行情 (unique source)
-            df = ak.stock_zh_index_spot_em()
+            df = await call_with_fallback(
+                ("新浪财经", ak.stock_zh_index_spot, {}),
+                ("东方财富", ak.stock_zh_index_spot_em, {}),
+            )
             df = slim_df(df)
             result = df_to_json(df, max_rows=30)
             cache.set(cache_key, result, TTL_REALTIME)
@@ -72,21 +76,69 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            # market parameter is required: "sh" or "sz"
-            market = get_exchange(symbol)  # returns "sh", "sz", or "bj"
-            df = ak.stock_individual_fund_flow(stock=symbol, market=market)
-            if df is None or df.empty:
-                return error_response(
-                    f"资金流向数据为空 ({symbol})", "get_money_flow"
-                )
-            df = slim_df(df)
-            result = df_to_json(df, max_rows=30)
-            cache.set(cache_key, result, TTL_DAILY)
-            return result
+            import pandas as pd
+
+            secid = f"1.{symbol}" if symbol.startswith("6") else f"0.{symbol}"
+
+            d = em_push2_fund_flow(secid, timeout=10)
+            if d.get("rc") == 0:
+                klines = d.get("data", {}).get("klines", [])
+                if klines:
+                    data = []
+                    for line in klines:
+                        parts = line.split(",")
+                        if len(parts) >= 6:
+                            data.append({
+                                "时间": parts[0],
+                                "主力净流入": float(parts[1]),
+                                "小单净流入": float(parts[2]),
+                                "中单净流入": float(parts[3]),
+                                "大单净流入": float(parts[4]),
+                                "超大单净流入": float(parts[5]),
+                            })
+                    df = pd.DataFrame(data)
+                    result = df_to_json(df, max_rows=30)
+                    cache.set(cache_key, result, TTL_DAILY)
+                    return result
+
+            dh = em_push2his_fund_flow(secid, limit=20, timeout=10)
+            if dh.get("rc") == 0:
+                klines = dh.get("data", {}).get("klines", [])
+                if klines:
+                    data = []
+                    for line in klines:
+                        parts = line.split(",")
+                        if len(parts) >= 6:
+                            data.append({
+                                "日期": parts[0],
+                                "主力净流入": float(parts[1]),
+                                "小单净流入": float(parts[2]),
+                                "中单净流入": float(parts[3]),
+                                "大单净流入": float(parts[4]),
+                                "超大单净流入": float(parts[5]),
+                            })
+                    df = pd.DataFrame(data)
+                    result = df_to_json(df, max_rows=30)
+                    cache.set(cache_key, result, TTL_DAILY)
+                    return result
+
+            raise Exception("东财push2接口无数据")
         except Exception as e:
-            return error_response(
-                f"获取资金流向失败 ({symbol}): {e}", "get_money_flow"
-            )
+            try:
+                market = get_exchange(symbol)
+                df = ak.stock_individual_fund_flow(stock=symbol, market=market)
+                if df is None or df.empty:
+                    return error_response(
+                        f"资金流向数据为空 ({symbol})", "get_money_flow"
+                    )
+                df = slim_df(df)
+                result = df_to_json(df, max_rows=30)
+                cache.set(cache_key, result, TTL_DAILY)
+                return result
+            except Exception as e2:
+                return error_response(
+                    f"获取资金流向失败 ({symbol}): {e2}", "get_money_flow"
+                )
 
     @mcp.tool()
     async def get_north_bound_flow() -> str:
@@ -106,14 +158,15 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            # stock_hsgt_north_net_flow_in_em has been removed;
-            # use stock_hsgt_hist_em which provides historical HSGT data.
-            # Valid symbols: "北向资金", "沪股通", "深股通", "南向资金" etc.
             df = ak.stock_hsgt_hist_em(symbol="北向资金")
             if df is None or df.empty:
                 return error_response(
                     "北向资金数据为空", "get_north_bound_flow"
                 )
+            for col in ["日期", "date", "时间", "time"]:
+                if col in df.columns:
+                    df = df.sort_values(col, ascending=False)
+                    break
             df = slim_df(df)
             result = df_to_json(df, max_rows=30)
             cache.set(cache_key, result, TTL_DAILY)

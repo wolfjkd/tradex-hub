@@ -138,12 +138,24 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            # ak.stock_sector_fund_flow_rank signature:
-            #   indicator: {"今日", "5日", "10日"}
-            #   sector_type: {"行业资金流", "概念资金流", "地域资金流"}
-            df = ak.stock_sector_fund_flow_rank(
-                indicator=indicator, sector_type=sector_type
-            )
+            sources = [
+                ("东方财富", ak.stock_sector_fund_flow_rank, {"indicator": indicator, "sector_type": sector_type}),
+            ]
+
+            if sector_type == "行业资金流":
+                sources.append(("同花顺行业", ak.stock_board_industry_name_ths, {}))
+            elif sector_type == "概念资金流":
+                sources.append(("同花顺概念", ak.stock_board_concept_name_ths, {}))
+
+            df = None
+            for name, fn, kwargs in sources:
+                try:
+                    df = fn(**kwargs)
+                    if df is not None and not df.empty:
+                        break
+                except Exception:
+                    continue
+
             if df is None or df.empty:
                 return error_response(
                     f"板块资金流向数据为空 ({sector_type})", "get_sector_fund_flow"
