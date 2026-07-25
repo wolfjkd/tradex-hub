@@ -1,8 +1,8 @@
 # Trader Finance Hub
 
 <p align="center">
-  <strong>AI金融数据聚合平台</strong><br/>
-  AKShare 封装 · eltdx 通达信协议 · astock_signals 信号模块 · 本地 MCP Server · 61 个工具
+  <strong>AI金融智能决策中台</strong><br/>
+  AKShare 封装 · eltdx 通达信协议 · astock_signals 信号模块 · 量化计算引擎 · 本地 MCP Server · 80 个工具
 </p>
 
 <p align="center">
@@ -10,14 +10,20 @@
   <img src="https://img.shields.io/badge/MCP-1.0-green.svg" alt="MCP"/>
   <img src="https://img.shields.io/badge/License-Apache--2.0-yellow.svg" alt="License"/>
   <img src="https://img.shields.io/badge/Data-A股-red.svg" alt="Data Scope"/>
-  <img src="https://img.shields.io/badge/Tools-61-orange.svg" alt="MCP Tools"/>
+  <img src="https://img.shields.io/badge/Tools-80-orange.svg" alt="MCP Tools"/>
+  <img src="https://img.shields.io/badge/Version-2.5.0-blue.svg" alt="Version"/>
 </p>
 
 ---
 
 ## 项目定位
 
-为 AI Agent（WorkBuddy / Claude Code / Cursor）提供 **A 股金融数据的 MCP 接口**。
+为 AI Agent（WorkBuddy / Claude Code / Cursor）提供 **A 股金融数据 + 量化计算 + 决策支持的 MCP 接口**。
+
+**三层能力模型**：
+- **L1 数据获取层**（65个工具）：行情/财务/估值/行业/新闻/宏观/涨停板/龙虎榜等
+- **L2 计算引擎层**（8个工具）：技术指标计算6个、绩效指标计算2个（V2.5.0新增）
+- **L3 决策支持层**（7个工具）：交易信号生成3个、多因子分析2个、条件选股2个（V2.5.0新增）
 
 **当前数据源**：
 - **AKShare**：42 个基础金融工具（行情/财务/估值/行业/新闻/宏观）
@@ -63,7 +69,7 @@ AI Agent (WorkBuddy / Claude Code / Cursor)
                     └─ 数据源：通达信私有协议 (TCP 7709)
 ```
 
-## MCP 工具清单（61 个）
+## MCP 工具清单（80 个）
 
 ### 1. 公司信息（4 个）— `company_info`
 
@@ -176,6 +182,48 @@ AI Agent (WorkBuddy / Claude Code / Cursor)
 | `eltdx_get_minutes` | 分时数据（1分钟K线） | ~40ms | ⚠️ 有但源不同 |
 | `eltdx_get_kline` | K线（日/周/月/5m/15m/30m/60m） | ~80ms | ⚠️ 有但源不同 |
 
+### 11. 技术指标计算（6 个）— `technical_indicators` 🆕 V2.5.0
+
+纯函数实现，输入价格数组，输出与 Excel/通达信一致的指标值。
+
+| 工具名 | 功能 | 算法 |
+|--------|------|------|
+| `calculate_ma_ema` | MA/EMA 均线计算 | SMA前n-1个为null；EMA首值用SMA初始化 |
+| `calculate_macd` | MACD 指标计算 | DIF=EMA(fast)-EMA(slow)；DEA=EMA(DIF)；MACD柱=2*(DIF-DEA) |
+| `calculate_kdj` | KDJ 随机指标 | RSV=(C-LLV)/(HHV-LLV)*100；K=2/3前K+1/3 RSV；D=2/3前D+1/3 K；J=3K-2D |
+| `calculate_rsi` | RSI 相对强弱指数 | Wilder 平滑法；RSI=100-100/(1+平均涨幅/平均跌幅) |
+| `calculate_boll` | BOLL 布林带 | 中轨=SMA；上下轨=中轨±k*std；带宽+ Percent B |
+| `calculate_atr` | ATR 平均真实波幅 | TR=max(H-L,\|H-前C\|,\|L-前C\|)；ATR=EMA(TR) |
+
+### 12. 绩效指标计算（2 个）— `performance_metrics` 🆕 V2.5.0
+
+| 工具名 | 功能 |
+|--------|------|
+| `calculate_performance` | 完整绩效报告（21项指标）：收益/风险/风险调整收益/交易质量/费用统计/基准对比 |
+| `list_performance_metrics` | 列出所有支持的绩效指标及计算公式 |
+
+### 13. 信号生成（3 个）— `signal_generation` 🆕 V2.5.0
+
+| 工具名 | 功能 |
+|--------|------|
+| `generate_trading_signal` | 单票交易信号生成（5级信号+评分+多指标组合） |
+| `scan_stocks_for_signals` | 批量扫描股票信号（按评分排序） |
+| `validate_signal_quality` | 信号质量验证（前瞻收益分析） |
+
+### 14. 因子分析（2 个）— `factor_analysis` 🆕 V2.5.0
+
+| 工具名 | 功能 |
+|--------|------|
+| `calculate_factor_score` | 多因子综合评分（5类22因子，Z-Score 标准化） |
+| `get_factor_catalog` | 获取因子库清单（估值/盈利/成长/动量/质量 5 大类） |
+
+### 15. 条件选股（2 个）— `stock_screening` 🆕 V2.5.0
+
+| 工具名 | 功能 |
+|--------|------|
+| `screen_stocks` | 条件选股扫描（5类30+条件，AND 组合） |
+| `get_screening_conditions` | 获取支持的选股条件清单 |
+
 ---
 
 ## 安装
@@ -256,6 +304,7 @@ AI 会调用 `mcp__cn-financial-mcp__eltdx_get_kline`，返回 100 根日 K 线�
 
 | 版本 | 日期 | 内容 |
 |------|------|------|
+| v2.5.0 | 2026-07-26 | 智能决策中台升级：新增15个量化计算工具（技术指标6/绩效2/信号3/因子2/选股2），工具数65→80，从数据中台升级为智能决策中台 |
 | v2.4.0 | 2026-07-23 | 修复6个核心接口（东财风控封禁），新增em_client防封客户端，ETF/可转债改为延迟导入，工具数61→65 |
 | v2.3.2 | 2026-06-29 | 清理 workbuddy 遗留路径，新增涨停板分析模块 |
 | v2.3.1 | 2026-06-24 | 文档修复与版本管理优化（4处不一致修正） |

@@ -60,6 +60,27 @@ def register_all_tools():
 
     reg_signal(mcp)
 
+    # V2.5.0 新增：量化计算工具组（智能决策中台）
+    # 技术指标计算（纯函数，输入价格数组）
+    from .tools.technical_indicators import register as reg_ti
+    reg_ti(mcp)
+
+    # 绩效指标计算
+    from .tools.performance_metrics import register as reg_pm
+    reg_pm(mcp)
+
+    # 信号生成
+    from .tools.signal_generation import register as reg_sg
+    reg_sg(mcp)
+
+    # 因子分析
+    from .tools.factor_analysis import register as reg_fa
+    reg_fa(mcp)
+
+    # 条件选股
+    from .tools.stock_screening import register as reg_ss
+    reg_ss(mcp)
+
 
 # Register all tools at import time
 register_all_tools()

@@ -4,6 +4,47 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
 
+## [2.5.0] - 2026-07-26
+
+### Added - 智能决策中台升级（15个新工具）
+本次升级将 Trader Finance Hub 从「数据中台」升级为「智能决策中台」，
+新增量化计算工具组（quant_tools），提供技术指标计算、绩效分析、
+信号生成、因子分析、条件选股五大能力。
+
+#### P0：技术指标计算模块（6个工具）— `technical_indicators.py`
+- `calculate_ma_ema` - MA/EMA 均线计算（纯函数，输入价格数组）
+- `calculate_macd` - MACD 指标计算（DIF/DEA/MACD柱）
+- `calculate_kdj` - KDJ 随机指标（K/D/J值）
+- `calculate_rsi` - RSI 相对强弱指数（Wilder 平滑法）
+- `calculate_boll` - BOLL 布林带（含带宽/%B）
+- `calculate_atr` - ATR 平均真实波幅
+
+#### P0：绩效指标计算模块（2个工具）— `performance_metrics.py`
+- `calculate_performance` - 完整绩效报告（21项指标）
+  覆盖收益/风险/风险调整收益/交易质量/费用统计/基准对比
+- `list_performance_metrics` - 绩效指标清单查询
+
+#### P1：信号生成模块（3个工具）— `signal_generation.py`
+- `generate_trading_signal` - 单票信号（5级信号+评分+多指标组合）
+- `scan_stocks_for_signals` - 批量扫描信号（按评分排序）
+- `validate_signal_quality` - 信号前瞻收益验证
+
+#### P2：因子分析模块（2个工具）— `factor_analysis.py`
+- `calculate_factor_score` - 多因子综合评分（5类22因子，Z-Score标准化）
+- `get_factor_catalog` - 因子库清单查询
+
+#### P2：条件选股模块（2个工具）— `stock_screening.py`
+- `screen_stocks` - 条件选股扫描（5类30+条件，AND组合）
+- `get_screening_conditions` - 选股条件清单查询
+
+### Changed
+- `server.py`: 注册5个新工具模块，工具总数 65 → 80
+- 升级定位：从「数据中台」升级为「智能决策中台」
+- 架构升级：新增「计算引擎层」(L2) 和「决策支持层」(L3)
+
+### Fixed
+- 修正 README.md 工具数不一致问题（实际65个，README标61个）
+
 ## [2.4.0] - 2026-07-23
 
 ### Fixed
