@@ -1,13 +1,15 @@
 # cn-financial-mcp
 
 <p align="center">
-  <strong>cn大陆金融数据 MCP Server</strong><br/>
-  基于 <a href="https://akshare.akfamily.xyz">AKShare</a> · 支持 <a href="https://modelcontextprotocol.io">MCP 协议</a> · 61 个金融工具
+  <strong>cn大陆金融数据 MCP Server · 智能决策中台</strong><br/>
+  基于 <a href="https://akshare.akfamily.xyz">AKShare</a> · 支持 <a href="https://modelcontextprotocol.io">MCP 协议</a> · 80 个金融工具（65 数据 + 15 量化计算）
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.10+-blue.svg" alt="Python 3.10+"/>
   <img src="https://img.shields.io/badge/MCP-1.0-green.svg" alt="MCP 1.0"/>
+  <img src="https://img.shields.io/badge/Version-2.5.0-orange.svg" alt="v2.5.0"/>
+  <img src="https://img.shields.io/badge/Tools-80-brightgreen.svg" alt="80 tools"/>
   <img src="https://img.shields.io/badge/License-Apache--2.0-yellow.svg" alt="Apache-2.0 License"/>
   <img src="https://img.shields.io/badge/Data-A%E8%82%A1%20%7C%20%E5%AE%8F%E8%A7%82%20%7C%20%E8%A1%8C%E4%B8%9A-red.svg" alt="A股 | 宏观 | 行业"/>
 </p>
@@ -30,9 +32,9 @@
 
 ## 简介
 
-**cn-financial-mcp** 是一个遵循 [Model Context Protocol (MCP)](https://modelcontextprotocol.io) 标准的金融数据服务器，专注于cn大陆市场。它让任何支持 MCP 的 AI Agent（如 Claude Code、Cursor、自定义 Agent）都能直接调用 A 股行情、财报、行业、宏观经济等 **42 个金融工具**，无需 API Key，开箱即用。
+**cn-financial-mcp** 是一个遵循 [Model Context Protocol (MCP)](https://modelcontextprotocol.io) 标准的金融数据服务器，专注于cn大陆市场。它让任何支持 MCP 的 AI Agent（如 Claude Code、Cursor、自定义 Agent）都能直接调用 A 股行情、财报、行业、宏观经济等 **80 个金融工具**（65 个数据获取 + 15 个量化计算），无需 API Key，开箱即用。
 
-底层数据来源于 [AKShare](https://akshare.akfamily.xyz)、eltdx 通达信协议、东财直连和同花顺，提供 61 个金融工具，覆盖行情、财务、估值、行业、新闻、宏观、信号数据等全方位金融数据。
+底层数据来源于 [AKShare](https://akshare.akfamily.xyz)、eltdx 通达信协议、东财直连和同花顺，提供 80 个金融工具，覆盖行情、财务、估值、行业、新闻、宏观、信号数据等全方位金融数据，并内置技术指标计算、绩效分析、信号生成、因子分析、条件选股等量化计算能力（v2.5.0 新增）。
 
 ---
 
@@ -50,8 +52,13 @@
 | **宏观与衍生** | 8 | GDP/CPI/PMI/M2、汇率、国债收益率、融资融券、高管增减持 |
 | **A股信号+品种** | 14 | 涨停归因/解禁/概念/预期/技术指标/北向/资金流/龙虎榜/行业/ETF/可转债 |
 | **eltdx 通达信独有** | 5 | 集合竞价/逐笔/F10/分时/K线（AKShare无此功能） |
+| **技术指标计算** 🆕 v2.5.0 | 6 | MA/EMA/MACD/KDJ/RSI/BOLL/ATR 纯函数计算 |
+| **绩效指标计算** 🆕 v2.5.0 | 2 | 完整绩效报告（21项指标）/ 指标清单 |
+| **信号生成** 🆕 v2.5.0 | 3 | 单票信号/批量扫描/信号质量验证（5级评分） |
+| **因子分析** 🆕 v2.5.0 | 2 | 多因子评分（5类22因子）/ 因子清单 |
+| **条件选股** 🆕 v2.5.0 | 2 | 条件选股扫描（5类30+条件）/ 条件清单 |
 
-**合计 61 个工具**，覆盖从个股研究到宏观分析、从基础行情到信号数据的完整链路。
+**合计 80 个工具**（65 个数据获取 + 15 个量化计算），覆盖从个股研究到宏观分析、从基础行情到信号数据、从数据获取到量化计算的完整链路。
 
 ---
 
@@ -280,6 +287,71 @@ docker compose up -d
 
 </details>
 
+<details>
+<summary><b>技术指标计算 (technical_indicators) 🆕 v2.5.0</b></summary>
+
+纯函数实现，输入价格数组，输出指标数组，与 Excel/通达信计算结果一致。无外部依赖（不依赖 TA-Lib）。
+
+| 工具 | 说明 |
+|:-----|:-----|
+| `calculate_ma_ema` | MA（简单移动平均）/ EMA（指数移动平均）均线计算 |
+| `calculate_macd` | MACD 指标（DIF/DEA/MACD柱） |
+| `calculate_kdj` | KDJ 随机指标（K/D/J 值，A股标准算法） |
+| `calculate_rsi` | RSI 相对强弱指数（Wilder 平滑法） |
+| `calculate_boll` | BOLL 布林带（上轨/中轨/下轨/带宽/%B） |
+| `calculate_atr` | ATR 平均真实波幅（TR/ATR） |
+
+</details>
+
+<details>
+<summary><b>绩效指标计算 (performance_metrics) 🆕 v2.5.0</b></summary>
+
+输入权益曲线和交易记录，输出完整的绩效报告，覆盖 21 项关键指标。
+
+| 工具 | 说明 |
+|:-----|:-----|
+| `calculate_performance` | 计算完整绩效指标（收益/风险/风险调整/交易质量/费用） |
+| `list_performance_metrics` | 列出所有支持的绩效指标清单及公式 |
+
+</details>
+
+<details>
+<summary><b>信号生成 (signal_generation) 🆕 v2.5.0</b></summary>
+
+基于多指标组合评分生成交易信号，支持 5 级信号：strong_buy / buy / neutral / sell / strong_sell。
+
+| 工具 | 说明 |
+|:-----|:-----|
+| `generate_trading_signal` | 单票交易信号生成（含交易计划：入场价/止损/止盈/仓位） |
+| `scan_stocks_for_signals` | 批量扫描股票信号（按评分降序） |
+| `validate_signal_quality` | 信号质量验证（前瞻收益分析） |
+
+</details>
+
+<details>
+<summary><b>因子分析 (factor_analysis) 🆕 v2.5.0</b></summary>
+
+支持 5 类 22 因子的多因子综合评分，使用 Z-Score 标准化 + 方向调整。
+
+| 工具 | 说明 |
+|:-----|:-----|
+| `calculate_factor_score` | 多因子综合评分（价值5/成长4/质量5/动量4/风险4） |
+| `get_factor_catalog` | 获取因子库清单（5类22因子） |
+
+</details>
+
+<details>
+<summary><b>条件选股 (stock_screening) 🆕 v2.5.0</b></summary>
+
+支持 5 类 30+ 条件的多维度组合选股，含基本面/技术面/资金面/风险面/标记类。
+
+| 工具 | 说明 |
+|:-----|:-----|
+| `screen_stocks` | 条件选股扫描（支持多条件 AND 组合） |
+| `get_screening_conditions` | 获取支持的选股条件清单（5类30+条件） |
+
+</details>
+
 ---
 
 ## 🔄 多数据源 Fallback
@@ -341,19 +413,39 @@ cn-financial-mcp/
 │   │   ├── news_events.py    # 新闻公告 (4 tools)
 │   │   ├── macro_fx.py       # 宏观衍生 (8 tools)
 │   │   ├── signal_data.py    # A股信号+品种 (14 tools)
-│   │   └── eltdx_data.py     # eltdx 通达信独有 (5 tools)
+│   │   ├── eltdx_data.py     # eltdx 通达信独有 (5 tools)
+│   │   ├── technical_indicators.py  # 技术指标计算 (6 tools) 🆕 v2.5.0
+│   │   ├── performance_metrics.py   # 绩效指标计算 (2 tools) 🆕 v2.5.0
+│   │   ├── signal_generation.py     # 信号生成 (3 tools) 🆕 v2.5.0
+│   │   ├── factor_analysis.py       # 因子分析 (2 tools) 🆕 v2.5.0
+│   │   └── stock_screening.py       # 条件选股 (2 tools) 🆕 v2.5.0
 │   └── utils/
 │       ├── cache.py          # TTL 缓存
 │       ├── fallback.py       # 多源 fallback
 │       ├── formatter.py      # DataFrame → JSON
 │       └── symbol.py         # 股票代码工具
 ├── tests/
+├── verify_v250.py            # v2.5.0 升级验证脚本 🆕
 ├── docs/images/
 ├── pyproject.toml
 ├── Dockerfile
 ├── docker-compose.yml
 └── .mcp.json
 ```
+
+---
+
+## 📜 版本历史
+
+| 版本 | 发布日期 | 主要变更 |
+|:-----|:---------|:---------|
+| v2.5.0 | 2026-07-26 | 智能决策中台升级：新增 15 个量化计算工具（技术指标 6 / 绩效 2 / 信号 3 / 因子 2 / 选股 2），工具数 65→80，从「数据中台」升级为「智能决策中台」 |
+| v2.4.0 | 2026-07-22 | 新增涨停板/涨停揭秘/打板情绪速算模块，ETF/可转债/Tick 存储/WebSocket 全覆盖 |
+| v2.3.0 | 2026-07-15 | 信号数据模块扩展，测试用例 69 个 100% 通过 |
+| v2.2.0 | 2026-07-08 | eltdx 通达信协议集成，集合竞价/逐笔/F10 独有数据 |
+| v2.1.0 | 2026-07-01 | 多数据源 Fallback 机制，AKShare 主 + 东财直连备 |
+| v2.0.0 | 2026-06-20 | MCP 协议升级，支持 stdio + HTTP/SSE 双模式 |
+| v1.0.0 | 2026-06-01 | 初始版本，42 个 AKShare 封装工具 |
 
 ---
 
