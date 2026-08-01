@@ -6,6 +6,9 @@ Signal Data — 信号数据基础子模块 (signal_data_base)。
 
 TradingAgents-astock 移植层基础工具集。
 
+v3.1.0 起：所有数据获取通过 SmartRouter.route() 路由，
+不再直接 import astock_signals 数据源函数。
+
 Tools (共 6 个):
   get_hot_stocks                - 涨停股票+主题归因（同花顺 editorial）
   get_lockup_expiry             - 限售解禁日历（东财 datacenter）
@@ -17,25 +20,17 @@ Tools (共 6 个):
 
 from __future__ import annotations
 
-import os
-import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
+import pandas as pd
 from mcp.server.fastmcp import FastMCP
 
+from ..data_sources import get_router
 from ..utils.cache import TTL_DAILY, cache
 from ..utils.formatter import error_response, dict_to_json
 from ..utils.symbol import normalize_symbol
 
-# Import astock_signals modules from Hub src/
-
-from astock_signals import (  # noqa: E402
-    get_hot_stocks_json,
-    get_lockup_expiry_json,
-    get_concept_blocks_json,
-    get_supported_indicators,
-    get_indicator_description,
-)
+_router = get_router()
 
 
 def register(mcp: FastMCP):
@@ -62,7 +57,8 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            result = get_hot_stocks_json(date)
+            # hot_money 数据源: code="" → get_hot_stocks_json(date)
+            result, _src = _router.route("hot_money", code="", date=date)
             output = dict_to_json(result)
 
             if len(result.get("stocks", [])) > 0:
@@ -103,7 +99,12 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            data = get_lockup_expiry_json(symbol, trade_date, forward_days)
+            data, _src = _router.route(
+                "lockup_expiry",
+                symbol=symbol,
+                trade_date=trade_date,
+                forward_days=forward_days,
+            )
             output = dict_to_json(data)
             cache.set(cache_key, output, TTL_DAILY)
             return output
@@ -133,7 +134,7 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            data = get_concept_blocks_json(symbol)
+            data, _src = _router.route("concept_attribution", symbol=symbol)
             output = dict_to_json(data)
             if data.get("source"):
                 cache.set(cache_key, output, TTL_DAILY)
@@ -151,6 +152,8 @@ def register(mcp: FastMCP):
         基于同花顺分析师一致预期数据，计算Forward PE、PEG、
         以及PE消化年限（PEG估值框架）。
 
+        主源：同花顺 basic.10jqka 抓取；备源：腾讯实时价格/PE。
+
         Args:
             symbol: 6位股票代码，如 "600519"。
 
@@ -158,9 +161,6 @@ def register(mcp: FastMCP):
             一致预期数据 (JSON)，含FY年份/EPS均值/预测机构数/
             Forward PE/PEG/PE消化年限。
         """
-        import math
-        import re
-
         symbol = normalize_symbol(symbol)
         cache_key = f"profit_forecast:{symbol}"
         cached = cache.get(cache_key)
@@ -168,152 +168,10 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            code = symbol
-            url = f"https://basic.10jqka.com.cn/new/{code}/worth.html"
-            import requests as _rq
-            _headers = {
-                "User-Agent": (
-                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                    "AppleWebKit/537.36"
-                ),
-                "Referer": "https://basic.10jqka.com.cn/",
-            }
-            resp = _rq.get(url, headers=_headers, timeout=15)
-            resp.encoding = "gbk"
-            html = resp.text
-
-            # --- Step 1: Find EPS forecast <thead> + <tbody> ---
-            # The EPS table has <thead> with columns: 年度, 预测机构数, 最小值, 均值, 最大值, 行业平均数
-            thead_pat = re.compile(
-                r"<thead[^>]*>\s*<tr>\s*<th>\s*年度\s*</th>\s*"
-                r"<th>\s*预测机构数\s*</th>.*?</thead>",
-                re.DOTALL,
-            )
-            thead_m = thead_pat.search(html)
-            if not thead_m:
-                return error_response(
-                    f"{symbol} 无分析师一致预期数据（找不到EPS预测表头）",
-                    "get_profit_forecast",
-                )
-
-            # Find next <tbody> after the <thead>
-            tbody_pat = re.compile(r"<tbody[^>]*>(.*?)</tbody>", re.DOTALL)
-            tbody_m = tbody_pat.search(html, thead_m.end())
-            if not tbody_m:
-                return error_response(
-                    f"{symbol} 无分析师一致预期数据（找不到EPS预测表体）",
-                    "get_profit_forecast",
-                )
-
-            tbody_html = tbody_m.group(1)
-
-            # Parse each row: <tr>...<th>YEAR</th><td...>N1</td><td>N2</td>...
-            row_pat = re.compile(
-                r"<tr[^>]*>\s*<th[^>]*>\s*(\d{4})\s*</th>\s*"
-                r"<td[^>]*>\s*(\d+)\s*</td>\s*"        # 预测机构数
-                r"<td[^>]*>\s*([\d.]+)\s*</td>\s*"      # 最小值
-                r"<td[^>]*>\s*([\d.]+)\s*</td>\s*"      # 均值
-                r"<td[^>]*>\s*([\d.]+)\s*</td>\s*"      # 最大值
-                r"<td[^>]*>\s*([\d.]+)\s*</td>"         # 行业平均数
-                r".*?</tr>",
-                re.DOTALL,
-            )
-
-            eps_by_year: dict[str, float] = {}
-            forecast_rows: list[dict] = []
-            for rm in row_pat.finditer(tbody_html):
-                fy = rm.group(1)
-                analysts = int(rm.group(2))
-                eps_min = rm.group(3)
-                eps_mean = float(rm.group(4))
-                eps_max = rm.group(5)
-                industry_avg = rm.group(6)
-
-                entry = {
-                    "year": fy,
-                    "analysts": analysts,
-                    "eps_min": eps_min,
-                    "eps_mean": eps_mean,
-                    "eps_max": eps_max,
-                    "industry_average": industry_avg,
-                    "low_coverage_warning": analysts < 3,
-                }
-                forecast_rows.append(entry)
-                if analysts > 0:
-                    eps_by_year[fy] = eps_mean
-
-            if not forecast_rows:
-                return error_response(
-                    f"{symbol} 无分析师一致预期数据", "get_profit_forecast"
-                )
-
-            # --- Step 2: Extract summary text from <p class="tip"> ---
-            tip_pat = re.compile(
-                r'<p[^>]*class="tip[^"]*"[^>]*>(.*?)</p>', re.DOTALL
-            )
-            tip_m = tip_pat.search(html, thead_m.start() - 2000, thead_m.start())
-            summary_text = ""
-            if tip_m:
-                summary_text = re.sub(r"<[^>]+>", "", tip_m.group(1)).strip()
-
-            # --- Step 3: Get current price for forward valuation ---
-            result = {
-                "symbol": symbol,
-                "source": "同花顺 analyst consensus",
-                "summary": summary_text,
-                "forecasts": forecast_rows,
-            }
-
-            try:
-                import urllib.request as _ur
-                prefix = "sh" if code.startswith("6") else "sz"
-                quote_url = f"https://qt.gtimg.cn/q={prefix}{code}"
-                req = _ur.Request(quote_url)
-                req.add_header("User-Agent", "Mozilla/5.0")
-                quote_resp = _ur.urlopen(req, timeout=5)
-                raw = quote_resp.read().decode("gbk")
-                vals = raw.split('"')[1].split("~") if '"' in raw else []
-                if len(vals) >= 53:
-                    price = float(vals[3]) if vals[3] else 0
-                    pe_ttm = float(vals[39]) if vals[39] else 0
-                    result["price"] = price
-                    result["pe_ttm"] = pe_ttm
-
-                    years_sorted = sorted(eps_by_year.keys())
-                    if years_sorted and eps_by_year.get(years_sorted[0], 0) > 0:
-                        eps_cur = eps_by_year[years_sorted[0]]
-                        fwd_pe = round(price / eps_cur, 1)
-                        result["forward_pe"] = fwd_pe
-                        result["forward_pe_year"] = years_sorted[0]
-
-                        if (
-                            len(years_sorted) >= 2
-                            and eps_by_year.get(years_sorted[1], 0) > 0
-                        ):
-                            eps_next = eps_by_year[years_sorted[1]]
-                            cagr = eps_next / eps_cur - 1
-                            if cagr > 0:
-                                peg = round(fwd_pe / (cagr * 100), 2)
-                                result["peg"] = peg
-                                result["eps_cagr"] = round(cagr * 100, 1)
-                                if fwd_pe > 30:
-                                    digest = round(
-                                        math.log(fwd_pe / 30) / math.log(1 + cagr), 1
-                                    )
-                                    result["pe_digestion_years"] = digest
-                            else:
-                                result["peg"] = None
-                                result["eps_cagr"] = round(cagr * 100, 1)
-                                result["peg_note"] = (
-                                    "EPS declining, PEG not applicable"
-                                )
-            except Exception as e:
-                result["valuation_note"] = f"Forward valuation unavailable: {e}"
-
+            result, _src = _router.route("profit_forecast", symbol=symbol)
             output = dict_to_json(result)
             cache.set(cache_key, output, TTL_DAILY)
             return output
-
         except Exception as e:
             return error_response(
                 f"获取一致预期失败: {e}", "get_profit_forecast"
@@ -330,7 +188,7 @@ def register(mcp: FastMCP):
         计算个股技术指标。
 
         支持 MACD、RSI、布林带、ATR、SMA、EMA、VWMA、MFI 等 13 种常用指标。
-        底层使用 stockstats 标准库计算，数据源为 AKShare（东方财富）OHLCV。
+        底层使用 stockstats 标准库计算，OHLCV 数据通过 SmartRouter 获取。
 
         Args:
             symbol: 6位股票代码，如 "600519"。
@@ -349,6 +207,13 @@ def register(mcp: FastMCP):
         if not curr_date or curr_date.strip() == "":
             curr_date = datetime.now().strftime("%Y-%m-%d")
 
+        # L2 计算模块延迟导入（非数据源，是纯计算/元数据函数）
+        from astock_signals.indicators import (
+            calculate_indicators,
+            get_supported_indicators,
+            get_indicator_description,
+        )
+
         if indicator not in get_supported_indicators():
             return error_response(
                 f"不支持的指标 '{indicator}'。可选: {get_supported_indicators()}",
@@ -361,10 +226,49 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            from astock_signals.indicators import calculate_indicators, _load_ohlcv
+            # 通过 SmartRouter 获取 OHLCV 数据
+            fetch_trading_days = look_back_days + 60
+            fetch_calendar_days = int(fetch_trading_days * 1.5) + 30
+            start_date = (
+                datetime.now() - timedelta(days=fetch_calendar_days)
+            ).strftime("%Y%m%d")
+            end_date = datetime.now().strftime("%Y%m%d")
 
-            # Load OHLCV data
-            df = _load_ohlcv(symbol, curr_date, source="akshare")
+            df, _src = _router.route(
+                "historical_kline",
+                symbol=symbol,
+                period="daily",
+                start_date=start_date,
+                end_date=end_date,
+                adjust="qfq",
+            )
+
+            if df is None or df.empty:
+                return error_response(
+                    f"无 {indicator} 数据 ({symbol})", "get_technical_indicator"
+                )
+
+            # 列名标准化（中文 → 英文，兼容多数据源）
+            col_map = {
+                "日期": "Date", "开盘": "Open", "最高": "High",
+                "最低": "Low", "收盘": "Close", "成交量": "Volume",
+                "date": "Date", "open": "Open", "high": "High",
+                "low": "Low", "close": "Close", "volume": "Volume",
+            }
+            df = df.rename(columns={k: v for k, v in col_map.items() if k in df.columns})
+            needed = ["Date", "Open", "High", "Low", "Close", "Volume"]
+            df = df[[c for c in needed if c in df.columns]]
+
+            if "Date" in df.columns:
+                df["Date"] = pd.to_datetime(df["Date"])
+            for col in ["Open", "High", "Low", "Close", "Volume"]:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors="coerce")
+            if "Date" in df.columns:
+                df = df.sort_values("Date").reset_index(drop=True)
+            if len(df) > look_back_days:
+                df = df.iloc[-look_back_days:]
+
             result_df = calculate_indicators(df, indicator, look_back_days)
 
             if result_df.empty:
@@ -403,6 +307,12 @@ def register(mcp: FastMCP):
         Returns:
             指标列表 (JSON)，含指标名称和中文说明。
         """
+        # L2 元数据延迟导入（非数据源）
+        from astock_signals.indicators import (
+            get_supported_indicators,
+            get_indicator_description,
+        )
+
         result = []
         for name in get_supported_indicators():
             result.append({

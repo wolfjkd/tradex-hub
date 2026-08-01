@@ -19,13 +19,15 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
-import akshare as ak
 import pandas as pd
 from mcp.server.fastmcp import FastMCP
 
+from ..data_sources import get_router
 from ..utils.cache import TTL_DAILY, cache
 from ..utils.formatter import dict_to_json, error_response
 from ..utils.symbol import normalize_symbol
+
+_router = get_router()
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -667,12 +669,12 @@ class AnalysisEngine:
 
 
 # ──────────────────────────────────────────────────────────────────
-# OHLCV 数据获取（参考 astock_signals/indicators.py 的 _load_ohlcv_akshare）
+# OHLCV 数据获取（via SmartRouter，不直接 import akshare/eltdx）
 # ──────────────────────────────────────────────────────────────────
 
 
-def _load_ohlcv_akshare(code: str, look_back_days: int) -> pd.DataFrame:
-    """使用 akshare 获取 OHLCV 数据（东方财富主，腾讯备用）。
+def _load_ohlcv(code: str, look_back_days: int) -> pd.DataFrame:
+    """通过 SmartRouter 获取 OHLCV 数据（eltdx 主，akshare 备）。
 
     Args:
         code: 6 位股票代码。
@@ -690,40 +692,19 @@ def _load_ohlcv_akshare(code: str, look_back_days: int) -> pd.DataFrame:
         datetime.now() - timedelta(days=fetch_calendar_days)
     ).strftime("%Y%m%d")
 
-    sources: list[tuple[str, Any, dict[str, Any]]] = [
-        ("东方财富", ak.stock_zh_a_hist, {
-            "symbol": code,
-            "period": "daily",
-            "start_date": start_date,
-            "end_date": end_date,
-            "adjust": "qfq",
-        }),
-    ]
-
-    tx_prefix = "sh" if code.startswith("6") else "sz"
-    sources.append(("腾讯", ak.stock_zh_a_hist_tx, {
-        "symbol": f"{tx_prefix}{code}",
-        "adjust": "qfq",
-    }))
-
-    df: pd.DataFrame | None = None
-    last_error: Exception | None = None
-    for name, fn, kwargs in sources:
-        try:
-            df = fn(**kwargs)
-            if df is not None and not df.empty:
-                break
-        except Exception as e:
-            last_error = e
-            continue
+    df, _src = _router.route(
+        "historical_kline",
+        symbol=code,
+        period="daily",
+        start_date=start_date,
+        end_date=end_date,
+        adjust="qfq",
+    )
 
     if df is None or df.empty:
-        msg = f"无法获取 {code} 的 OHLCV 数据"
-        if last_error:
-            msg += f": {last_error}"
-        raise ValueError(msg)
+        raise ValueError(f"无法获取 {code} 的 OHLCV 数据")
 
-    # 列名标准化（兼容东方财富中文列名与腾讯英文列名）
+    # 列名标准化（兼容东方财富中文列名与 eltdx/腾讯英文列名）
     col_map = {
         "日期": "Date", "开盘": "Open", "最高": "High",
         "最低": "Low", "收盘": "Close", "成交量": "Volume",
@@ -797,7 +778,7 @@ def register(mcp: FastMCP) -> None:
             return cached
 
         try:
-            df = _load_ohlcv_akshare(symbol, look_back_days)
+            df = _load_ohlcv(symbol, look_back_days)
             if df is None or df.empty:
                 return error_response(
                     f"无法获取 {symbol} 的 OHLCV 数据",

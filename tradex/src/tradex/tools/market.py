@@ -8,29 +8,25 @@ Tools:
   29. get_limit_up_down    - Daily limit-up/limit-down pool
   30. get_dragon_tiger     - Dragon & Tiger Board (institutional activity)
 
-Data source:
-  东方财富 (eastmoney) — most functions have no alternative source
+Data source routing (via SmartRouter):
+  市场概览: akshare market_overview
+  资金流向: em_push2(priority=1) → akshare(priority=100)  [fund_flow]
+  北向资金: ths_hsgt(priority=1) → akshare(priority=100)  [northbound]
+  涨跌停池: akshare hot_stocks
+  龙虎榜:   em_datacenter(priority=1) → akshare(priority=100)  [dragon_tiger]
 """
 
 from __future__ import annotations
 
-import os
-import sys
-
-import akshare as ak
 from mcp.server.fastmcp import FastMCP
 
+import pandas as pd
+from ..data_sources import get_router
 from ..utils.cache import TTL_DAILY, TTL_REALTIME, cache
-from ..utils.fallback import call_with_fallback
 from ..utils.formatter import df_to_json, error_response, slim_df
-from ..utils.symbol import get_exchange, normalize_symbol
+from ..utils.symbol import normalize_symbol
 
-# Import astock_signals modules from Hub src/ (anti_ban_client 是唯一东财防封实现)
-
-from astock_signals.anti_ban_client import (  # noqa: E402
-    em_push2_fund_flow,
-    em_push2his_fund_flow,
-)
+_router = get_router()
 
 
 def register(mcp: FastMCP):
@@ -53,10 +49,7 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            df = await call_with_fallback(
-                ("新浪财经", ak.stock_zh_index_spot, {}),
-                ("东方财富", ak.stock_zh_index_spot_em, {}),
-            )
+            df, _src = _router.route("market_overview")
             df = slim_df(df)
             result = df_to_json(df, max_rows=30)
             cache.set(cache_key, result, TTL_REALTIME)
@@ -85,69 +78,46 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            import pandas as pd
-
-            secid = f"1.{symbol}" if symbol.startswith("6") else f"0.{symbol}"
-
-            d = em_push2_fund_flow(secid, timeout=10)
-            if d.get("rc") == 0:
-                klines = d.get("data", {}).get("klines", [])
-                if klines:
-                    data = []
-                    for line in klines:
-                        parts = line.split(",")
-                        if len(parts) >= 6:
-                            data.append({
-                                "时间": parts[0],
-                                "主力净流入": float(parts[1]),
-                                "小单净流入": float(parts[2]),
-                                "中单净流入": float(parts[3]),
-                                "大单净流入": float(parts[4]),
-                                "超大单净流入": float(parts[5]),
-                            })
-                    df = pd.DataFrame(data)
-                    result = df_to_json(df, max_rows=30)
-                    cache.set(cache_key, result, TTL_DAILY)
-                    return result
-
-            dh = em_push2his_fund_flow(secid, limit=20, timeout=10)
-            if dh.get("rc") == 0:
-                klines = dh.get("data", {}).get("klines", [])
-                if klines:
-                    data = []
-                    for line in klines:
-                        parts = line.split(",")
-                        if len(parts) >= 6:
-                            data.append({
-                                "日期": parts[0],
-                                "主力净流入": float(parts[1]),
-                                "小单净流入": float(parts[2]),
-                                "中单净流入": float(parts[3]),
-                                "大单净流入": float(parts[4]),
-                                "超大单净流入": float(parts[5]),
-                            })
-                    df = pd.DataFrame(data)
-                    result = df_to_json(df, max_rows=30)
-                    cache.set(cache_key, result, TTL_DAILY)
-                    return result
-
-            raise Exception("东财push2接口无数据")
-        except Exception as e:
-            try:
-                market = get_exchange(symbol)
-                df = ak.stock_individual_fund_flow(stock=symbol, market=market)
-                if df is None or df.empty:
-                    return error_response(
-                        f"资金流向数据为空 ({symbol})", "get_money_flow"
-                    )
-                df = slim_df(df)
-                result = df_to_json(df, max_rows=30)
-                cache.set(cache_key, result, TTL_DAILY)
-                return result
-            except Exception as e2:
+            result, _src = _router.route(
+                "fund_flow", code=symbol, include_history=True
+            )
+            # fund_flow fetch_fn 返回 dict（含 realtime/history 列表）
+            rows = []
+            if isinstance(result, dict):
+                # 优先使用实时分钟级数据，其次历史日线
+                realtime = result.get("realtime") or []
+                history = result.get("history") or []
+                for item in realtime:
+                    rows.append({
+                        "时间": item.get("time", item.get("date", "")),
+                        "主力净流入": float(item.get("main_net", 0) or 0),
+                        "小单净流入": float(item.get("small", 0) or 0),
+                        "中单净流入": float(item.get("mid", 0) or 0),
+                        "大单净流入": float(item.get("large", 0) or 0),
+                        "超大单净流入": float(item.get("super_large", 0) or 0),
+                    })
+                if not rows:
+                    for item in history:
+                        rows.append({
+                            "日期": item.get("date", item.get("time", "")),
+                            "主力净流入": float(item.get("main_net", 0) or 0),
+                            "小单净流入": float(item.get("small", 0) or 0),
+                            "中单净流入": float(item.get("mid", 0) or 0),
+                            "大单净流入": float(item.get("large", 0) or 0),
+                            "超大单净流入": float(item.get("super_large", 0) or 0),
+                        })
+            if not rows:
                 return error_response(
-                    f"获取资金流向失败 ({symbol}): {e2}", "get_money_flow"
+                    f"资金流向数据为空 ({symbol})", "get_money_flow"
                 )
+            df = pd.DataFrame(rows)
+            result_json = df_to_json(df, max_rows=30)
+            cache.set(cache_key, result_json, TTL_DAILY)
+            return result_json
+        except Exception as e:
+            return error_response(
+                f"获取资金流向失败 ({symbol}): {e}", "get_money_flow"
+            )
 
     @mcp.tool()
     async def get_north_bound_flow() -> str:
@@ -167,7 +137,23 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            df = ak.stock_hsgt_hist_em(symbol="北向资金")
+            result, _src = _router.route("northbound", include_history=True)
+            # ths_hsgt 源返回 dict；akshare 源返回 DataFrame
+            if isinstance(result, pd.DataFrame):
+                df = result
+            elif isinstance(result, dict):
+                # 同花顺返回的 dict 含 history 列表
+                history = result.get("history") or []
+                if not history:
+                    return error_response(
+                        "北向资金数据为空", "get_north_bound_flow"
+                    )
+                df = pd.DataFrame(history)
+            else:
+                return error_response(
+                    "北向资金数据为空", "get_north_bound_flow"
+                )
+
             if df is None or df.empty:
                 return error_response(
                     "北向资金数据为空", "get_north_bound_flow"
@@ -177,9 +163,9 @@ def register(mcp: FastMCP):
                     df = df.sort_values(col, ascending=False)
                     break
             df = slim_df(df)
-            result = df_to_json(df, max_rows=30)
-            cache.set(cache_key, result, TTL_DAILY)
-            return result
+            result_json = df_to_json(df, max_rows=30)
+            cache.set(cache_key, result_json, TTL_DAILY)
+            return result_json
         except Exception as e:
             return error_response(
                 f"获取北向资金失败: {e}", "get_north_bound_flow"
@@ -203,14 +189,7 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            import datetime
-            today = datetime.date.today().strftime("%Y%m%d")
-
-            if direction == "涨停":
-                df = ak.stock_zt_pool_em(date=today)
-            else:
-                df = ak.stock_zt_pool_dtgc_em(date=today)
-
+            df, _src = _router.route("hot_stocks", direction=direction)
             result = df_to_json(df)
             cache.set(cache_key, result, TTL_DAILY)
             return result
@@ -242,18 +221,21 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            import datetime
-            today = datetime.date.today()
-            start = today - datetime.timedelta(days=num_days * 2)  # Buffer for non-trading days
-
-            df = ak.stock_lhb_detail_em(
-                start_date=start.strftime("%Y%m%d"),
-                end_date=today.strftime("%Y%m%d"),
+            # code="" → 返回全市场龙虎榜明细 DataFrame（akshare 源）
+            result, _src = _router.route(
+                "dragon_tiger", code="", look_back_days=num_days * 2
             )
+            # dragon_tiger with code="" 返回原始 DataFrame
+            if isinstance(result, pd.DataFrame):
+                df = result
+            else:
+                return error_response(
+                    "龙虎榜数据格式异常", "get_dragon_tiger"
+                )
             df = slim_df(df)
-            result = df_to_json(df, max_rows=30)
-            cache.set(cache_key, result, TTL_DAILY)
-            return result
+            result_json = df_to_json(df, max_rows=30)
+            cache.set(cache_key, result_json, TTL_DAILY)
+            return result_json
         except Exception as e:
             return error_response(
                 f"获取龙虎榜失败: {e}", "get_dragon_tiger"

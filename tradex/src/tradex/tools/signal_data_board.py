@@ -6,6 +6,9 @@ Signal Data — 涨停板类子模块 (signal_data_board)。
 
 V0.9 打板层 — 涨停四池 + 情绪速算（a-stock-data 融合）。
 
+v3.1.0 起：所有数据获取通过 SmartRouter.route() 路由，
+不再直接 import astock_signals 数据源函数。
+
 Tools (共 3 个):
   get_limit_up_board   - 涨停四池（东财 push2ex：涨停/炸板/跌停/昨日涨停）
   get_board_sentiment  - 打板情绪速算（炸板率/连板梯队/晋级率）
@@ -14,21 +17,13 @@ Tools (共 3 个):
 
 from __future__ import annotations
 
-import os
-import sys
-
 from mcp.server.fastmcp import FastMCP
 
+from ..data_sources import get_router
 from ..utils.cache import TTL_DAILY, TTL_REALTIME, cache
 from ..utils.formatter import error_response, dict_to_json
 
-# Import astock_signals modules from Hub src/
-
-from astock_signals import (  # noqa: E402
-    get_limit_up_board_json,
-    get_board_sentiment_json,
-    get_limit_up_insight,
-)
+_router = get_router()
 
 
 def _try_push_limit_up_signal(board_type: str, count: int) -> None:
@@ -87,7 +82,8 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            result = get_limit_up_board_json(board_type)
+            # limit_up_board: board_type → get_limit_up_board_json(board_type)
+            result, _src = _router.route("limit_up_board", board_type=board_type)
             output = dict_to_json(result)
             if result.get("data"):
                 cache.set(cache_key, output, TTL_REALTIME)
@@ -118,7 +114,10 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            result = get_board_sentiment_json()
+            # limit_up_board: board_type="sentiment" → get_board_sentiment_json()
+            result, _src = _router.route(
+                "limit_up_board", board_type="sentiment"
+            )
             output = dict_to_json(result)
             if not result.get("error"):
                 cache.set(cache_key, output, TTL_REALTIME)
@@ -147,7 +146,8 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            result = get_limit_up_insight(code)
+            # hot_money: code 非空 → get_limit_up_insight(code)
+            result, _src = _router.route("hot_money", code=code)
             output = dict_to_json(result)
             if result.get("data"):
                 cache.set(cache_key, output, TTL_DAILY)

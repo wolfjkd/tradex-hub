@@ -6,6 +6,9 @@ Signal Data — 可转债类子模块 (signal_data_cb)。
 
 V0.8 品种扩展层。
 
+v3.1.0 起：所有数据获取通过 SmartRouter.route() 路由，
+不再直接 import astock_signals 数据源函数。
+
 Tools (共 2 个):
   get_cb_realtime_data        - 可转债实时行情（AKShare bond_zh_cov）
   get_cb_value_analysis_data  - 可转债价值分析/转股溢价率（AKShare bond_zh_cov_value_analysis）
@@ -13,20 +16,13 @@ Tools (共 2 个):
 
 from __future__ import annotations
 
-import os
-import sys
-
 from mcp.server.fastmcp import FastMCP
 
+from ..data_sources import get_router
 from ..utils.cache import TTL_DAILY, TTL_REALTIME, cache
 from ..utils.formatter import error_response, dict_to_json
 
-# Import astock_signals modules from Hub src/
-
-from astock_signals import (  # noqa: E402
-    get_cb_realtime_json,
-    get_cb_value_analysis_json,
-)
+_router = get_router()
 
 
 def register(mcp: FastMCP):
@@ -60,7 +56,10 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            result = get_cb_realtime_json(top_n, sort_by)
+            # cb_data: symbol="" → get_cb_realtime_json(top_n, sort_by)
+            result, _src = _router.route(
+                "cb_data", symbol="", top_n=top_n, sort_by=sort_by
+            )
             output = dict_to_json(result)
             if result.get("bonds"):
                 cache.set(cache_key, output, TTL_REALTIME)
@@ -94,7 +93,10 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            result = get_cb_value_analysis_json(symbol, days)
+            # cb_data: symbol 非空 → get_cb_value_analysis_json(symbol, days)
+            result, _src = _router.route(
+                "cb_data", symbol=symbol, days=days
+            )
             output = dict_to_json(result)
             if result.get("history"):
                 cache.set(cache_key, output, TTL_DAILY)

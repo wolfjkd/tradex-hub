@@ -53,12 +53,18 @@ class TestSmartRouterSingleton:
 
 
 class TestSignalDataFlowRegistration:
-    """signal_data_flow 模块导入后注册 6 个数据源到全局 SmartRouter。"""
+    """资金流类数据源注册验证（v3.1.0：注册集中在 data_sources/registry.py）。
+
+    v3.0.0 时 signal_data_flow.py 模块级直接注册 6 个源；
+    v3.1.0 改为统一在 register_all_sources() 中注册，
+    故测试需显式调用 register_all_sources() 触发注册。
+    """
 
     def test_six_sources_registered(self):
-        """导入 signal_data_flow 后全局 router 注册 6 个源（3 类型 × 2 源）。"""
-        # 导入触发模块级 _router.register() 调用（6 次）
-        from tradex.tools import signal_data_flow  # noqa: F401
+        """register_all_sources() 后全局 router 注册 6 个资金流类源（3 类型 × 2 源）。"""
+        # v3.1.0：数据源注册集中在 data_sources/registry.py
+        from tradex.data_sources import register_all_sources
+        register_all_sources()
 
         router = get_router()
         report = router.get_health_report()
@@ -78,7 +84,8 @@ class TestSignalDataFlowRegistration:
 
     def test_data_types_have_two_sources_each(self):
         """每种数据类型恰好有 2 个源（一主一备）。"""
-        from tradex.tools import signal_data_flow  # noqa: F401
+        from tradex.data_sources import register_all_sources
+        register_all_sources()
 
         router = get_router()
         for data_type in ("fund_flow", "dragon_tiger", "industry_comparison"):

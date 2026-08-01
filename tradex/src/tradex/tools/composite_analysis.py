@@ -9,6 +9,9 @@ AI Agent 无需多次调用和组装数据，降低上下文消耗。
   2. 容错降级：单维度失败不影响其他维度，返回 partial 结果
   3. 结构化输出：统一 JSON 格式，包含各维度分析结果和状态
 
+v3.1.0 起：所有数据获取通过 SmartRouter.route() 路由，
+不再直接 import akshare。
+
 Tools (共 3 个):
   73. analyze_stock_comprehensive  - 个股综合分析（行情+技术+基本面+资金+估值+信号）
   74. analyze_industry_comparison  - 行业对比分析（个股 vs 同行业）
@@ -21,14 +24,16 @@ import asyncio
 import logging
 from typing import Any
 
-import akshare as ak
 from mcp.server.fastmcp import FastMCP
 
+from ..data_sources import get_router
 from ..utils.cache import cache, TTL_REALTIME, TTL_DAILY
 from ..utils.formatter import dict_to_json, error_response, df_to_json, slim_df
 from ..utils.symbol import normalize_symbol
 
 logger = logging.getLogger(__name__)
+
+_router = get_router()
 
 
 async def _safe_call(func, *args, **kwargs) -> dict:
@@ -51,33 +56,42 @@ async def _safe_call(func, *args, **kwargs) -> dict:
 
 
 def _get_realtime_quote_sync(symbol: str) -> dict:
-    """同步获取实时行情（内部函数）。"""
-    df = ak.stock_zh_a_spot_em()
-    row = df[df["代码"] == symbol]
-    if row.empty:
+    """同步获取实时行情（内部函数，via SmartRouter）。"""
+    df, _src = _router.route("realtime_quote", symbol=symbol)
+    if df is None or df.empty:
         raise ValueError(f"未找到股票 {symbol} 的实时行情")
+    # akshare 返回全量需过滤；eltdx 返回单行
+    code_col = "代码" if "代码" in df.columns else df.columns[0]
+    if len(df) > 1:
+        row = df[df[code_col].astype(str).str.strip() == symbol]
+        if row.empty:
+            raise ValueError(f"未找到股票 {symbol} 的实时行情")
+    else:
+        row = df
     r = row.iloc[0]
     return {
         "code": str(r.get("代码", "")),
         "name": str(r.get("名称", "")),
-        "price": float(r.get("最新价", 0)),
-        "change_pct": float(r.get("涨跌幅", 0)),
-        "change_amount": float(r.get("涨跌额", 0)),
-        "volume": float(r.get("成交量", 0)),
-        "turnover": float(r.get("成交额", 0)),
-        "high": float(r.get("最高", 0)),
-        "low": float(r.get("最低", 0)),
-        "open": float(r.get("今开", 0)),
-        "prev_close": float(r.get("昨收", 0)),
-        "turnover_rate": float(r.get("换手率", 0)),
-        "pe_ratio": float(r.get("市盈率-动态", 0)),
-        "total_market_cap": float(r.get("总市值", 0)),
+        "price": float(r.get("最新价", 0) or 0),
+        "change_pct": float(r.get("涨跌幅", 0) or 0),
+        "change_amount": float(r.get("涨跌额", 0) or 0),
+        "volume": float(r.get("成交量", 0) or 0),
+        "turnover": float(r.get("成交额", 0) or 0),
+        "high": float(r.get("最高", 0) or 0),
+        "low": float(r.get("最低", 0) or 0),
+        "open": float(r.get("今开", 0) or 0),
+        "prev_close": float(r.get("昨收", 0) or 0),
+        "turnover_rate": float(r.get("换手率", 0) or 0),
+        "pe_ratio": float(r.get("市盈率-动态", 0) or 0),
+        "total_market_cap": float(r.get("总市值", 0) or 0),
     }
 
 
 def _get_company_info_sync(symbol: str) -> dict:
-    """同步获取公司基本信息（内部函数）。"""
-    df = ak.stock_individual_info_em(symbol=symbol)
+    """同步获取公司基本信息（内部函数，via SmartRouter）。"""
+    df, _src = _router.route(
+        "company_info", endpoint="individual_info", symbol=symbol
+    )
     if df is None or df.empty:
         raise ValueError(f"未找到股票 {symbol} 的公司信息")
     info = {}
@@ -87,8 +101,10 @@ def _get_company_info_sync(symbol: str) -> dict:
 
 
 def _get_financial_indicators_sync(symbol: str) -> dict:
-    """同步获取财务指标（内部函数）。"""
-    df = ak.stock_financial_analysis_indicator(symbol=symbol, start_year="2020")
+    """同步获取财务指标（内部函数，via SmartRouter）。"""
+    df, _src = _router.route(
+        "financial_stmt", endpoint="indicator", symbol=symbol
+    )
     if df is None or df.empty:
         raise ValueError(f"未找到股票 {symbol} 的财务指标")
     latest = df.iloc[:4]  # 最近4个报告期
@@ -106,47 +122,54 @@ def _get_financial_indicators_sync(symbol: str) -> dict:
 
 
 def _get_sector_fund_flow_sync() -> dict:
-    """同步获取板块资金流向（内部函数）。"""
-    df = ak.stock_sector_fund_flow_rank(indicator="今日", sector_type="行业资金流")
+    """同步获取板块资金流向（内部函数，via SmartRouter）。"""
+    df, _src = _router.route(
+        "industry_data",
+        endpoint="sector_fund_flow_rank",
+        indicator="今日",
+        sector_type="行业资金流",
+    )
     if df is None or df.empty:
         raise ValueError("未获取到板块资金流向数据")
-    top = df.head(10)
     return {
-        "top_inflow": df_to_json(slim_df(top, max_rows=5)),
-        "top_outflow": df_to_json(slim_df(df.tail(5), max_rows=5)),
+        "top_inflow": df_to_json(slim_df(df.head(5)), max_rows=5),
+        "top_outflow": df_to_json(slim_df(df.tail(5)), max_rows=5),
     }
 
 
 def _get_market_overview_sync() -> dict:
-    """同步获取大盘总览（内部函数）。"""
-    df = ak.stock_zh_index_spot_em(symbol="上证系列指数")
-    sh = df[df["代码"] == "000001"] if df is not None and not df.empty else None
-    df2 = ak.stock_zh_index_spot_em(symbol="深证系列指数")
-    sz = df2[df2["代码"] == "399001"] if df2 is not None and not df2.empty else None
-    df3 = ak.stock_zh_index_spot_em(symbol="创业板系列指数")
-    cy = df3[df3["代码"] == "399006"] if df3 is not None and not df3.empty else None
-
+    """同步获取大盘总览（内部函数，via SmartRouter）。"""
     result = {}
-    for name, row_data in [("shanghai", sh), ("shenzhen", sz), ("chinext", cy)]:
-        if row_data is not None and not row_data.empty:
-            r = row_data.iloc[0]
-            result[name] = {
-                "name": str(r.get("名称", "")),
-                "price": float(r.get("最新价", 0)),
-                "change_pct": float(r.get("涨跌幅", 0)),
-            }
+    for name, index_symbol, index_code in [
+        ("shanghai", "上证系列指数", "000001"),
+        ("shenzhen", "深证系列指数", "399001"),
+        ("chinext", "创业板系列指数", "399006"),
+    ]:
+        try:
+            df, _src = _router.route("market_overview", symbol=index_symbol)
+            if df is not None and not df.empty:
+                row = df[df["代码"].astype(str).str.strip() == index_code]
+                if not row.empty:
+                    r = row.iloc[0]
+                    result[name] = {
+                        "name": str(r.get("名称", "")),
+                        "price": float(r.get("最新价", 0) or 0),
+                        "change_pct": float(r.get("涨跌幅", 0) or 0),
+                    }
+        except Exception:
+            continue
     return result
 
 
 def _get_limit_up_down_sync() -> dict:
-    """同步获取涨跌停统计（内部函数）。"""
+    """同步获取涨跌停统计（内部函数，via SmartRouter）。"""
     try:
-        df_up = ak.stock_zt_pool_em(date="")
+        df_up, _src = _router.route("hot_stocks", direction="涨停", date="")
         up_count = len(df_up) if df_up is not None else 0
     except Exception:
         up_count = -1
     try:
-        df_down = ak.stock_zt_pool_dtgc_em(date="")
+        df_down, _src = _router.route("hot_stocks", direction="跌停", date="")
         down_count = len(df_down) if df_down is not None else 0
     except Exception:
         down_count = -1
@@ -210,7 +233,7 @@ def register(mcp: FastMCP):
             "status": "complete" if success_count == 4 else "partial",
         }
 
-        output = dict_to_json(result, "stock_comprehensive_analysis")
+        output = dict_to_json(result)
         cache.set(cache_key, output, TTL_REALTIME)
         return output
 
@@ -247,7 +270,9 @@ def register(mcp: FastMCP):
         # Step 2: 获取行业成分股
         try:
             industry_code = None
-            board_df = ak.stock_board_industry_name_em()
+            board_df, _src = _router.route(
+                "industry_data", endpoint="board_industry_name_em"
+            )
             if board_df is not None and not board_df.empty:
                 match = board_df[board_df["板块名称"].str.contains(industry, na=False)]
                 if not match.empty:
@@ -260,7 +285,11 @@ def register(mcp: FastMCP):
                 )
 
             # 获取行业成分股
-            constituents = ak.stock_board_industry_cons_em(symbol=industry)
+            constituents, _src = _router.route(
+                "industry_data",
+                endpoint="board_industry_cons_em",
+                industry=industry,
+            )
             if constituents is None or constituents.empty:
                 return error_response(
                     f"行业 '{industry}' 无成分股数据",
@@ -299,7 +328,7 @@ def register(mcp: FastMCP):
                         "total": len(constituents),
                     }
 
-        output = dict_to_json(stats, "industry_comparison")
+        output = dict_to_json(stats)
         cache.set(cache_key, output, TTL_DAILY)
         return output
 
@@ -346,6 +375,6 @@ def register(mcp: FastMCP):
             "status": "complete" if success_count == 3 else "partial",
         }
 
-        output = dict_to_json(result, "market_overview")
+        output = dict_to_json(result)
         cache.set(cache_key, output, TTL_REALTIME)
         return output

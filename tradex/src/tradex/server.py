@@ -39,5 +39,8 @@ def register_all_tools():
     logger.info("已注册 %d 个工具模块: %s", len(registered), ", ".join(registered))
 
 
-# Register all tools at import time
+# Register data sources first (L1 tools depend on SmartRouter), then tools
+from .data_sources import register_all_sources  # noqa: E402
+
+register_all_sources()
 register_all_tools()

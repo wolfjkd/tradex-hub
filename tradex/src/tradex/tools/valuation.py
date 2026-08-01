@@ -6,17 +6,22 @@ Tools:
   18. get_dividend_data          - Dividend history
   19. get_institutional_holdings - Institutional shareholder data
   20. get_analyst_rating         - Analyst forecasts and ratings
+
+Data source routing (via SmartRouter):
+  估值数据: akshare valuation (endpoints: baidu/dividend_detail/dividend_cninfo/circulate_holder/rank_forecast)
 """
 
 from __future__ import annotations
 
-import akshare as ak
 from mcp.server.fastmcp import FastMCP
 
 import pandas as pd
+from ..data_sources import get_router
 from ..utils.cache import TTL_DAILY, TTL_FINANCIAL, cache
 from ..utils.formatter import df_to_json, error_response, slim_df
 from ..utils.symbol import normalize_symbol
+
+_router = get_router()
 
 
 def register(mcp: FastMCP):
@@ -47,14 +52,12 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            # stock_a_lg_indicator has been removed from akshare;
-            # use stock_zh_valuation_baidu which provides PE/PB/总市值 etc.
             indicators = ["总市值", "市盈率(TTM)", "市净率", "市销率(TTM)"]
             frames = []
             for ind in indicators:
                 try:
-                    df = ak.stock_zh_valuation_baidu(
-                        symbol=symbol, indicator=ind, period="近一年"
+                    df, _src = _router.route(
+                        "valuation", endpoint="baidu", symbol=symbol, indicator=ind
                     )
                     if df is not None and not df.empty:
                         # Rename value column to indicator name
@@ -110,8 +113,8 @@ def register(mcp: FastMCP):
 
         # Primary: stock_history_dividend_detail
         try:
-            df = ak.stock_history_dividend_detail(
-                symbol=symbol, indicator="分红"
+            df, _src = _router.route(
+                "valuation", endpoint="dividend_detail", symbol=symbol
             )
             if df is not None and not df.empty:
                 result = df_to_json(df)
@@ -122,7 +125,9 @@ def register(mcp: FastMCP):
 
         # Fallback: stock_dividend_cninfo (巨潮信息网)
         try:
-            df = ak.stock_dividend_cninfo(symbol=symbol)
+            df, _src = _router.route(
+                "valuation", endpoint="dividend_cninfo", symbol=symbol
+            )
             if df is not None and not df.empty:
                 result = df_to_json(df)
                 cache.set(cache_key, result, TTL_FINANCIAL)
@@ -154,7 +159,9 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            df = ak.stock_circulate_stock_holder(symbol=symbol)
+            df, _src = _router.route(
+                "valuation", endpoint="circulate_holder", symbol=symbol
+            )
             if df is None or df.empty:
                 return error_response(
                     f"机构持股数据为空 ({symbol})", "get_institutional_holdings"
@@ -192,7 +199,7 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            df = ak.stock_rank_forecast_cninfo()
+            df, _src = _router.route("valuation", endpoint="rank_forecast")
             if symbol:
                 symbol = normalize_symbol(symbol)
                 # Filter for the specific stock

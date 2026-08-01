@@ -8,26 +8,27 @@ Tools:
   8. get_market_capitalization - Total & free-float market cap
   9. get_stock_list            - Full A-share list with basic data
 
-Data source fallback chain:
-  实时行情: 东方财富(push2) → 新浪全量 → 新浪单股(stock_zh_a_daily)
-  历史K线:  东方财富 → 腾讯(stock_zh_a_hist_tx)
-  分时数据:  东方财富(stock_intraday_em) → eltdx(minutes.today)
-  股票列表: 东方财富 → 新浪全量
+Data source routing (via SmartRouter):
+  实时行情: eltdx(priority=1) → akshare(priority=100) → tencent_http(priority=200)
+  历史K线:  eltdx(priority=1) → akshare(priority=100)
+  分时数据: eltdx(priority=1) → akshare(priority=100)
+  股票列表: akshare(全量行情快照)
 """
 
 from __future__ import annotations
 
 import logging
 
-import akshare as ak
 from mcp.server.fastmcp import FastMCP
 
+from ..data_sources import get_router
 from ..utils.cache import TTL_DAILY, TTL_REALTIME, cache
-from ..utils.fallback import call_with_fallback
-from ..utils.formatter import df_to_json, error_response, slim_df
+from ..utils.formatter import df_to_json, dict_to_json, error_response, slim_df
 from ..utils.symbol import format_with_exchange, normalize_symbol
 
 logger = logging.getLogger("tradex")
+
+_router = get_router()
 
 
 def register(mcp: FastMCP):
@@ -51,37 +52,29 @@ def register(mcp: FastMCP):
         if cached is not None:
             return cached
 
-        # === Tier 1 & 2: 全量行情接口 ===
         try:
-            df = await call_with_fallback(
-                ("东方财富", ak.stock_zh_a_spot_em, {}),
-                ("新浪财经", ak.stock_zh_a_spot, {}),
-            )
+            df, _src = _router.route("realtime_quote", symbol=symbol)
+            if df is None or df.empty:
+                return error_response(
+                    f"获取实时行情失败 ({symbol}): 数据源返回空数据", "get_realtime_quote"
+                )
+            # eltdx/tencent 返回单行；akshare 返回全量需过滤
             code_col = _find_code_col(df)
-            row = df[df[code_col].astype(str).str.strip() == symbol]
-            if not row.empty:
-                result = df_to_json(row)
-                cache.set(cache_key, result, TTL_REALTIME)
-                return result
-        except Exception:
-            pass
-
-        # === Tier 3: 新浪单股日线 (当天数据) ===
-        try:
-            ex_symbol = format_with_exchange(symbol)  # e.g. "sh600519"
-            df = ak.stock_zh_a_daily(symbol=ex_symbol)
-            if df is not None and not df.empty:
-                row = df.tail(1)
-                logger.debug(f"[新浪单股] 成功, 返回最新日数据 ({symbol})")
-                result = df_to_json(row)
-                cache.set(cache_key, result, TTL_REALTIME)
-                return result
-        except Exception:
-            pass
-
-        return error_response(
-            f"获取实时行情失败 ({symbol}): 所有数据源均不可用", "get_realtime_quote"
-        )
+            if len(df) > 1:
+                row = df[df[code_col].astype(str).str.strip() == symbol]
+                if row.empty:
+                    return error_response(
+                        f"未找到股票 {symbol} 的实时行情", "get_realtime_quote"
+                    )
+            else:
+                row = df
+            result = df_to_json(row)
+            cache.set(cache_key, result, TTL_REALTIME)
+            return result
+        except Exception as e:
+            return error_response(
+                f"获取实时行情失败 ({symbol}): {e}", "get_realtime_quote"
+            )
 
     @mcp.tool()
     async def get_historical_price(
@@ -112,31 +105,13 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            # Primary: 东方财富
-            em_kwargs: dict = {
-                "symbol": symbol,
-                "period": period,
-                "adjust": adjust,
-            }
-            if start_date:
-                em_kwargs["start_date"] = start_date
-            if end_date:
-                em_kwargs["end_date"] = end_date
-
-            # Fallback: 腾讯 (needs sh/sz prefix)
-            tx_symbol = format_with_exchange(symbol)
-            tx_kwargs: dict = {
-                "symbol": tx_symbol,
-                "adjust": adjust,
-            }
-            if start_date:
-                tx_kwargs["start_date"] = start_date
-            if end_date:
-                tx_kwargs["end_date"] = end_date
-
-            df = await call_with_fallback(
-                ("东方财富", ak.stock_zh_a_hist, em_kwargs),
-                ("腾讯", ak.stock_zh_a_hist_tx, tx_kwargs),
+            df, _src = _router.route(
+                "historical_kline",
+                symbol=symbol,
+                period=period,
+                start_date=start_date,
+                end_date=end_date,
+                adjust=adjust,
             )
             result = df_to_json(df, max_rows=500)
             cache.set(cache_key, result, TTL_DAILY)
@@ -167,81 +142,58 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            df = ak.stock_intraday_em(symbol=symbol)
-            if df is not None and not df.empty:
-                col_map = {
-                    "时间": "time", "time": "time",
-                    "开盘": "open", "open": "open",
-                    "收盘": "close", "close": "close", "价格": "close", "price": "close",
-                    "最高": "high", "high": "high",
-                    "最低": "low", "low": "low",
-                    "均价": "avg_price", "avg_price": "avg_price",
-                    "成交量": "volume", "volume": "volume",
-                    "成交额": "amount", "amount": "amount",
+            df, _src = _router.route("minute_data", symbol=symbol)
+            if df is None or df.empty:
+                return error_response(
+                    f"获取分时数据失败 ({symbol}): 数据源返回空数据",
+                    "get_intraday_data",
+                )
+
+            # 兼容 akshare(时间/开盘/收盘/均价/成交量) 与 eltdx(时间/价格/均价/成交量) 列名
+            col_map = {
+                "时间": "time", "time": "time",
+                "开盘": "open", "open": "open",
+                "收盘": "close", "close": "close", "价格": "close", "price": "close",
+                "最高": "high", "high": "high",
+                "最低": "low", "low": "low",
+                "均价": "avg_price", "avg_price": "avg_price",
+                "成交量": "volume", "volume": "volume",
+                "成交额": "amount", "amount": "amount",
+            }
+            df = df.rename(columns={k: v for k, v in col_map.items() if k in df.columns})
+
+            points = []
+            for _, row in df.iterrows():
+                time_val = str(row.get("time", ""))
+                price_val = float(row.get("close", row.get("price", 0)) or 0)
+                avg_val = float(row.get("avg_price", 0) or 0)
+                vol_val = int(row.get("volume", 0) or 0)
+
+                if time_val and price_val > 0:
+                    points.append({
+                        "time": time_val,
+                        "price": price_val,
+                        "avg_price": avg_val,
+                        "volume": vol_val,
+                    })
+
+            if points:
+                data = {
+                    "code": symbol,
+                    "point_count": len(points),
+                    "points": points,
                 }
-                
-                df = df.rename(columns={k: v for k, v in col_map.items() if k in df.columns})
-                
-                points = []
-                for _, row in df.iterrows():
-                    time_val = str(row.get("time", ""))
-                    price_val = float(row.get("close", row.get("price", 0)))
-                    avg_val = float(row.get("avg_price", 0))
-                    vol_val = int(row.get("volume", 0))
-                    
-                    if time_val and price_val > 0:
-                        points.append({
-                            "time": time_val,
-                            "price": price_val,
-                            "avg_price": avg_val,
-                            "volume": vol_val,
-                        })
-                
-                if points:
-                    data = {
-                        "code": symbol,
-                        "point_count": len(points),
-                        "points": points,
-                    }
-                    from ..utils.formatter import dict_to_json
-                    result_json = dict_to_json(data)
-                    cache.set(cache_key, result_json, TTL_REALTIME)
-                    return result_json
+                result_json = dict_to_json(data)
+                cache.set(cache_key, result_json, TTL_REALTIME)
+                return result_json
+
+            return error_response(
+                f"获取分时数据失败 ({symbol}): 无有效数据点", "get_intraday_data"
+            )
         except Exception as e:
-            logger.debug(f"东方财富分时数据失败: {e}")
-
-        try:
-            from .eltdx_data import _get_client, _normalize_code
-
-            client = _get_client()
-            if client is not None:
-                norm_code = _normalize_code(symbol)
-                result = client.minutes.today(norm_code)
-                points = getattr(result, "points", None) or []
-                if points:
-                    data = {
-                        "code": norm_code,
-                        "point_count": len(points),
-                        "points": [
-                            {
-                                "time": getattr(p, "time_label", None) or getattr(p, "time", None),
-                                "price": getattr(p, "price", None),
-                                "avg_price": getattr(p, "avg_price", None),
-                                "volume": getattr(p, "volume", None),
-                            }
-                            for p in points
-                        ],
-                    }
-                    from ..utils.formatter import dict_to_json
-                    result_json = dict_to_json(data)
-                    cache.set(cache_key, result_json, TTL_REALTIME)
-                    return result_json
-        except Exception as e:
-            logger.debug(f"eltdx分时数据失败: {e}")
-
-        return error_response(
-            f"获取分时数据失败 ({symbol}): 所有数据源均不可用", "get_intraday_data"
-        )
+            return error_response(
+                f"获取分时数据失败 ({symbol}): {e}", "get_intraday_data"
+            )
 
     @mcp.tool()
     async def get_market_capitalization(symbol: str) -> str:
@@ -260,43 +212,45 @@ def register(mcp: FastMCP):
         if cached is not None:
             return cached
 
-        # === Tier 1: 东方财富个股信息 (emweb, not push2, reliable) ===
+        # === Tier 1: 个股基本信息（含市值） ===
         try:
-            df = ak.stock_individual_info_em(symbol=symbol)
-            info = {}
-            for _, row in df.iterrows():
-                info[row.iloc[0]] = row.iloc[1]
-            # Check if it has market cap data
-            if any("市值" in str(k) for k in info):
-                from ..utils.formatter import dict_to_json
-                result = dict_to_json(info)
-                cache.set(cache_key, result, TTL_REALTIME)
-                return result
+            df, _src = _router.route(
+                "company_info", endpoint="individual_info", symbol=symbol
+            )
+            if df is not None and not df.empty:
+                info = {}
+                for _, row in df.iterrows():
+                    info[row.iloc[0]] = row.iloc[1]
+                if any("市值" in str(k) for k in info):
+                    result = dict_to_json(info)
+                    cache.set(cache_key, result, TTL_REALTIME)
+                    return result
         except Exception:
             pass
 
-        # === Tier 2 & 3: 全量行情 ===
+        # === Tier 2: 全量行情快照 ===
         try:
-            df = await call_with_fallback(
-                ("东方财富", ak.stock_zh_a_spot_em, {}),
-                ("新浪财经", ak.stock_zh_a_spot, {}),
-            )
-            code_col = _find_code_col(df)
-            row = df[df[code_col].astype(str).str.strip() == symbol]
-            if not row.empty:
-                cap_keywords = ["代码", "名称", "最新价", "总市值", "流通市值",
-                                "涨跌幅", "成交量", "成交额", "市盈率", "市净率",
-                                "code", "name", "trade", "volume", "amount",
-                                "changepercent", "settlement", "mktcap"]
-                available_cols = [
-                    c for c in row.columns
-                    if any(k in c for k in cap_keywords)
-                ]
-                if not available_cols:
-                    available_cols = list(row.columns)
-                result = df_to_json(row[available_cols])
-                cache.set(cache_key, result, TTL_REALTIME)
-                return result
+            df, _src = _router.route("realtime_quote", symbol=symbol)
+            if df is not None and not df.empty:
+                code_col = _find_code_col(df)
+                if len(df) > 1:
+                    row = df[df[code_col].astype(str).str.strip() == symbol]
+                else:
+                    row = df
+                if not row.empty:
+                    cap_keywords = ["代码", "名称", "最新价", "总市值", "流通市值",
+                                    "涨跌幅", "成交量", "成交额", "市盈率", "市净率",
+                                    "code", "name", "trade", "volume", "amount",
+                                    "changepercent", "settlement", "mktcap"]
+                    available_cols = [
+                        c for c in row.columns
+                        if any(k in c for k in cap_keywords)
+                    ]
+                    if not available_cols:
+                        available_cols = list(row.columns)
+                    result = df_to_json(row[available_cols])
+                    cache.set(cache_key, result, TTL_REALTIME)
+                    return result
         except Exception:
             pass
 
@@ -327,11 +281,12 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            # Primary: 东方财富, Fallback: 新浪
-            df = await call_with_fallback(
-                ("东方财富", ak.stock_zh_a_spot_em, {}),
-                ("新浪财经", ak.stock_zh_a_spot, {}),
-            )
+            # symbol="" → eltdx 单股源会失败，SmartRouter 自动降级到 akshare 全量快照
+            df, _src = _router.route("realtime_quote", symbol="")
+            if df is None or df.empty:
+                return error_response(
+                    "获取股票列表失败: 数据源返回空数据", "get_stock_list"
+                )
 
             cap_col = None
             for c in df.columns:

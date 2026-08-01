@@ -6,16 +6,22 @@ Tools:
   32. get_financial_calendar   - Earnings/report disclosure schedule
   33. get_company_announcements - Company announcements
   34. search_news              - Keyword-based news search
+
+Data source routing (via SmartRouter):
+  新闻数据: akshare news_data (endpoints: stock_news_em/stock_report_disclosure/stock_notice_report/stock_news_main_cx/news_cctv)
 """
 
 from __future__ import annotations
 
-import akshare as ak
 from mcp.server.fastmcp import FastMCP
 
+import pandas as pd
+from ..data_sources import get_router
 from ..utils.cache import TTL_DAILY, TTL_REALTIME, cache
 from ..utils.formatter import df_to_json, error_response, slim_df
 from ..utils.symbol import normalize_symbol
+
+_router = get_router()
 
 
 def register(mcp: FastMCP):
@@ -39,7 +45,7 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            df = ak.stock_news_em(symbol=symbol)
+            df, _src = _router.route("news_data", endpoint="stock_news_em", symbol=symbol)
             result = df_to_json(df, max_rows=30)
             cache.set(cache_key, result, TTL_REALTIME)
             return result
@@ -66,10 +72,7 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            kwargs = {}
-            if date:
-                kwargs["date"] = date
-            df = ak.stock_report_disclosure(**kwargs)
+            df, _src = _router.route("news_data", endpoint="stock_report_disclosure", date=date)
             df = slim_df(df)
             result = df_to_json(df, max_rows=50)
             cache.set(cache_key, result, TTL_DAILY)
@@ -100,11 +103,9 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            kwargs = {}
             if symbol:
                 symbol = normalize_symbol(symbol)
-                kwargs["symbol"] = symbol
-            df = ak.stock_notice_report(**kwargs)
+            df, _src = _router.route("news_data", endpoint="stock_notice_report", symbol=symbol)
             df = df.head(num_results)
             result = df_to_json(df)
             cache.set(cache_key, result, TTL_DAILY)
@@ -140,23 +141,20 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            import pandas as pd
-
             all_dfs = []
 
             if symbol:
                 symbol = normalize_symbol(symbol)
                 try:
-                    df = ak.stock_news_em(symbol=symbol)
+                    df, _src = _router.route("news_data", endpoint="stock_news_em", symbol=symbol)
                     if df is not None and not df.empty:
                         all_dfs.append(df)
                 except Exception:
                     pass
             else:
-                # Try multiple general news sources instead of relying on one stock
                 # Source 1: 财新网 general financial news
                 try:
-                    df = ak.stock_news_main_cx()
+                    df, _src = _router.route("news_data", endpoint="stock_news_main_cx")
                     if df is not None and not df.empty:
                         all_dfs.append(df)
                 except Exception:
@@ -164,7 +162,7 @@ def register(mcp: FastMCP):
 
                 # Source 2: CCTV financial news
                 try:
-                    df = ak.news_cctv(date="")
+                    df, _src = _router.route("news_data", endpoint="news_cctv", date="")
                     if df is not None and not df.empty:
                         all_dfs.append(df)
                 except Exception:

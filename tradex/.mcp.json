@@ -1,10 +1,10 @@
 {
   "mcpServers": {
-    "cn-financial": {
+    "tradex": {
       "type": "stdio",
       "command": "python",
       "args": ["-m", "tradex"],
-      "cwd": "tradex/src"
+      "cwd": "."
     }
   }
 }

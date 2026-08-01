@@ -8,19 +8,21 @@ Tools:
   24. get_sector_fund_flow - Sector-level fund flow ranking
   25. get_industry_pe      - Industry historical PE valuation
 
-Data source fallback:
-  Primary: 东方财富 (eastmoney)
-  Fallback: 同花顺 (ths) — for board name lists
+Data source routing (via SmartRouter):
+  行业数据: akshare industry_data (endpoints: board_industry_name_em/board_industry_name_ths/
+           board_industry_cons_em/board_concept_name_em/board_concept_name_ths/
+           sector_fund_flow_rank/board_industry_hist_em)
 """
 
 from __future__ import annotations
 
-import akshare as ak
 from mcp.server.fastmcp import FastMCP
 
+from ..data_sources import get_router
 from ..utils.cache import TTL_DAILY, cache
-from ..utils.fallback import call_with_fallback
 from ..utils.formatter import df_to_json, error_response, slim_df
+
+_router = get_router()
 
 
 def register(mcp: FastMCP):
@@ -40,19 +42,20 @@ def register(mcp: FastMCP):
         if cached is not None:
             return cached
 
-        try:
-            # Primary: 东方财富, Fallback: 同花顺
-            df = await call_with_fallback(
-                ("东方财富", ak.stock_board_industry_name_em, {}),
-                ("同花顺", ak.stock_board_industry_name_ths, {}),
-            )
-            result = df_to_json(df)
-            cache.set(cache_key, result, TTL_DAILY)
-            return result
-        except Exception as e:
-            return error_response(
-                f"获取行业板块列表失败: {e}", "get_industry_list"
-            )
+        # Primary: 东方财富, Fallback: 同花顺
+        for ep in ["board_industry_name_em", "board_industry_name_ths"]:
+            try:
+                df, _src = _router.route("industry_data", endpoint=ep)
+                if df is not None and not df.empty:
+                    result = df_to_json(df)
+                    cache.set(cache_key, result, TTL_DAILY)
+                    return result
+            except Exception:
+                continue
+
+        return error_response(
+            "获取行业板块列表失败: 所有数据源均不可用", "get_industry_list"
+        )
 
     @mcp.tool()
     async def get_industry_stocks(industry: str) -> str:
@@ -72,8 +75,9 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            # 东方财富行业成分股 (unique source, no alternative)
-            df = ak.stock_board_industry_cons_em(symbol=industry)
+            df, _src = _router.route(
+                "industry_data", endpoint="board_industry_cons_em", industry=industry
+            )
             df = slim_df(df)
             result = df_to_json(df)
             cache.set(cache_key, result, TTL_DAILY)
@@ -99,19 +103,20 @@ def register(mcp: FastMCP):
         if cached is not None:
             return cached
 
-        try:
-            # Primary: 东方财富, Fallback: 同花顺
-            df = await call_with_fallback(
-                ("东方财富", ak.stock_board_concept_name_em, {}),
-                ("同花顺", ak.stock_board_concept_name_ths, {}),
-            )
-            result = df_to_json(df)
-            cache.set(cache_key, result, TTL_DAILY)
-            return result
-        except Exception as e:
-            return error_response(
-                f"获取概念板块列表失败: {e}", "get_concept_list"
-            )
+        # Primary: 东方财富, Fallback: 同花顺
+        for ep in ["board_concept_name_em", "board_concept_name_ths"]:
+            try:
+                df, _src = _router.route("industry_data", endpoint=ep)
+                if df is not None and not df.empty:
+                    result = df_to_json(df)
+                    cache.set(cache_key, result, TTL_DAILY)
+                    return result
+            except Exception:
+                continue
+
+        return error_response(
+            "获取概念板块列表失败: 所有数据源均不可用", "get_concept_list"
+        )
 
     @mcp.tool()
     async def get_sector_fund_flow(
@@ -138,23 +143,33 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            sources = [
-                ("东方财富", ak.stock_sector_fund_flow_rank, {"indicator": indicator, "sector_type": sector_type}),
-            ]
-
-            if sector_type == "行业资金流":
-                sources.append(("同花顺行业", ak.stock_board_industry_name_ths, {}))
-            elif sector_type == "概念资金流":
-                sources.append(("同花顺概念", ak.stock_board_concept_name_ths, {}))
-
+            # Primary: 东方财富资金流向排名
             df = None
-            for name, fn, kwargs in sources:
+            try:
+                df, _src = _router.route(
+                    "industry_data",
+                    endpoint="sector_fund_flow_rank",
+                    sector_type=sector_type,
+                    indicator=indicator,
+                )
+            except Exception:
+                pass
+
+            # Fallback: 同花顺板块列表（无资金流数据，仅板块名称）
+            if (df is None or df.empty) and sector_type == "行业资金流":
                 try:
-                    df = fn(**kwargs)
-                    if df is not None and not df.empty:
-                        break
+                    df, _src = _router.route(
+                        "industry_data", endpoint="board_industry_name_ths"
+                    )
                 except Exception:
-                    continue
+                    pass
+            elif (df is None or df.empty) and sector_type == "概念资金流":
+                try:
+                    df, _src = _router.route(
+                        "industry_data", endpoint="board_concept_name_ths"
+                    )
+                except Exception:
+                    pass
 
             if df is None or df.empty:
                 return error_response(
@@ -194,16 +209,14 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            kwargs: dict = {
-                "symbol": industry,
-                "period": "日k",
-            }
-            if start_date:
-                kwargs["start_date"] = start_date
-            if end_date:
-                kwargs["end_date"] = end_date
-
-            df = ak.stock_board_industry_hist_em(**kwargs)
+            df, _src = _router.route(
+                "industry_data",
+                endpoint="board_industry_hist_em",
+                industry=industry,
+                period="日k",
+                start_date=start_date,
+                end_date=end_date,
+            )
             result = df_to_json(df, max_rows=250)
             cache.set(cache_key, result, TTL_DAILY)
             return result

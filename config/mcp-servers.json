@@ -1,14 +1,14 @@
 {
-  "version": "3.0",
-  "description": "Buddy 金融数据中枢 - MCP Server 配置（v3.0.0）",
+  "version": "3.1",
+  "description": "tradex-hub 金融数据中枢 - MCP Server 配置（v3.1.0）",
   "servers": {
     "tradex": {
       "name": "tradex 金融数据中枢",
       "type": "stdio",
-      "tools": 88,
-      "modules": ["company_info(4)", "price_data(5)", "financial_stmt(8)", "valuation(4)", "industry(5)", "market(5)", "news_events(4)", "macro_fx(8)", "signal_data(17)", "eltdx_data(5)", "technical_indicators(6)", "performance_metrics(2)", "signal_generation(3)", "factor_analysis(2)", "stock_screening(2)", "diagnostics(4)", "composite_analysis(3)", "analysis_engine(1)"],
-      "version": "3.0.0",
-      "note": "AKShare主+东财直连+同花顺，88个MCP工具，三层架构(L1数据/L2计算/L3决策)"
+      "tools": 89,
+      "modules": ["company_info(4)", "price_data(5)", "financial_stmt(8)", "valuation(4)", "industry(5)", "market(5)", "news_events(4)", "macro_fx(8)", "signal_data(17)", "eltdx_data(5)", "technical_indicators(6)", "performance_metrics(2)", "signal_generation(3)", "factor_analysis(2)", "stock_screening(2)", "diagnostics(5)", "composite_analysis(3)", "analysis_engine(1)"],
+      "version": "3.1.0",
+      "note": "eltdx行情类第一主源+AKShare第二源+东财/同花顺备用，89个MCP工具，三层架构(L1数据/L2计算/L3决策)，SmartRouter 25类型34源全量覆盖，数据源看板 python -m tradex.dashboard"
     },
     "tdx-connector": {
       "name": "通达信 MCP",
@@ -20,32 +20,56 @@
   },
   "routing": {
     "realtime_quote": {
-      "primary": "tradex (get_realtime_price)",
+      "primary": "SmartRouter: eltdx(TCP) → akshare → tencent_http",
       "fallback": ["tdx-connector"]
     },
-    "kline": {
-      "primary": "tradex (get_kline)",
+    "historical_kline": {
+      "primary": "SmartRouter: eltdx → akshare",
       "fallback": ["tdx-connector"]
+    },
+    "minute_data": {
+      "primary": "SmartRouter: eltdx → akshare",
+      "fallback": []
+    },
+    "call_auction": {
+      "primary": "SmartRouter: eltdx [exclusive]",
+      "fallback": []
+    },
+    "tick_data": {
+      "primary": "SmartRouter: eltdx [exclusive]",
+      "fallback": []
+    },
+    "f10_profile": {
+      "primary": "SmartRouter: eltdx [exclusive]",
+      "fallback": []
     },
     "financials": {
-      "primary": "tradex (get_financial_statements)",
+      "primary": "SmartRouter: akshare",
       "fallback": []
     },
     "industry_board": {
-      "primary": "tradex (get_industry_boards)",
+      "primary": "SmartRouter: akshare",
       "fallback": []
     },
     "macro": {
-      "primary": "tradex (macro_fx)",
+      "primary": "SmartRouter: akshare",
+      "fallback": []
+    },
+    "fund_flow": {
+      "primary": "SmartRouter: em_push2 → akshare",
       "fallback": []
     },
     "dragon_tiger": {
-      "primary": "tradex (get_dragon_tiger)",
-      "fallback": ["signal_data (get_dragon_tiger_signal)"]
+      "primary": "SmartRouter: em_datacenter → akshare",
+      "fallback": []
     },
     "northbound": {
-      "primary": "tradex (get_northbound_flow)",
-      "fallback": ["signal_data (get_northbound_flow_signal)"]
+      "primary": "SmartRouter: ths_hsgt → akshare",
+      "fallback": []
+    },
+    "limit_up_board": {
+      "primary": "SmartRouter: em_push2_clist [exclusive]",
+      "fallback": []
     }
   }
 }

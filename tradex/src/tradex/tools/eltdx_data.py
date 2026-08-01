@@ -1,7 +1,7 @@
 """
 eltdx_data.py - eltdx 通达信协议独有数据源
 ============================================
-基于 eltdx 1.0.2 包封装的 5 个 MCP 工具。
+基于 eltdx 1.2.0 包封装的 5 个 MCP 工具。
 
 独有数据（AKShare 没有）：
   - 集合竞价（auction_series）
@@ -10,9 +10,12 @@ eltdx_data.py - eltdx 通达信协议独有数据源
   - 分时数据（today / history）
   - K线数据（get / all）
 
+v3.1.0 起：所有数据获取通过 SmartRouter.route() 路由，不再直接 import eltdx。
+eltdx 客户端管理已迁移至 data_sources/eltdx_fetchers.py。
+
 代码归属说明：
-  eltdx 是 https://github.com/electkismet/eltdx/ 的开源项目（pip 包）。
-  本文件只通过 import 调用其公开 API，不复制/修改其源码。
+  eltdx 是 https://github.com/electrkismet/eltdx/ 的开源项目（pip 包）。
+  本文件只通过 SmartRouter 调用其公开 API，不复制/修改其源码。
   eltdx 版权声明保留在 pip 安装包的 LICENSE 中。
 """
 
@@ -21,12 +24,17 @@ from __future__ import annotations
 import json
 import logging
 import os
-import sys
 import time
 import threading
 from typing import Any, Optional
 
+from mcp.server.fastmcp import FastMCP
+
+from ..data_sources import get_router
+
 logger = logging.getLogger("tradex.eltdx")
+
+_router = get_router()
 
 
 # TickStore SQLite DB path: <project_root>/data/tick_store.db
@@ -60,56 +68,6 @@ def _get_tick_store():
     return _tick_store_instance
 
 
-# ============================================================
-# 客户端管理
-# ============================================================
-
-_client: Optional[Any] = None
-_client_lock = False
-
-
-def _get_client():
-    """
-    获取/创建 eltdx TdxClient 单例。
-
-    关闭 probe_hosts（避免冷启动慢），使用默认 host 列表。
-    第一次调用时建立连接，后续复用。
-    """
-    global _client, _client_lock
-    if _client is not None:
-        return _client
-    if _client_lock:
-        return None
-    _client_lock = True
-    try:
-        from eltdx import TdxClient
-        _client = TdxClient.from_hosts(timeout=8.0, pool_size=1)
-        _client.connect()
-        logger.info("eltdx TdxClient connected")
-        return _client
-    except Exception as e:
-        logger.error(f"eltdx client init failed: {e}")
-        _client = None
-        return None
-    finally:
-        _client_lock = False
-
-
-def _shutdown_client() -> None:
-    global _client
-    if _client is not None:
-        try:
-            _client.close()
-        except Exception:
-            pass
-        _client = None
-
-
-# 进程退出时清理连接
-import atexit
-atexit.register(_shutdown_client)
-
-
 def _ok(payload: Any) -> str:
     return json.dumps({"status": "success", "data": payload}, ensure_ascii=False, default=str)
 
@@ -122,23 +80,11 @@ def _no_data(reason: str = "no data") -> str:
     return json.dumps({"status": "no_data", "message": reason}, ensure_ascii=False)
 
 
-def _normalize_code(code: str) -> str:
-    """
-    把 6 位代码或带前缀代码统一成 eltdx 期望的格式。
-    eltdx 的 TdxClient 通常接受 'sz000001' / 'sh600000' 或 6 位纯代码，
-    这里的 tools 接受 6 位代码即可。
-    """
+def _strip_prefix(code: str) -> str:
+    """去除 sh/sz/bj 前缀，返回 6 位纯代码。"""
     code = code.strip().lower()
-    if code.startswith(("sz", "sh", "bj")):
-        return code
-    if len(code) == 6 and code.isdigit():
-        # 默认按代码首位分配市场（6=沪，0/3=深，8/4=北）
-        if code.startswith(("60", "68", "90", "11", "13")):
-            return "sh" + code
-        if code.startswith(("00", "30", "20")):
-            return "sz" + code
-        if code.startswith(("8", "43", "92")):
-            return "bj" + code
+    if code.startswith(("sh", "sz", "bj")):
+        return code[2:]
     return code
 
 
@@ -146,7 +92,7 @@ def _normalize_code(code: str) -> str:
 # MCP 工具注册
 # ============================================================
 
-def register(mcp):
+def register(mcp: FastMCP):
     """Register eltdx-specific tools with the MCP server."""
 
     @mcp.tool()
@@ -160,24 +106,17 @@ def register(mcp):
         Args:
             code: 股票代码，如 "000001"（平安银行）、"600519"（贵州茅台）
         """
-        client = _get_client()
-        if client is None:
-            return _err("eltdx client not available")
         try:
             start = time.time()
-            norm_code = _normalize_code(code)
-            result = client.auctions.series(norm_code)
+            result, _src = _router.route("call_auction", code=code)
             latency_ms = round((time.time() - start) * 1000, 1)
-
-            if result is None:
-                return _no_data("auction series is empty")
 
             points = getattr(result, "points", None) or []
             if not points:
                 return _no_data("no auction points")
 
             return _ok({
-                "code": norm_code,
+                "code": _strip_prefix(code),
                 "latency_ms": latency_ms,
                 "point_count": len(points),
                 "points": [
@@ -206,18 +145,10 @@ def register(mcp):
             trading_date: 交易日期，格式 "20260617" 或 "2026-06-17"
             count: 返回笔数（默认 2000）
         """
-        client = _get_client()
-        if client is None:
-            return _err("eltdx client not available")
         try:
             start = time.time()
-            norm_code = _normalize_code(code)
+            tick_code = _strip_prefix(code)
             norm_date = trading_date.replace("-", "").replace("/", "")
-
-            # 6位纯代码用于 TickStore 存储
-            tick_code = norm_code
-            if tick_code.startswith(("sh", "sz", "bj")):
-                tick_code = tick_code[2:]
 
             # 缓存优先：同一天同一股票从 TickStore 读取
             store = _get_tick_store()
@@ -238,7 +169,7 @@ def register(mcp):
                         ]
                         latency_ms = round((time.time() - start) * 1000, 1)
                         return _ok({
-                            "code": norm_code,
+                            "code": tick_code,
                             "date": norm_date,
                             "latency_ms": latency_ms,
                             "tick_count": len(ticks_out),
@@ -247,7 +178,10 @@ def register(mcp):
                 except Exception as cache_err:
                     logger.debug("TickStore cache read failed: %s", cache_err)
 
-            result = client.trades.history(norm_code, norm_date, count=count)
+            # SmartRouter 路由获取逐笔数据（eltdx 独占源）
+            result, _src = _router.route(
+                "tick_data", code=code, trading_date=trading_date, count=count
+            )
             latency_ms = round((time.time() - start) * 1000, 1)
 
             ticks = getattr(result, "ticks", None) or []
@@ -290,7 +224,7 @@ def register(mcp):
                 threading.Thread(target=_save_to_store, daemon=True).start()
 
             return _ok({
-                "code": norm_code,
+                "code": tick_code,
                 "date": norm_date,
                 "latency_ms": latency_ms,
                 "tick_count": len(ticks_out),
@@ -310,19 +244,15 @@ def register(mcp):
         Args:
             code: 股票代码，如 "000001"（6 位）
         """
-        client = _get_client()
-        if client is None:
-            return _err("eltdx client not available")
         try:
             start = time.time()
-            norm_code = code.strip()
-            if norm_code.startswith(("sz", "sh", "bj")):
-                norm_code = norm_code[2:]
-
-            profile_resp = client.f10.company_profile(norm_code)
-            topics_resp = client.f10.hot_topics(norm_code)
-            diag_resp = client.f10.finance_diagnosis(norm_code)
+            result, _src = _router.route("f10_profile", code=code)
             latency_ms = round((time.time() - start) * 1000, 1)
+
+            profile_resp = result.get("profile_resp")
+            topics_resp = result.get("topics_resp")
+            diag_resp = result.get("diag_resp")
+            norm_code = result.get("code", _strip_prefix(code))
 
             def _rows(resp):
                 if resp is None or not getattr(resp, "ok", False):
@@ -352,39 +282,43 @@ def register(mcp):
     @mcp.tool()
     async def eltdx_get_minutes(code: str) -> str:
         """
-        获取股票当日分时数据（eltdx 数据源，与 AKShare 互补）。
+        获取股票当日分时数据（SmartRouter 路由，优先 eltdx 数据源）。
 
         1 分钟一根 K 线的价量数据。
 
         Args:
             code: 股票代码，如 "000001"
         """
-        client = _get_client()
-        if client is None:
-            return _err("eltdx client not available")
         try:
             start = time.time()
-            norm_code = _normalize_code(code)
-            result = client.minutes.today(norm_code)
+            df, _src = _router.route("minute_data", code=code)
             latency_ms = round((time.time() - start) * 1000, 1)
 
-            points = getattr(result, "points", None) or []
+            if df is None or df.empty:
+                return _no_data("no minute points")
+
+            points = []
+            for _, row in df.iterrows():
+                time_val = str(row.get("时间", row.get("time", "")))
+                price_val = float(row.get("价格", row.get("收盘", row.get("close", 0))) or 0)
+                avg_val = float(row.get("均价", row.get("avg_price", 0)) or 0)
+                vol_val = float(row.get("成交量", row.get("volume", 0)) or 0)
+                if time_val:
+                    points.append({
+                        "time": time_val,
+                        "price": price_val,
+                        "avg_price": avg_val,
+                        "volume": vol_val,
+                    })
+
             if not points:
                 return _no_data("no minute points")
 
             return _ok({
-                "code": norm_code,
+                "code": _strip_prefix(code),
                 "latency_ms": latency_ms,
                 "point_count": len(points),
-                "points": [
-                    {
-                        "time": getattr(p, "time_label", None) or getattr(p, "time", None),
-                        "price": getattr(p, "price", None),
-                        "avg_price": getattr(p, "avg_price", None),
-                        "volume": getattr(p, "volume", None),
-                    }
-                    for p in points
-                ],
+                "points": points,
             })
         except Exception as e:
             logger.exception("eltdx_get_minutes failed")
@@ -393,7 +327,7 @@ def register(mcp):
     @mcp.tool()
     async def eltdx_get_kline(code: str, period: str = "day", count: int = 100) -> str:
         """
-        获取股票 K 线数据（eltdx 数据源，与 AKShare 互补）。
+        获取股票 K 线数据（SmartRouter 路由，优先 eltdx 数据源）。
 
         支持日/周/月/分钟等多种周期。
 
@@ -402,36 +336,37 @@ def register(mcp):
             period: 周期，"day" / "week" / "month" / "5m" / "15m" / "30m" / "60m"
             count: 返回 K 线根数（默认 100）
         """
-        client = _get_client()
-        if client is None:
-            return _err("eltdx client not available")
         try:
             start = time.time()
-            norm_code = _normalize_code(code)
-            result = client.bars.get(norm_code, period=period, count=count)
+            df, _src = _router.route(
+                "historical_kline", code=code, period=period, count=count
+            )
             latency_ms = round((time.time() - start) * 1000, 1)
 
-            bars = getattr(result, "bars", None) or []
+            if df is None or df.empty:
+                return _no_data(f"no kline bars for period={period}")
+
+            bars = []
+            for _, row in df.iterrows():
+                bars.append({
+                    "date": str(row.get("日期", row.get("date", ""))),
+                    "open": float(row.get("开盘", row.get("open", 0)) or 0),
+                    "high": float(row.get("最高", row.get("high", 0)) or 0),
+                    "low": float(row.get("最低", row.get("low", 0)) or 0),
+                    "close": float(row.get("收盘", row.get("close", 0)) or 0),
+                    "volume": float(row.get("成交量", row.get("volume", 0)) or 0),
+                    "amount": float(row.get("成交额", row.get("amount", 0)) or 0),
+                })
+
             if not bars:
                 return _no_data(f"no kline bars for period={period}")
 
             return _ok({
-                "code": norm_code,
+                "code": _strip_prefix(code),
                 "period": period,
                 "latency_ms": latency_ms,
                 "bar_count": len(bars),
-                "bars": [
-                    {
-                        "date": getattr(b, "date", None) or getattr(b, "datetime", None),
-                        "open": getattr(b, "open", None),
-                        "high": getattr(b, "high", None),
-                        "low": getattr(b, "low", None),
-                        "close": getattr(b, "close", None),
-                        "volume": getattr(b, "volume", None),
-                        "amount": getattr(b, "amount", None),
-                    }
-                    for b in bars
-                ],
+                "bars": bars,
             })
         except Exception as e:
             logger.exception("eltdx_get_kline failed")

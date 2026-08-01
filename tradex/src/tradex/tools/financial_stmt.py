@@ -10,13 +10,16 @@ Tools:
   14. get_growth_rates          - Revenue/profit growth rates
   15. get_per_share_data        - EPS, BPS, CFPS, etc.
   16. get_segments_revenue      - Revenue breakdown by business segment
+
+Data source routing (via SmartRouter):
+  财务报表: akshare financial_stmt (endpoints: profit/balance/cashflow/indicator/segments)
 """
 
 from __future__ import annotations
 
-import akshare as ak
 from mcp.server.fastmcp import FastMCP
 
+from ..data_sources import get_router
 from ..utils.cache import TTL_FINANCIAL, cache
 from ..utils.formatter import (
     BALANCE_SHEET_COLS,
@@ -28,6 +31,8 @@ from ..utils.formatter import (
     slim_financial_df,
 )
 from ..utils.symbol import format_em_symbol, normalize_symbol
+
+_router = get_router()
 
 
 def register(mcp: FastMCP):
@@ -57,7 +62,7 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            df = ak.stock_profit_sheet_by_quarterly_em(symbol=em_symbol)
+            df, _src = _router.route("financial_stmt", endpoint="profit", symbol=em_symbol)
             if df is None or df.empty:
                 return error_response(
                     f"利润表数据为空 ({symbol})", "get_income_statement"
@@ -97,9 +102,7 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            # stock_balance_sheet_by_quarterly_em has been removed;
-            # use stock_balance_sheet_by_report_em instead (按报告期).
-            df = ak.stock_balance_sheet_by_report_em(symbol=em_symbol)
+            df, _src = _router.route("financial_stmt", endpoint="balance", symbol=em_symbol)
             if df is None or df.empty:
                 return error_response(
                     f"资产负债表数据为空 ({symbol})", "get_balance_sheet"
@@ -139,7 +142,7 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            df = ak.stock_cash_flow_sheet_by_quarterly_em(symbol=em_symbol)
+            df, _src = _router.route("financial_stmt", endpoint="cashflow", symbol=em_symbol)
             if df is None or df.empty:
                 return error_response(
                     f"现金流量表数据为空 ({symbol})", "get_cash_flow_statement"
@@ -182,18 +185,15 @@ def register(mcp: FastMCP):
 
         try:
             # Try each financial statement to find the item
-            # Note: all EM financial APIs require exchange-prefixed symbol
-            # We slim each statement first so the user can search by Chinese
-            # name (e.g. "营业总收入") or English name (e.g. "NETPROFIT").
             statements = [
-                ("利润表", ak.stock_profit_sheet_by_quarterly_em, INCOME_STATEMENT_COLS),
-                ("资产负债表", ak.stock_balance_sheet_by_report_em, BALANCE_SHEET_COLS),
-                ("现金流量表", ak.stock_cash_flow_sheet_by_quarterly_em, CASHFLOW_STATEMENT_COLS),
+                ("利润表", "profit", INCOME_STATEMENT_COLS, em_symbol),
+                ("资产负债表", "balance", BALANCE_SHEET_COLS, em_symbol),
+                ("现金流量表", "cashflow", CASHFLOW_STATEMENT_COLS, em_symbol),
             ]
 
-            for stmt_name, func, whitelist in statements:
+            for stmt_name, endpoint, whitelist, sym in statements:
                 try:
-                    df = func(symbol=em_symbol)
+                    df, _src = _router.route("financial_stmt", endpoint=endpoint, symbol=sym)
                 except Exception:
                     continue
                 if df is None or df.empty:
@@ -266,7 +266,7 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            df = ak.stock_financial_analysis_indicator(symbol=symbol)
+            df, _src = _router.route("financial_stmt", endpoint="indicator", symbol=symbol)
             if df is None or df.empty:
                 return error_response(
                     f"财务指标数据为空 ({symbol})", "get_financial_indicators"
@@ -304,7 +304,7 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            df = ak.stock_financial_analysis_indicator(symbol=symbol)
+            df, _src = _router.route("financial_stmt", endpoint="indicator", symbol=symbol)
             if df is None or df.empty:
                 return error_response(
                     f"增长指标数据为空 ({symbol})", "get_growth_rates"
@@ -349,7 +349,7 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            df = ak.stock_financial_analysis_indicator(symbol=symbol)
+            df, _src = _router.route("financial_stmt", endpoint="indicator", symbol=symbol)
             if df is None or df.empty:
                 return error_response(
                     f"每股指标数据为空 ({symbol})", "get_per_share_data"
@@ -390,7 +390,7 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            df = ak.stock_zygc_em(symbol=symbol)
+            df, _src = _router.route("financial_stmt", endpoint="segments", symbol=symbol)
             df = slim_df(df)
             result = df_to_json(df)
             cache.set(cache_key, result, TTL_FINANCIAL)

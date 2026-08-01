@@ -166,19 +166,24 @@ class TestTickStoreMetadata:
 class TestEltdxGetTicksCacheLogic:
     """eltdx_get_ticks 工具的缓存逻辑集成测试。
 
-    第一次调用：缓存为空 → 调用 eltdx provider → 异步写入 TickStore
-    第二次调用：缓存命中 → 直接从 TickStore 返回，不调用 provider
+    v3.1.0：eltdx_data 通过 SmartRouter.route() 获取数据，
+    _get_client() 已迁移至 data_sources/eltdx_fetchers.py。
+    测试改为 mock eltdx_data._router.route() 返回带 .ticks 属性的结果对象，
+    验证缓存逻辑（第一次 route 调用，第二次从 TickStore 读取）。
+
+    第一次调用：缓存为空 → route() 调用 → 异步写入 TickStore
+    第二次调用：缓存命中 → 直接从 TickStore 返回，不调用 route()
     """
 
     def test_first_call_hits_network_second_call_from_cache(self, tmp_path, monkeypatch):
-        """第一次调用走网络，第二次从缓存读取。"""
+        """第一次调用走网络（route），第二次从缓存读取。"""
         from tradex.tools import eltdx_data
 
         # 准备临时 TickStore
         db_path = str(tmp_path / "cache_test.db")
         test_store = TickStore(db_path=db_path)
 
-        # 准备 mock client（模拟 eltdx TdxClient）
+        # 准备 mock tick 数据（eltdx fetcher 返回的结果对象，含 .ticks 属性）
         mock_tick_1 = MagicMock()
         mock_tick_1.time = "09:30:01"
         mock_tick_1.price = 1800.0
@@ -196,11 +201,10 @@ class TestEltdxGetTicksCacheLogic:
         mock_result = MagicMock()
         mock_result.ticks = [mock_tick_1, mock_tick_2]
 
-        mock_client = MagicMock()
-        mock_client.trades.history.return_value = mock_result
-
-        # monkeypatch eltdx_data 的 _get_client 和 _get_tick_store
-        monkeypatch.setattr(eltdx_data, "_get_client", lambda: mock_client)
+        # v3.1.0：mock _router.route() 返回 mock_result（eltdx_data 直接用 result.ticks）
+        mock_router = MagicMock()
+        mock_router.route.return_value = (mock_result, "eltdx")
+        monkeypatch.setattr(eltdx_data, "_router", mock_router)
         monkeypatch.setattr(eltdx_data, "_get_tick_store", lambda: test_store)
 
         # 让 threading.Thread 同步执行（确保缓存写入完成）
@@ -224,20 +228,20 @@ class TestEltdxGetTicksCacheLogic:
         eltdx_data.register(fake_mcp)
         eltdx_get_ticks = fake_mcp.tools["eltdx_get_ticks"]
 
-        # ── 第一次调用：缓存为空，走网络 ──
+        # ── 第一次调用：缓存为空，走"网络"（route 被调用） ──
         result1 = asyncio.run(eltdx_get_ticks("600519", "20260801", count=100))
         data1 = json.loads(result1)
         assert data1["status"] == "success"
         assert data1["data"]["tick_count"] == 2
-        assert mock_client.trades.history.call_count == 1
+        assert mock_router.route.call_count == 1
 
-        # ── 第二次调用：缓存命中，不走网络 ──
+        # ── 第二次调用：缓存命中，不走"网络"（route 不再被调用） ──
         result2 = asyncio.run(eltdx_get_ticks("600519", "20260801", count=100))
         data2 = json.loads(result2)
         assert data2["status"] == "success"
         assert data2["data"]["tick_count"] == 2
-        # 关键断言：网络调用次数仍为 1（第二次从缓存读取）
-        assert mock_client.trades.history.call_count == 1
+        # 关键断言：route 调用次数仍为 1（第二次从缓存读取）
+        assert mock_router.route.call_count == 1
 
     def test_cache_returns_same_data_as_network(self, tmp_path, monkeypatch):
         """缓存返回的数据与网络返回的数据一致。"""
@@ -256,10 +260,9 @@ class TestEltdxGetTicksCacheLogic:
         mock_result = MagicMock()
         mock_result.ticks = [mock_tick]
 
-        mock_client = MagicMock()
-        mock_client.trades.history.return_value = mock_result
-
-        monkeypatch.setattr(eltdx_data, "_get_client", lambda: mock_client)
+        mock_router = MagicMock()
+        mock_router.route.return_value = (mock_result, "eltdx")
+        monkeypatch.setattr(eltdx_data, "_router", mock_router)
         monkeypatch.setattr(eltdx_data, "_get_tick_store", lambda: test_store)
 
         class _SyncThread:
@@ -308,10 +311,9 @@ class TestEltdxGetTicksCacheLogic:
         mock_result = MagicMock()
         mock_result.ticks = [mock_tick]
 
-        mock_client = MagicMock()
-        mock_client.trades.history.return_value = mock_result
-
-        monkeypatch.setattr(eltdx_data, "_get_client", lambda: mock_client)
+        mock_router = MagicMock()
+        mock_router.route.return_value = (mock_result, "eltdx")
+        monkeypatch.setattr(eltdx_data, "_router", mock_router)
         monkeypatch.setattr(eltdx_data, "_get_tick_store", lambda: None)
 
         fake_mcp = FakeMCP()

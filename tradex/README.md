@@ -2,14 +2,14 @@
 
 <p align="center">
   <strong>cn大陆金融数据 MCP Server · 智能决策中台</strong><br/>
-  基于 <a href="https://akshare.akfamily.xyz">AKShare</a> · 支持 <a href="https://modelcontextprotocol.io">MCP 协议</a> · 80 个金融工具（65 数据 + 15 量化计算）
+  基于 <a href="https://akshare.akfamily.xyz">AKShare</a> · eltdx 通达信协议 · astock_signals 信号模块 · 支持 <a href="https://modelcontextprotocol.io">MCP 协议</a> · 89 个金融工具（65 数据 + 8 计算 + 16 决策支持）
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.10+-blue.svg" alt="Python 3.10+"/>
   <img src="https://img.shields.io/badge/MCP-1.0-green.svg" alt="MCP 1.0"/>
-  <img src="https://img.shields.io/badge/Version-2.5.0-orange.svg" alt="v2.5.0"/>
-  <img src="https://img.shields.io/badge/Tools-80-brightgreen.svg" alt="80 tools"/>
+  <img src="https://img.shields.io/badge/Version-3.1.0-orange.svg" alt="v3.1.0"/>
+  <img src="https://img.shields.io/badge/Tools-89-brightgreen.svg" alt="89 tools"/>
   <img src="https://img.shields.io/badge/License-Apache--2.0-yellow.svg" alt="Apache-2.0 License"/>
   <img src="https://img.shields.io/badge/Data-A%E8%82%A1%20%7C%20%E5%AE%8F%E8%A7%82%20%7C%20%E8%A1%8C%E4%B8%9A-red.svg" alt="A股 | 宏观 | 行业"/>
 </p>
@@ -32,9 +32,9 @@
 
 ## 简介
 
-**tradex** 是一个遵循 [Model Context Protocol (MCP)](https://modelcontextprotocol.io) 标准的金融数据服务器，专注于cn大陆市场。它让任何支持 MCP 的 AI Agent（如 Claude Code、Cursor、自定义 Agent）都能直接调用 A 股行情、财报、行业、宏观经济等 **80 个金融工具**（65 个数据获取 + 15 个量化计算），无需 API Key，开箱即用。
+**tradex** 是一个遵循 [Model Context Protocol (MCP)](https://modelcontextprotocol.io) 标准的金融数据服务器，专注于cn大陆市场。它让任何支持 MCP 的 AI Agent（如 Claude Code、Cursor、自定义 Agent）都能直接调用 A 股行情、财报、行业、宏观经济等 **89 个金融工具**（65 个数据获取 + 8 个计算引擎 + 16 个决策支持），无需 API Key，开箱即用。
 
-底层数据来源于 [AKShare](https://akshare.akfamily.xyz)、eltdx 通达信协议、东财直连和同花顺，提供 80 个金融工具，覆盖行情、财务、估值、行业、新闻、宏观、信号数据等全方位金融数据，并内置技术指标计算、绩效分析、信号生成、因子分析、条件选股等量化计算能力（v2.5.0 新增）。
+底层数据来源于 [AKShare](https://akshare.akfamily.xyz)（1.18.81，第二主源）、eltdx 通达信协议（1.2.0，行情类第一主源，TCP 7709）、东财直连和同花顺，通过 SmartRouter 全量路由（25 类型 34 源）提供 89 个金融工具，覆盖行情、财务、估值、行业、新闻、宏观、信号数据等全方位金融数据，并内置技术指标计算、绩效分析、信号生成、因子分析、条件选股、系统诊断、综合分析等能力（v3.1.0）。
 
 ---
 
@@ -43,22 +43,25 @@
 | 模块 | 工具数 | 说明 |
 |:-----|:------:|:-----|
 | **公司信息** | 4 | 股票搜索、公司概况、主营构成、竞争对手 |
-| **行情数据** | 4 | 实时行情、历史 K 线（日/周/月）、市值、股票列表 |
+| **行情数据** | 5 | 实时行情、历史 K 线（日/周/月）、分时数据、市值、股票列表 |
 | **财务报表** | 8 | 利润表、资产负债表、现金流量表、财务指标、增长率、分部收入 |
 | **估值分析** | 4 | PE/PB/PS 时序、分红历史、机构持仓、分析师评级 |
 | **行业板块** | 5 | 行业列表、成分股、概念板块、板块资金流、行业估值 |
 | **市场总览** | 5 | 指数概览、个股资金流、北向资金、涨跌停池、龙虎榜 |
 | **新闻公告** | 4 | 个股新闻、财报日历、公司公告、关键词搜索 |
 | **宏观与衍生** | 8 | GDP/CPI/PMI/M2、汇率、国债收益率、融资融券、高管增减持 |
-| **A股信号+品种** | 14 | 涨停归因/解禁/概念/预期/技术指标/北向/资金流/龙虎榜/行业/ETF/可转债 |
+| **A股信号+品种** | 17 | 涨停归因/解禁/概念/预期/技术指标/北向/资金流/龙虎榜/行业/ETF/可转债/涨停板/打板情绪/涨停揭秘 |
 | **eltdx 通达信独有** | 5 | 集合竞价/逐笔/F10/分时/K线（AKShare无此功能） |
 | **技术指标计算** 🆕 v2.5.0 | 6 | MA/EMA/MACD/KDJ/RSI/BOLL/ATR 纯函数计算 |
 | **绩效指标计算** 🆕 v2.5.0 | 2 | 完整绩效报告（21项指标）/ 指标清单 |
 | **信号生成** 🆕 v2.5.0 | 3 | 单票信号/批量扫描/信号质量验证（5级评分） |
 | **因子分析** 🆕 v2.5.0 | 2 | 多因子评分（5类22因子）/ 因子清单 |
 | **条件选股** 🆕 v2.5.0 | 2 | 条件选股扫描（5类30+条件）/ 条件清单 |
+| **系统诊断** 🆕 v3.0.0 | 5 | 数据源健康/工具清单/缓存统计/系统健康/数据源看板 |
+| **综合分析** 🆕 v3.0.0 | 3 | 个股综合分析/行业横向对比/市场总览分析 |
+| **技术分析引擎** 🆕 v3.0.0 | 1 | 多指标组合分析（趋势/支撑压力/买卖信号综合研判） |
 
-**合计 80 个工具**（65 个数据获取 + 15 个量化计算），覆盖从个股研究到宏观分析、从基础行情到信号数据、从数据获取到量化计算的完整链路。
+**合计 89 个工具**（65 个数据获取 + 8 个计算引擎 + 16 个决策支持），覆盖从个股研究到宏观分析、从基础行情到信号数据、从数据获取到量化计算再到决策支持的完整链路。
 
 ---
 
@@ -72,10 +75,12 @@
 ### 安装
 
 ```bash
-git clone https://github.com/<your-username>/tradex.git
-cd tradex
+git clone https://github.com/wolfjkd/tradex-hub.git
+cd tradex-hub/tradex
 pip install -e .
 ```
+
+> **依赖**：需先安装 astock_signals 独立包（v1.1.0）：`pip install -e astock_signals/`
 
 ### 验证安装
 
@@ -106,7 +111,7 @@ options:
 ```json
 {
   "mcpServers": {
-    "cn-financial": {
+    "tradex": {
       "type": "stdio",
       "command": "python",
       "args": ["-m", "tradex"],
@@ -165,6 +170,7 @@ docker compose up -d
 |:-----|:-----|
 | `get_realtime_quote` | 获取实时行情（最新价、涨跌幅、成交量） |
 | `get_historical_price` | 获取历史 K 线（日/周/月，支持前复权/后复权） |
+| `get_intraday_data` | 获取分时数据（当日分时走势/分钟K线） |
 | `get_market_capitalization` | 获取总市值与流通市值 |
 | `get_stock_list` | 获取 A 股完整列表，支持市值筛选 |
 
@@ -271,6 +277,9 @@ docker compose up -d
 | `get_etf_kline_data` | ETF历史K线（日/周/月，支持复权，AKShare） |
 | `get_cb_realtime_data` | 可转债实时行情（溢价率/转股价/评级，AKShare） |
 | `get_cb_value_analysis_data` | 可转债价值分析（溢价率历史曲线，AKShare） |
+| `get_limit_up_board` 🆕 v3.0.0 | 涨停板/炸板/跌停股票池（封单额/连板天数，东财 push2） |
+| `get_board_sentiment` 🆕 v3.0.0 | 打板情绪速算（涨停/炸板/跌停情绪指标，本地计算） |
+| `get_limit_up_insight` 🆕 v3.0.0 | 涨停揭秘（题材归因/封单强度/资金流向，同花顺） |
 
 </details>
 
@@ -352,31 +361,72 @@ docker compose up -d
 
 </details>
 
+<details>
+<summary><b>系统诊断 (diagnostics) 🆕 v3.0.0</b></summary>
+
+系统自省与运维诊断工具，不依赖外部数据源。
+
+| 工具 | 说明 |
+|:-----|:-----|
+| `get_data_source_health` | 数据源健康检查（各数据源成功率/延迟/封禁状态） |
+| `list_all_tools` | 列出所有已注册的 MCP 工具及模块归属 |
+| `get_cache_stats` | 缓存统计（命中率/容量/TTL 过期情况） |
+| `health_check` | 系统整体健康检查（模块状态/数据源/缓存综合诊断） |
+| `get_data_source_dashboard` 🆕 v3.1.0 | 数据源看板（25 类型 34 源的健康/路由/工具分布） |
+
+</details>
+
+<details>
+<summary><b>综合分析 (composite_analysis) 🆕 v3.0.0</b></summary>
+
+组合调用 L1 数据 + L2 计算结果，输出多维度综合分析报告。
+
+| 工具 | 说明 |
+|:-----|:-----|
+| `analyze_stock_comprehensive` | 个股综合分析（基本面+技术面+资金面+估值综合评分） |
+| `analyze_industry_comparison` | 行业横向对比分析（多维度排名+景气度评估） |
+| `analyze_market_overview` | 市场总览分析（指数/资金/情绪/板块轮动综合研判） |
+
+</details>
+
+<details>
+<summary><b>技术分析引擎 (analysis_engine) 🆕 v3.0.0</b></summary>
+
+| 工具 | 说明 |
+|:-----|:-----|
+| `analyze_technical` | 多指标组合分析（趋势/支撑压力/买卖信号综合研判） |
+
+</details>
+
 ---
 
-## 🔄 多数据源 Fallback
+## 🔄 SmartRouter 全量路由（v3.1.0）
 
-为应对部分数据源在云服务器环境下不稳定的问题，内置了自动多源切换：
+data_sources 数据源层（25 类型 34 源）注册到 SmartRouter，L1 工具通过 `SmartRouter.route()` 统一获取数据，自动健康评分/降级/故障隔离。eltdx 为行情类第一主源（郑州节点，TCP 7709，延迟 3.5ms），akshare 1.18.81 为第二主源。
 
 ```
-请求 → 东方财富 (优先，字段最全)
-         ↓ 失败
-       新浪 / 腾讯 / 同花顺 (备选)
-         ↓ 失败
+请求 → SmartRouter.route() → 选择最优源
+         ↓                    ├── eltdx（行情类第一主源，TCP 7709）
+         ↓                    ├── akshare 1.18.81（第二主源）
+         ↓                    ├── 东财直连 / 同花顺 / 腾讯
+         ↓ 失败降级            └── 独占源（exclusive）不降级
        返回错误
 ```
 
-| 功能 | 主源 | 备选源 |
-|:-----|:----:|:------:|
-| 实时行情 | 东方财富 | 新浪 → 新浪单股 |
-| 历史 K 线 | 东方财富 | 腾讯 |
-| 行业板块 | 东方财富 | 同花顺 |
-| 概念板块 | 东方财富 | 同花顺 |
-| 公司信息 | 东方财富 emweb | 新浪 |
-| 信号数据 | 混合源（东财/同花顺/AKShare） | AKShare 备用部分工具 |
-| eltdx 数据 | 通达信私有协议 (TCP 7709) | 无备选（独有数据） |
+| 数据类型 | 主源 | 备选源 | 独占 |
+|:---------|:----:|:------:|:----:|
+| 实时行情 | eltdx | 腾讯 / akshare | - |
+| 历史 K 线 | eltdx | akshare / Wind | - |
+| 分时数据 | eltdx | 腾讯 / akshare | - |
+| 集合竞价 | eltdx | 无 | ✅ 独占 |
+| 逐笔成交 | eltdx | 无 | ✅ 独占 |
+| F10 资料 | eltdx | 无 | ✅ 独占 |
+| 涨停板 | 东财 push2 | 无 | ✅ 独占 |
+| 涨停揭秘 | 同花顺 | 无 | ✅ 独占 |
+| 信号数据 | 混合源（东财/同花顺/akshare） | akshare 备用 | - |
+| 财务/估值 | akshare | Wind / eltdx F10 | - |
 
-> 代码始终优先尝试东方财富。只有当主源连接失败时才自动切换，对调用方完全透明。
+> **数据源看板**：`python -m tradex.dashboard`（端口 8765），HTML 可视化查看数据源健康/路由/工具分布；MCP 工具 `get_data_source_dashboard` 可在 Agent 对话中查询。
 
 ---
 
@@ -402,30 +452,43 @@ tradex/
 ├── src/tradex/
 │   ├── __init__.py
 │   ├── __main__.py          # CLI 入口
+│   ├── config.py             # 配置（环境变量/默认值）
 │   ├── server.py             # MCP Server 实例
 │   ├── tools/
 │   │   ├── company_info.py   # 公司信息 (4 tools)
-│   │   ├── price_data.py     # 行情数据 (4 tools)
+│   │   ├── price_data.py     # 行情数据 (5 tools)
 │   │   ├── financial_stmt.py # 财务报表 (8 tools)
 │   │   ├── valuation.py      # 估值分析 (4 tools)
 │   │   ├── industry.py       # 行业板块 (5 tools)
 │   │   ├── market.py         # 市场总览 (5 tools)
 │   │   ├── news_events.py    # 新闻公告 (4 tools)
 │   │   ├── macro_fx.py       # 宏观衍生 (8 tools)
-│   │   ├── signal_data.py    # A股信号+品种 (14 tools)
+│   │   ├── signal_data.py    # A股信号+品种 (17 tools)
 │   │   ├── eltdx_data.py     # eltdx 通达信独有 (5 tools)
 │   │   ├── technical_indicators.py  # 技术指标计算 (6 tools) 🆕 v2.5.0
 │   │   ├── performance_metrics.py   # 绩效指标计算 (2 tools) 🆕 v2.5.0
 │   │   ├── signal_generation.py     # 信号生成 (3 tools) 🆕 v2.5.0
 │   │   ├── factor_analysis.py       # 因子分析 (2 tools) 🆕 v2.5.0
-│   │   └── stock_screening.py       # 条件选股 (2 tools) 🆕 v2.5.0
+│   │   ├── stock_screening.py       # 条件选股 (2 tools) 🆕 v2.5.0
+│   │   ├── diagnostics.py           # 系统诊断 (5 tools) 🆕 v3.0.0
+│   │   ├── composite_analysis.py    # 综合分析 (3 tools) 🆕 v3.0.0
+│   │   └── analysis_engine.py       # 技术分析引擎 (1 tool) 🆕 v3.0.0
+│   ├── data_sources/                 # 数据源层 🆕 v3.1.0
+│   │   ├── registry.py        # SmartRouter 注册表（25 类型 34 源）
+│   │   ├── akshare_fetchers.py
+│   │   ├── eltdx_fetchers.py
+│   │   ├── http_fetchers.py
+│   │   └── astock_signals_fetchers.py
+│   ├── dashboard/                    # 数据源看板 🆕 v3.1.0
+│   │   ├── __main__.py        # python -m tradex.dashboard（端口 8765）
+│   │   └── index.html         # HTML 可视化
 │   └── utils/
 │       ├── cache.py          # TTL 缓存
 │       ├── fallback.py       # 多源 fallback
 │       ├── formatter.py      # DataFrame → JSON
-│       └── symbol.py         # 股票代码工具
+│       ├── symbol.py         # 股票代码工具
+│       └── data_source_monitor.py  # 数据源版本检查 🆕 v3.1.0
 ├── tests/
-├── verify_v250.py            # v2.5.0 升级验证脚本 🆕
 ├── docs/images/
 ├── pyproject.toml
 ├── Dockerfile
@@ -439,6 +502,8 @@ tradex/
 
 | 版本 | 发布日期 | 主要变更 |
 |:-----|:---------|:---------|
+| v3.1.0 | 2026-08-02 | 项目改名 tradex-hub（包名 cn_financial_mcp→tradex），astock_signals 独立成包 v1.1.0，SmartRouter 全量覆盖 25 数据类型 34 源，data_sources 数据源层接入，eltdx 升为行情类第一主源，新增数据源看板（`python -m tradex.dashboard` + MCP 工具 `get_data_source_dashboard`），工具数 88→89 |
+| v3.0.0 | 2026-08-01 | 架构大重构：版本号单一事实来源（VERSION 文件）、僵尸模块激活（smart_router/tick_store/ws_server）、em_client 合并、signal_data 拆分 5 子模块、新增 L2 计算引擎层 + L3 决策支持层（系统诊断 5/综合分析 3/技术分析 1）、MCP_HOST 默认改为 127.0.0.1，工具数 80→88 |
 | v2.5.0 | 2026-07-26 | 智能决策中台升级：新增 15 个量化计算工具（技术指标 6 / 绩效 2 / 信号 3 / 因子 2 / 选股 2），工具数 65→80，从「数据中台」升级为「智能决策中台」 |
 | v2.4.0 | 2026-07-22 | 新增涨停板/涨停揭秘/打板情绪速算模块，ETF/可转债/Tick 存储/WebSocket 全覆盖 |
 | v2.3.0 | 2026-07-15 | 信号数据模块扩展，测试用例 69 个 100% 通过 |

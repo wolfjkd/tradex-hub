@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tradex 数据源看板</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                 "Microsoft YaHei", sans-serif;
+    background: #f5f5f5;
+    color: #333;
+    line-height: 1.5;
+  }
+  /* ── 顶部状态栏 ── */
+  .header {
+    background: #fff;
+    padding: 16px 24px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .header h1 {
+    font-size: 20px;
+    font-weight: 600;
+    color: #1a1a1a;
+  }
+  .stats {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    font-size: 14px;
+    margin-top: 8px;
+  }
+  .stat {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .stat-label { color: #888; }
+  .stat-value { font-weight: 600; color: #1a1a1a; }
+  .stat-value.green { color: #4caf50; }
+  .stat-value.red { color: #f44336; }
+  .refresh-btn {
+    background: #1976d2;
+    color: #fff;
+    border: none;
+    padding: 8px 18px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background 0.2s;
+    white-space: nowrap;
+  }
+  .refresh-btn:hover { background: #1565c0; }
+  .refresh-btn:disabled { background: #90caf9; cursor: not-allowed; }
+  /* ── 版本提醒条幅 ── */
+  .version-banner {
+    background: #fff3cd;
+    border: 1px solid #ffc107;
+    color: #856404;
+    padding: 12px 24px;
+    margin: 0;
+  }
+  .version-banner.hidden { display: none; }
+  .version-item { margin: 4px 0; }
+  .version-item a {
+    color: #1976d2;
+    text-decoration: none;
+    font-weight: 500;
+  }
+  .version-item a:hover { text-decoration: underline; }
+  /* ── 主体内容 ── */
+  .container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 20px;
+  }
+  .loading, .error-msg {
+    text-align: center;
+    padding: 60px 20px;
+    color: #888;
+    font-size: 16px;
+  }
+  .error-msg { color: #f44336; }
+  /* ── 数据类型分组 ── */
+  .type-group { margin-bottom: 28px; }
+  .type-group h2 {
+    font-size: 15px;
+    color: #555;
+    margin-bottom: 12px;
+    padding-bottom: 6px;
+    border-bottom: 2px solid #e0e0e0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .type-group .type-count {
+    font-size: 12px;
+    color: #999;
+    font-weight: normal;
+  }
+  /* ── 卡片网格 ── */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 14px;
+  }
+  .card {
+    background: #fff;
+    border-radius: 6px;
+    padding: 14px 16px;
+    border-left: 4px solid #ccc;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    transition: box-shadow 0.2s;
+  }
+  .card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
+  .card.healthy { border-left-color: #4caf50; }
+  .card.warning { border-left-color: #ff9800; }
+  .card.fault { border-left-color: #f44336; }
+  .card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 10px;
+  }
+  .card-name {
+    font-size: 16px;
+    font-weight: 600;
+    color: #1a1a1a;
+  }
+  .card-meta {
+    font-size: 12px;
+    color: #999;
+    margin-top: 2px;
+  }
+  .badge {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .badge.exclusive {
+    background: #fff3e0;
+    color: #e65100;
+    border: 1px solid #ffb74d;
+  }
+  .badge.priority {
+    background: #e3f2fd;
+    color: #1565c0;
+    border: 1px solid #90caf9;
+  }
+  .card-score {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    margin: 8px 0;
+  }
+  .score-num {
+    font-size: 28px;
+    font-weight: 700;
+  }
+  .score-num.healthy { color: #4caf50; }
+  .score-num.warning { color: #ff9800; }
+  .score-num.fault { color: #f44336; }
+  .score-label { font-size: 12px; color: #999; }
+  .card-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 12px;
+    font-size: 13px;
+    margin-top: 8px;
+  }
+  .card-stats .label { color: #888; }
+  .card-stats .value { font-weight: 500; text-align: right; }
+  .exclusive-note {
+    font-size: 11px;
+    color: #e65100;
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px dashed #ffcc80;
+  }
+  /* ── 响应式 ── */
+  @media (max-width: 600px) {
+    .header { padding: 12px 16px; }
+    .header h1 { font-size: 17px; }
+    .stats { gap: 12px; font-size: 13px; }
+    .container { padding: 12px; }
+    .card-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-row">
+    <div>
+      <h1>tradex 数据源看板</h1>
+      <div class="stats" id="stats">
+        <span class="stat"><span class="stat-label">数据类型:</span> <span class="stat-value" id="stat-types">-</span></span>
+        <span class="stat"><span class="stat-label">数据源:</span> <span class="stat-value" id="stat-sources">-</span></span>
+        <span class="stat"><span class="stat-label">健康:</span> <span class="stat-value green" id="stat-healthy">-</span></span>
+        <span class="stat"><span class="stat-label">MCP工具:</span> <span class="stat-value" id="stat-tools">-</span></span>
+        <span class="stat"><span class="stat-label">时间:</span> <span class="stat-value" id="stat-time">-</span></span>
+      </div>
+    </div>
+    <button class="refresh-btn" id="refresh-btn" onclick="manualRefresh()">立即刷新</button>
+  </div>
+</div>
+
+<div class="version-banner hidden" id="version-banner"></div>
+
+<div class="container">
+  <div id="content">
+    <div class="loading">加载中...</div>
+  </div>
+</div>
+
+<script>
+  var REFRESH_INTERVAL = 30000; // 30 秒
+  var timerId = null;
+
+  // 优先级转中文标签
+  function priorityLabel(p) {
+    if (p === 1) return "主源";
+    if (p === 100) return "备源";
+    if (p === 200) return "兜底";
+    return "优先级 " + p;
+  }
+
+  // 按健康评分返回状态等级
+  function scoreLevel(score) {
+    if (score >= 80) return "healthy";
+    if (score >= 20) return "warning";
+    return "fault";
+  }
+
+  // 渲染顶部统计
+  function renderSummary(s) {
+    document.getElementById("stat-types").textContent = s.data_types;
+    document.getElementById("stat-sources").textContent = s.sources;
+    var healthyEl = document.getElementById("stat-healthy");
+    var ratio = s.sources > 0 ? Math.round(s.healthy_sources / s.sources * 100) : 0;
+    healthyEl.textContent = s.healthy_sources + "/" + s.sources + " (" + ratio + "%)";
+    healthyEl.className = "stat-value " + (ratio >= 80 ? "green" : (ratio < 50 ? "red" : ""));
+    document.getElementById("stat-tools").textContent = s.total_tools;
+  }
+
+  // 渲染版本提醒条幅
+  function renderVersions(versions) {
+    var banner = document.getElementById("version-banner");
+    var updates = [];
+    if (versions && versions.length) {
+      for (var i = 0; i < versions.length; i++) {
+        var v = versions[i];
+        if (v.has_update && !v.error) {
+          updates.push(
+            '<div class="version-item">' +
+            '<strong>' + v.name + '</strong> 有新版 <strong>' + v.latest + '</strong>，' +
+            '当前 ' + v.current + '，建议手动升级 ' +
+            '<a href="' + v.url + '" target="_blank">查看</a>' +
+            '</div>'
+          );
+        }
+      }
+    }
+    if (updates.length) {
+      banner.innerHTML = updates.join("");
+      banner.classList.remove("hidden");
+    } else {
+      banner.classList.add("hidden");
+    }
+  }
+
+  // 渲染单张卡片
+  function renderCard(src) {
+    var h = src.health || {};
+    var score = h.score != null ? h.score : 0;
+    var level = scoreLevel(score);
+    var latency = h.avg_latency_ms || 0;
+    var successRate = h.success_rate != null ? h.success_rate : 100;
+    var totalCalls = h.total_calls || 0;
+    var consecFails = h.consecutive_fails || 0;
+
+    var html = '<div class="card ' + level + '">';
+    // 卡片头部：源名 + 徽章
+    html += '<div class="card-head">';
+    html += '<div><div class="card-name">' + src.source_name + '</div>';
+    html += '<div class="card-meta">' + src.data_type + '</div></div>';
+    html += '<div>';
+    if (src.exclusive) {
+      html += '<span class="badge exclusive">独占源</span> ';
+    }
+    html += '<span class="badge priority">' + priorityLabel(src.priority) + '</span>';
+    html += '</div></div>';
+    // 健康评分
+    html += '<div class="card-score">';
+    html += '<span class="score-num ' + level + '">' + score + '</span>';
+    html += '<span class="score-label">健康评分</span>';
+    html += '</div>';
+    // 统计指标
+    html += '<div class="card-stats">';
+    html += '<span class="label">平均延迟</span><span class="value">' + latency + ' ms</span>';
+    html += '<span class="label">成功率</span><span class="value">' + successRate + '%</span>';
+    html += '<span class="label">总调用</span><span class="value">' + totalCalls + '</span>';
+    html += '<span class="label">连续失败</span><span class="value">' + consecFails + '</span>';
+    html += '</div>';
+    // 独占源提示
+    if (src.exclusive) {
+      html += '<div class="exclusive-note">无备用，故障即不可用</div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  // 按 data_type 分组渲染卡片
+  function renderSources(sources) {
+    if (!sources || !sources.length) {
+      return '<div class="loading">暂无已注册数据源</div>';
+    }
+    // 分组
+    var groups = {};
+    var groupOrder = [];
+    for (var i = 0; i < sources.length; i++) {
+      var dt = sources[i].data_type;
+      if (!groups[dt]) {
+        groups[dt] = [];
+        groupOrder.push(dt);
+      }
+      groups[dt].push(sources[i]);
+    }
+    var html = "";
+    for (var g = 0; g < groupOrder.length; g++) {
+      var dt = groupOrder[g];
+      var items = groups[dt];
+      html += '<div class="type-group">';
+      html += '<h2>' + dt + ' <span class="type-count">(' + items.length + ' 源)</span></h2>';
+      html += '<div class="card-grid">';
+      for (var j = 0; j < items.length; j++) {
+        html += renderCard(items[j]);
+      }
+      html += '</div></div>';
+    }
+    return html;
+  }
+
+  // 渲染整个看板
+  function render(data) {
+    if (data.error) {
+      document.getElementById("content").innerHTML =
+        '<div class="error-msg">加载失败: ' + data.error + '</div>';
+      return;
+    }
+    renderSummary(data.summary || {});
+    renderVersions(data.versions || []);
+    document.getElementById("content").innerHTML = renderSources(data.sources || []);
+    document.getElementById("stat-time").textContent = data.timestamp || "-";
+  }
+
+  // 拉取看板数据
+  function fetchDashboard() {
+    var btn = document.getElementById("refresh-btn");
+    btn.disabled = true;
+    btn.textContent = "刷新中...";
+    fetch("/api/dashboard", { cache: "no-store" })
+      .then(function(resp) { return resp.json(); })
+      .then(function(data) { render(data); })
+      .catch(function(err) {
+        document.getElementById("content").innerHTML =
+          '<div class="error-msg">请求失败: ' + err.message + '</div>';
+      })
+      .finally(function() {
+        btn.disabled = false;
+        btn.textContent = "立即刷新";
+      });
+  }
+
+  // 手动刷新
+  function manualRefresh() {
+    fetchDashboard();
+  }
+
+  // 启动自动刷新
+  function startAutoRefresh() {
+    if (timerId) clearInterval(timerId);
+    timerId = setInterval(fetchDashboard, REFRESH_INTERVAL);
+  }
+
+  // 页面加载后首次拉取 + 启动定时刷新
+  fetchDashboard();
+  startAutoRefresh();
+</script>
+
+</body>
+</html>

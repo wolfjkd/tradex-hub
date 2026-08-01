@@ -4,6 +4,45 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
 
+## [3.1.0] - 2026-08-02
+
+### BREAKING CHANGES
+- 项目改名：仓库目录 `trader-finance-hub` → `tradex-hub`，Python 包 `cn_financial_mcp` → `tradex`，GitHub 仓库名同步
+- astock_signals 独立成包：从 `tradex-hub/src/astock_signals/` 独立为 `trae_projects/astock_signals/`（pip install -e 安装）
+- 所有 L1 工具走 SmartRouter：L1 数据获取工具不再直接 import akshare/eltdx，统一通过 SmartRouter.route() 选择数据源
+- eltdx 升为行情类第一主源：实时行情/历史K线/分时数据，eltdx(TCP) 为主源，akshare 降为备用
+- MCP 工具入口变更：`python -m cn_financial_mcp` → `python -m tradex`
+
+### Added
+- 数据源看板：MCP 工具 `get_data_source_dashboard` 返回 JSON + HTML 单页可视化（`python -m tradex.dashboard`，端口 8765）
+- 数据源版本检查模块 `data_source_monitor.py`：eltdx GitHub release + akshare PyPI 版本检查（只提醒不升级）
+- SmartRouter 独占源标记（exclusive=True）：集合竞价/逐笔成交/F10/涨停归因/解禁日历/涨停板 6 个独占源失败不降级
+- SmartRouter `get_registry_report()` 方法：返回全量注册表供看板使用
+- data_sources 数据源层：akshare_fetchers / eltdx_fetchers / http_fetchers / astock_signals_fetchers / registry，25 数据类型 34 源注册
+- HTTP 防封参数环境变量化：EM_RATE_LIMIT_INTERVAL / EM_JITTER_MIN / EM_JITTER_MAX / EM_MAX_RETRY
+- anti_ban_client 新增 set_jitter_range() / set_max_retry() 函数
+
+### Changed
+- akshare 升级 1.18.80 → 1.18.81
+- eltdx 版本标注更新 1.0.2 → 1.2.0
+- 25 个数据类型全量注册到 SmartRouter（原仅 3 个）
+- 89 个 MCP 工具（原 88，+1 看板工具）
+- MCP_HOST 默认值 0.0.0.0 → 127.0.0.1（安全默认）
+- trader-data-router 下游适配：删除 sys.path 路径探测，直接 import astock_signals
+- quantterminal/tfhub_service.py 迁移：从已删除的 eltdx_provider 改为 eltdx.TdxClient 直调
+
+### Removed
+- 删除 `src/eltdx_provider.py` 孤儿模块（v2.0.0 时代老封装，无人调用）
+- 删除所有 `sys.path.insert` hack（8 个文件，改正式 import astock_signals）
+- 删除 `src/astock_signals/` 旧目录（已迁移为独立包）
+
+### 升级指引
+1. `pip install -e trae_projects/astock_signals/`（安装独立包）
+2. `pip install -e tradex-hub/tradex/`（重装改名后的 tradex 包）
+3. 更新 MCP 配置：server 名改为 `tradex`，args 改为 `["-m", "tradex"]`
+4. `pip install -U akshare==1.18.81`
+5. 访问数据源看板：`python -m tradex.dashboard`
+
 ## [3.0.0] - 2026-08-01
 
 ### BREAKING CHANGES

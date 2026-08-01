@@ -6,6 +6,9 @@ ETF 实时行情、ETF 历史 K 线。
 
 V0.8 品种扩展层。
 
+v3.1.0 起：所有数据获取通过 SmartRouter.route() 路由，
+不再直接 import astock_signals 数据源函数。
+
 Tools (共 2 个):
   get_etf_realtime_data - ETF实时行情（AKShare fund_etf_spot_em）
   get_etf_kline_data    - ETF历史K线（AKShare fund_etf_hist_em）
@@ -13,20 +16,13 @@ Tools (共 2 个):
 
 from __future__ import annotations
 
-import os
-import sys
-
 from mcp.server.fastmcp import FastMCP
 
+from ..data_sources import get_router
 from ..utils.cache import TTL_DAILY, TTL_REALTIME, cache
 from ..utils.formatter import error_response, dict_to_json
 
-# Import astock_signals modules from Hub src/
-
-from astock_signals import (  # noqa: E402
-    get_etf_realtime_json,
-    get_etf_kline_json,
-)
+_router = get_router()
 
 
 def register(mcp: FastMCP):
@@ -60,7 +56,10 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            result = get_etf_realtime_json(top_n, sort_by)
+            # etf_data: symbol="" → get_etf_realtime_json(top_n, sort_by)
+            result, _src = _router.route(
+                "etf_data", symbol="", top_n=top_n, sort_by=sort_by
+            )
             output = dict_to_json(result)
             if result.get("etfs"):
                 cache.set(cache_key, output, TTL_REALTIME)
@@ -100,7 +99,15 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            result = get_etf_kline_json(symbol, period, start_date, end_date, adjust)
+            # etf_data: symbol 非空 → get_etf_kline_json(symbol, period, ...)
+            result, _src = _router.route(
+                "etf_data",
+                symbol=symbol,
+                period=period,
+                start_date=start_date,
+                end_date=end_date,
+                adjust=adjust,
+            )
             output = dict_to_json(result)
             if result.get("klines"):
                 cache.set(cache_key, output, TTL_DAILY)

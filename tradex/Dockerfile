@@ -11,4 +11,4 @@ ENV PYTHONPATH=/app/src
 EXPOSE 8000
 
 # Default: HTTP/SSE mode for Docker deployment
-CMD ["python", "-m", "cn_financial_mcp", "--http", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "tradex", "--http", "--host", "0.0.0.0", "--port", "8000"]

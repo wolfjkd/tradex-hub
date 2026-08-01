@@ -7,20 +7,20 @@ Tools:
   3. get_company_profile - Get company business description & revenue breakdown
   4. get_competitors    - Get peer companies in the same industry
 
-Data source fallback:
-  Primary: 东方财富 (eastmoney)
-  Fallback: 新浪 (sina) — for list-based lookups
+Data source routing (via SmartRouter):
+  公司信息: akshare company_info (endpoints: code_name/individual_info/profile/industry_cons)
 """
 
 from __future__ import annotations
 
-import akshare as ak
 from mcp.server.fastmcp import FastMCP
 
+from ..data_sources import get_router
 from ..utils.cache import TTL_COMPANY, cache
-from ..utils.fallback import call_with_fallback
 from ..utils.formatter import df_to_json, dict_to_json, error_response, slim_df
 from ..utils.symbol import normalize_symbol
+
+_router = get_router()
 
 
 def register(mcp: FastMCP):
@@ -43,7 +43,7 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            df = ak.stock_info_a_code_name()
+            df, _src = _router.route("company_info", endpoint="code_name")
             # Search in both code and name columns
             mask = df["code"].str.contains(keyword, case=False, na=False) | df[
                 "name"
@@ -75,7 +75,9 @@ def register(mcp: FastMCP):
         try:
             # Primary: 东方财富个股信息
             try:
-                df = ak.stock_individual_info_em(symbol=symbol)
+                df, _src = _router.route(
+                    "company_info", endpoint="individual_info", symbol=symbol
+                )
                 if df is not None and not df.empty:
                     info = {}
                     for _, row in df.iterrows():
@@ -87,11 +89,8 @@ def register(mcp: FastMCP):
             except Exception:
                 pass
 
-            # Fallback: 从 A 股列表中提取基本信息
-            df = await call_with_fallback(
-                ("东方财富(列表)", ak.stock_zh_a_spot_em, {}),
-                ("新浪财经", ak.stock_zh_a_spot, {}),
-            )
+            # Fallback: 从 A 股全量行情列表中提取基本信息
+            df, _src = _router.route("realtime_quote", symbol="")
             code_col = _find_code_col(df)
             row = df[df[code_col].astype(str).str.strip() == symbol]
             if row.empty:
@@ -124,7 +123,9 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            df = ak.stock_zyjs_ths(symbol=symbol)
+            df, _src = _router.route(
+                "company_info", endpoint="profile", symbol=symbol
+            )
             result = df_to_json(df)
             cache.set(cache_key, result, TTL_COMPANY)
             return result
@@ -160,9 +161,11 @@ def register(mcp: FastMCP):
             # If no industry provided, look it up from company info
             if not industry:
                 try:
-                    info_df = ak.stock_individual_info_em(symbol=symbol)
-                    if info_df is not None and not info_df.empty:
-                        for _, row in info_df.iterrows():
+                    df, _src = _router.route(
+                        "company_info", endpoint="individual_info", symbol=symbol
+                    )
+                    if df is not None and not df.empty:
+                        for _, row in df.iterrows():
                             key = str(row.iloc[0])
                             if "行业" in key:
                                 industry = str(row.iloc[1])
@@ -173,17 +176,16 @@ def register(mcp: FastMCP):
             # Fallback: try to find industry from board industry list
             if not industry:
                 try:
-                    board_df = ak.stock_board_industry_name_em()
+                    board_df, _src = _router.route(
+                        "industry_data", endpoint="board_industry_name_em"
+                    )
                     if board_df is not None and not board_df.empty:
-                        # Try each industry to see if the stock is in it
-                        # This is expensive, so we use a heuristic:
                         # look up stock in A-share spot to find the industry name
-                        spot_df = ak.stock_zh_a_spot_em()
+                        spot_df, _src2 = _router.route("realtime_quote", symbol="")
                         if spot_df is not None and not spot_df.empty:
                             code_col = _find_code_col(spot_df)
                             row = spot_df[spot_df[code_col].astype(str).str.strip() == symbol]
                             if not row.empty:
-                                # Check if there's an industry column
                                 for c in row.columns:
                                     if "行业" in c or "板块" in c:
                                         industry = str(row.iloc[0][c])
@@ -197,8 +199,10 @@ def register(mcp: FastMCP):
                     "get_competitors",
                 )
 
-            # 东方财富行业成分股 (unique source, no THS alternative)
-            df = ak.stock_board_industry_cons_em(symbol=industry)
+            # 东方财富行业成分股
+            df, _src = _router.route(
+                "industry_data", endpoint="board_industry_cons_em", industry=industry
+            )
             df = slim_df(df)
             result = df_to_json(df, max_rows=30)
             cache.set(cache_key, result, TTL_COMPANY)

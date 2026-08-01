@@ -1,5 +1,5 @@
 [run]
-source = cn_financial_mcp,astock_signals
+source = tradex,astock_signals
 omit = */tests/*,*/test_*
 
 [report]

@@ -36,8 +36,8 @@ v3.0.0 完成架构重构（三层架构 + 僵尸激活 + 代码去重），但�
 - **Affected packages**：cn_financial_mcp → tradex（包目录+pyproject.toml+所有 import）；astock_signals 独立包
 - **Affected configs**：2 份 MCP 配置（.trae-cn/mcp.json + Trae CN User/mcp.json）+ config/mcp-servers.json
 - **Affected docs**：README.md / architecture.md / CHANGELOG.md / VERSION / 所有模块 docstring
-- **Affected global rules**：user_rules/AGENTS.md、user_rules/MEMORY.md、user_rules/project_dir_rule.md、memory/user_profile.md、memory/github_repos.md、memory/version_control_rules.md、项目 project_memory.md
-- **Affected downstream**：trader-data-router（Skill 工具）data_router.py 有硬编码路径 `trader-finance-hub/src`，需改为直接 import astock_signals
+- **Affected global rules**：user_rules/AGENTS.md、user_rules/MEMORY.md、user_rules/project_dir_rule.md、user_rules/identity.md、memory/user_profile.md、memory/github_repos.md、memory/version_control_rules.md、项目 project_memory.md（含 MEMORY.md §9 跨文件引用索引表的更新）
+- **Affected downstream**：trader-data-router（Skill 工具）data_router.py 有硬编码路径 `trader-finance-hub/src`，需改为直接 import astock_signals；其他项目（auction-hunter / stock-monitor-app / zhangting-finance-news / rbclient-race-order）若引用 trader-finance-hub 也需同步检查（执行阶段 2E 扫描确认）
 - **Affected tests**：tests/ + cn-financial-mcp/tests/ 全部用例需回归 + 新增 smart_router 全量测试 + 看板测试
 - **GitHub**：仓库名 wolfjkd/trader-finance-hub → wolfjkd/tradex-hub（git remote 更新）
 
@@ -51,7 +51,7 @@ v3.0.0 完成架构重构（三层架构 + 僵尸激活 + 代码去重），但�
 
 #### Scenario: 包导入
 - **WHEN** 开发者执行 `python -m tradex`
-- **THEN** MCP 服务正常启动，注册 88 个工具，server name 为 `tradex`
+- **THEN** MCP 服务正常启动，注册 89 个工具，server name 为 `tradex`
 
 #### Scenario: MCP 配置
 - **WHEN** Trae IDE 加载 MCP 配置
@@ -111,7 +111,9 @@ v3.0.0 完成架构重构（三层架构 + 僵尸激活 + 代码去重），但�
 
 ### Requirement: 智能路由全量重写
 
-系统 SHALL 将所有 L1 数据获取工具（65 个）接入 SmartRouter，每个数据类型注册到 router。独占数据源 SHALL 标记 `exclusive=True`，失败不降级。HTTP 直连源 SHALL 作为最后兜底（priority=200+）。
+系统 SHALL 将所有 L1 数据获取工具（65 个）接入 SmartRouter，每个数据类型注册到 router。**独占数据源 SHALL 也注册进 router**（不绕过 router 直连），通过 `SmartRouter.route()` 调用，router 内部判断 `exclusive=True` 后直接尝试该源、失败即返回错误不降级。HTTP 直连源 SHALL 作为最后兜底（priority=200+）。
+
+**铁律**：L1 工具 MUST NOT 直接 `import akshare` / `import eltdx` 调用源，MUST 通过 `SmartRouter.route(data_type, ...)` 获取数据。L2 计算层、L3 决策层不受此约束。
 
 **完整数据源矩阵**：
 
@@ -175,21 +177,35 @@ v3.0.0 完成架构重构（三层架构 + 僵尸激活 + 代码去重），但�
 - **WHEN** 设置 `EM_RATE_LIMIT_INTERVAL=2.0` 等环境变量
 - **THEN** anti_ban_client 按自定义参数限流
 
-### Requirement: 数据源看板（MCP 工具 + HTML 可视化）
+### Requirement: 数据源看板（MCP 工具返回 JSON + HTML 可视化渲染）
 
-系统 SHALL 新增 MCP 工具 `get_data_source_dashboard` 返回数据源健康/版本/统计 JSON，同时提供独立 HTML 看板可视化展示。看板 SHALL 调用 health_check + 版本检查模块。
+系统 SHALL 新增 MCP 工具 `get_data_source_dashboard` 返回数据源健康/版本/统计 JSON。系统 SHALL 同时提供独立 HTML 看板，通过轻量 HTTP 服务对外提供，前端 fetch 调用同源 `/api/dashboard` 接口获取 JSON 后渲染。看板 SHALL 调用 health_check + SmartRouter.get_health_report() + 版本检查模块。
+
+**双形态设计**：
+- **形态 A（MCP 工具）**：`get_data_source_dashboard` 返回结构化 JSON，供 AI Agent 程序化消费
+- **形态 B（HTML 看板）**：单页 HTML + 原生 JS（无构建依赖），通过 `python -m tradex.dashboard` 启动本地 HTTP 服务（默认端口 8765，可配置），前端 30s 自动刷新
+
+**HTML 看板入口**：`python -m tradex.dashboard` 启动后访问 `http://localhost:8765/`
 
 #### Scenario: MCP 工具调用
 - **WHEN** AI Agent 调用 `get_data_source_dashboard`
-- **THEN** 返回 JSON，包含：数据源列表、每个源的健康评分/延迟/成功率、版本信息、可用性状态
+- **THEN** 返回 JSON，包含：数据源列表、每个源的健康评分/延迟/成功率/版本信息/可用性状态/独占标记/今日调用次数
 
-#### Scenario: HTML 看板
-- **WHEN** 老板打开 HTML 看板
-- **THEN** 可视化展示所有数据源状态（绿/黄/红）、健康评分趋势、延迟、成功率，自动刷新（30s）
+#### Scenario: HTML 看板渲染
+- **WHEN** 老板在浏览器打开 `http://localhost:8765/`
+- **THEN** 单页 HTML 渲染所有数据源卡片（绿/黄/红状态色）、健康评分趋势条、延迟、成功率、版本提醒条幅、独占源标记
+
+#### Scenario: 看板自动刷新
+- **WHEN** 看板打开后保持运行
+- **THEN** 每 30s 自动 fetch `/api/dashboard` 刷新数据，无需手动操作；同时提供"立即刷新"按钮
 
 #### Scenario: 独占源标记
-- **WHEN** 看板渲染集合竞价数据源
-- **THEN** 标记为"独占源"，显示"无备用，故障即不可用"
+- **WHEN** 看板渲染集合竞价/逐笔成交/F10/涨停板等独占源
+- **THEN** 卡片标记"独占源"徽章，副标题显示"无备用，故障即不可用"
+
+#### Scenario: 版本提醒展示
+- **WHEN** eltdx 或 akshare 检测到新版
+- **THEN** 看板顶部显示黄色提醒条"eltdx 有新版 X.X.X，当前 1.2.0，建议手动升级"，附 GitHub/PyPI 链接
 
 ### Requirement: 数据源版本检查（只提醒不升级）
 
@@ -210,7 +226,7 @@ v3.0.0 完成架构重构（三层架构 + 僵尸激活 + 代码去重），但�
 ## Non-Goals
 
 - 不重构 L2/L3 层（已稳定）
-- 不新增 MCP 工具数量（保持 88 个，仅改 smart_router 工具 + 看板工具，看板工具计入 88 之内或新增为 89）
+- MCP 工具数量 88 → 89（新增 1 个看板工具 `get_data_source_dashboard`，计入 diagnostics 模块）
 - 不改动 eltdx 本地克隆源码（仅升级 pip 包版本标注）
 - 不自动化 GitHub 仓库改名（需老板手动在 GitHub 设置里改）
 - 不修改历史自动化任务报告（盘后复盘/早盘准备等历史快照保持原样）
@@ -219,3 +235,32 @@ v3.0.0 完成架构重构（三层架构 + 僵尸激活 + 代码去重），但�
 
 - VERSION: 3.0.0 → 3.1.0
 - astock_signals: 1.0.0 → 1.1.0（独立成包首次发版）
+
+## Execution Status
+
+> 截至 2026-08-02 的执行进度。Spec 本身是设计规格，进度仅作参考。
+
+| 阶段 | 状态 | 说明 |
+|------|------|------|
+| 阶段 0 准备与备份 | ✅ 已完成 | v3.0.0 tag 已打，350 测试全绿基线已确认 |
+| 阶段 1 astock_signals 独立成包 | ✅ 已完成 | trae_projects/astock_signals/ 已建立（v1.1.0），pip install -e 成功，旧目录已删除 |
+| 阶段 2A 代码与包结构改名 | ✅ 已完成 | cn_financial_mcp→tradex，37 文件全局替换，pyproject.toml 更新，89 工具注册验证通过 |
+| 阶段 2B 去 sys.path hack | ✅ 已完成 | 8 个文件 sys.path.insert hack 已清理，改正式 import astock_signals |
+| 阶段 2C MCP 配置更新 | ⏳ 待执行 | .trae-cn/mcp.json / Trae CN User/mcp.json / config/mcp-servers.json |
+| 阶段 2D trader-data-router 下游适配 | ⏳ 待执行 | data_router.py 删除路径探测逻辑 |
+| 阶段 2E 其他项目扫描 | ⏳ 待执行 | auction-hunter / stock-monitor-app 等是否引用旧名 |
+| 阶段 3 数据源升级 | ✅ 已完成 | pyproject.toml 已 akshare>=1.18.81 + eltdx>=1.2.0；孤儿模块已在阶段1删除 |
+| 阶段 4A SmartRouter 增强 | ✅ 已完成 | exclusive 独占源标记 + get_registry_report() + route() 返回 (data, source) 元组 |
+| 阶段 4B 数据源 fetch_fn 注册 | ✅ 已完成 | registry.py 注册全部 25 数据类型 34 源（eltdx/akshare/东财/同花顺/腾讯） |
+| 阶段 4C L1 工具接入 router | 🔧 进行中 | 多数工具已走 route()，但 eltdx_data.py 的 call_auction/tick_data/f10_profile 三处 route() 返回值 tuple 未解包（bug 待修），其余工具待逐模块核对 |
+| 阶段 5 HTTP 防封参数可配置化 | ✅ 已完成 | anti_ban_client 已读 EM_RATE_LIMIT_INTERVAL/EM_JITTER_MIN/EM_JITTER_MAX/EM_MAX_RETRY 环境变量，含 set_jitter_range/set_max_retry |
+| 阶段 6A 版本检查模块 | ✅ 已完成 | data_source_monitor.py：check_eltdx_version(GitHub) + check_akshare_version(PyPI) + check_all_versions() |
+| 阶段 6B MCP 看板工具 | ✅ 已完成 | diagnostics.py：build_dashboard_data() + get_data_source_dashboard 工具（第89个工具） |
+| 阶段 6C HTML 可视化看板 | ✅ 已完成 | dashboard/__main__.py：HTTP 服务端口 8765，/ 返回 HTML + /api/dashboard 返回 JSON |
+| 阶段 7A 项目内文档 | 🔧 进行中 | VERSION=3.1.0、tradex/pyproject=3.1.0、astock_signals=1.1.0、CHANGELOG v3.1.0 已更新；README.md / architecture.md 待更新 |
+| 阶段 7B 全局规则与记忆 MD | ⏳ 待执行 | AGENTS/MEMORY/project_dir_rule/identity/user_profile/github_repos/project_memory + MEMORY.md §9 引用索引 |
+| 阶段 8 测试回归 | 🔧 进行中 | v3.0.0 基线 350 绿；v3.1.0 需回归（含 eltdx_data.py bug 修复后 + smart_router/看板/版本检查新测试） |
+| 阶段 9 版本发布 | ⏳ 待执行 | 需老板确认后执行 git commit/tag v3.1.0/push + GitHub Release（含仓库改名 trader-finance-hub→tradex-hub） |
+
+> **当前阻塞**：阶段 4C 的 eltdx_data.py tuple 解包 bug（3 处：call_auction/tick_data/f10_profile 的 `_router.route()` 返回 `(data, source)` 元组，但代码未解包直接取属性）。
+> **下一步**：① 修复 eltdx_data.py tuple 解包 bug → ② 阶段 2C/2D/2E 配置与下游适配 → ③ 阶段 7 文档与规则同步 → ④ 阶段 8 测试回归 → ⑤ 阶段 9 发布（需老板确认）。

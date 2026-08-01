@@ -10,16 +10,21 @@ Tools:
   40. get_bond_yield_curve  - China government bond yields
   41. get_margin_trading    - Margin trading (融资融券) data
   42. get_insider_trading   - Insider trading records
+
+Data source routing (via SmartRouter):
+  宏观数据: akshare macro_data (endpoints: gdp/cpi/pmi/money_supply/fx_spot/bond_yield/margin_em/margin_sse/margin_szse/inner_trade)
 """
 
 from __future__ import annotations
 
-import akshare as ak
 from mcp.server.fastmcp import FastMCP
 
+from ..data_sources import get_router
 from ..utils.cache import TTL_DAILY, TTL_FINANCIAL, TTL_MACRO, cache
 from ..utils.formatter import df_to_json, error_response, slim_df
 from ..utils.symbol import get_exchange, normalize_symbol
+
+_router = get_router()
 
 
 def register(mcp: FastMCP):
@@ -40,7 +45,7 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            df = ak.macro_china_gdp()
+            df, _src = _router.route("macro_data", endpoint="gdp")
             result = df_to_json(df, max_rows=40)
             cache.set(cache_key, result, TTL_MACRO)
             return result
@@ -62,7 +67,7 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            df = ak.macro_china_cpi()
+            df, _src = _router.route("macro_data", endpoint="cpi")
             result = df_to_json(df, max_rows=60)
             cache.set(cache_key, result, TTL_MACRO)
             return result
@@ -86,7 +91,7 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            df = ak.macro_china_pmi()
+            df, _src = _router.route("macro_data", endpoint="pmi")
             result = df_to_json(df, max_rows=60)
             cache.set(cache_key, result, TTL_MACRO)
             return result
@@ -109,7 +114,7 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            df = ak.macro_china_money_supply()
+            df, _src = _router.route("macro_data", endpoint="money_supply")
             result = df_to_json(df, max_rows=60)
             cache.set(cache_key, result, TTL_MACRO)
             return result
@@ -137,7 +142,7 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            df = ak.fx_spot_quote()
+            df, _src = _router.route("macro_data", endpoint="fx_spot")
             # Filter for the specified currency pair
             if symbol:
                 name_cols = [
@@ -177,7 +182,7 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            df = ak.bond_china_yield(start_date="", end_date="")
+            df, _src = _router.route("macro_data", endpoint="bond_yield")
             result = df_to_json(df, max_rows=60)
             cache.set(cache_key, result, TTL_DAILY)
             return result
@@ -215,17 +220,15 @@ def register(mcp: FastMCP):
                 exchange = get_exchange(symbol)
                 today = datetime.date.today().strftime("%Y%m%d")
 
-                sources = []
+                endpoints = []
                 if exchange == "sh":
-                    sources.append(("上交所明细", ak.stock_margin_detail_sse, {"date": today}))
-                    sources.append(("深交所明细", ak.stock_margin_detail_szse, {"date": today}))
+                    endpoints = ["margin_sse", "margin_szse"]
                 else:
-                    sources.append(("深交所明细", ak.stock_margin_detail_szse, {"date": today}))
-                    sources.append(("上交所明细", ak.stock_margin_detail_sse, {"date": today}))
+                    endpoints = ["margin_szse", "margin_sse"]
 
-                for name, fn, kwargs in sources:
+                for ep in endpoints:
                     try:
-                        df = fn(**kwargs)
+                        df, _src = _router.route("macro_data", endpoint=ep, date=today)
                         if df is not None and not df.empty:
                             break
                     except Exception:
@@ -239,14 +242,9 @@ def register(mcp: FastMCP):
                     if code_cols:
                         df = df[df[code_cols[0]].astype(str).str.contains(symbol)]
             else:
-                sources = [
-                    ("东财市场汇总", ak.stock_margin_em, {}),
-                    ("上交所明细", ak.stock_margin_detail_sse, {}),
-                    ("深交所明细", ak.stock_margin_detail_szse, {}),
-                ]
-                for name, fn, kwargs in sources:
+                for ep in ["margin_em", "margin_sse", "margin_szse"]:
                     try:
-                        df = fn(**kwargs)
+                        df, _src = _router.route("macro_data", endpoint=ep)
                         if df is not None and not df.empty:
                             break
                     except Exception:
@@ -286,7 +284,7 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            df = ak.stock_inner_trade_xq()
+            df, _src = _router.route("macro_data", endpoint="inner_trade")
             if symbol:
                 symbol = normalize_symbol(symbol)
                 code_cols = [

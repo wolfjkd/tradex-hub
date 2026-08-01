@@ -4,15 +4,18 @@
 
 ## 改名完整性
 
-- [ ] 仓库目录已改名 tradex-hub
+- [ ] 仓库目录已改名 tradex-hub（本地 + GitHub）
 - [ ] Python 包目录已改名 tradex（cn_financial_mcp 不再存在）
-- [ ] `python -m tradex` 正常启动，88 工具注册
+- [ ] `python -m tradex` 正常启动，89 工具注册
 - [ ] server name 为 `tradex`
 - [ ] 项目内无 `cn_financial_mcp` / `cn-financial-mcp` 残留引用
 - [ ] 项目内无 `trader-finance-hub` 残留引用（除历史 CHANGELOG 条目）
 - [ ] MCP 配置 2 份已更新（.trae-cn/mcp.json + Trae CN User/mcp.json）
 - [ ] config/mcp-servers.json 已更新
 - [ ] trader-data-router 无 `trader-finance-hub/src` 路径硬编码
+- [ ] 其他项目（auction-hunter / stock-monitor-app 等）无旧名引用残留
+- [ ] 全局规则 MD 全部同步（AGENTS / MEMORY / project_dir_rule / identity / user_profile / github_repos / version_control_rules / project_memory）
+- [ ] MEMORY.md §9 跨文件引用索引表已更新
 
 ## astock_signals 独立包
 
@@ -35,11 +38,13 @@
 
 - [ ] SmartRouter 支持 exclusive 独占源标记
 - [ ] 25 个数据类型全部注册到 SmartRouter
-- [ ] 独占源（call_auction/tick_data/f10_profile/hot_money/lockup_expiry/limit_up_board）失败不降级
+- [ ] 独占源（call_auction/tick_data/f10_profile/hot_money/lockup_expiry/limit_up_board）也走 SmartRouter.route()，不绕过 router
+- [ ] 独占源失败不降级，直接返回错误
 - [ ] 多源数据类型（fund_flow/dragon_tiger/industry_comparison/northbound 等）降级正常
 - [ ] 北向资金 akshare 备用已接入
 - [ ] eltdx 为行情类第一主源（realtime_quote/historical_kline/minute_data）
 - [ ] HTTP 直连源 priority=200+ 作为兜底
+- [ ] **铁律验证**：L1 工具目录（tradex/src/tradex/tools/）下无 `import akshare` / `import eltdx` 残留（仅允许在 smart_router / fetch_fn 抽取层出现）
 
 ## HTTP 防封可配置
 
@@ -49,11 +54,16 @@
 
 ## 数据源看板
 
-- [ ] MCP 工具 get_data_source_dashboard 返回完整 JSON
-- [ ] HTML 看板可视化渲染正常
-- [ ] 看板显示数据源状态/健康评分/延迟/成功率/版本/独占标记
-- [ ] 看板自动刷新（30s）
-- [ ] 版本检查模块工作正常（eltdx GitHub + akshare PyPI）
+- [ ] MCP 工具 get_data_source_dashboard 返回完整 JSON（数据源列表/健康/延迟/成功率/版本/独占/调用次数）
+- [ ] HTML 看板单页可视化渲染正常（无构建依赖，原生 JS）
+- [ ] 看板入口 `python -m tradex.dashboard` 可启动，默认端口 8765（TRADEX_DASHBOARD_PORT 可配置）
+- [ ] 浏览器访问 `http://localhost:8765/` 渲染数据源卡片（绿/黄/红状态色）
+- [ ] `/api/dashboard` 接口返回与 MCP 工具一致的 JSON
+- [ ] 看板显示数据源状态/健康评分/延迟/成功率/版本/独占源徽章
+- [ ] 看板自动刷新（30s fetch `/api/dashboard`）+ 手动"立即刷新"按钮
+- [ ] 独占源卡片显示"独占源"徽章 + "无备用，故障即不可用"副标题
+- [ ] 版本检查模块工作正常（eltdx GitHub release + akshare PyPI）
+- [ ] 检测到新版时看板顶部显示黄色提醒条幅（附 GitHub/PyPI 链接）
 - [ ] 版本检查只提醒不自动升级
 
 ## 文档与规则同步

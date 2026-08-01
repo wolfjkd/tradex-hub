@@ -1,11 +1,12 @@
 """
 MCP 诊断工具模块 — 暴露数据源健康状态、工具清单、缓存统计与系统健康检查。
 
-提供 4 个诊断工具：
-  1. get_data_source_health — 各数据源健康状态（评分/成功率/延迟/连续失败）
-  2. list_all_tools         — 所有注册工具的分类清单
-  3. get_cache_stats        — 两级缓存统计信息
-  4. health_check           — 系统整体健康检查（组合以上三项 + akshare 连通性）
+提供 5 个诊断工具：
+  1. get_data_source_health    — 各数据源健康状态（评分/成功率/延迟/连续失败）
+  2. list_all_tools            — 所有注册工具的分类清单
+  3. get_cache_stats           — 两级缓存统计信息
+  4. health_check              — 系统整体健康检查（组合以上三项 + akshare 连通性）
+  5. get_data_source_dashboard — 数据源看板（健康/版本/统计聚合，供 HTML 看板复用）
 
 设计原则：
   - 只读诊断，不修改任何状态
@@ -48,6 +49,67 @@ def _ts_to_iso(ts) -> str:
         return datetime.fromtimestamp(float(ts)).strftime("%Y-%m-%d %H:%M:%S")
     except (ValueError, OSError):
         return ""
+
+
+def build_dashboard_data(tool_count: int = 0) -> dict:
+    """构建数据源看板数据（MCP 工具与 HTTP 看板共享）。
+
+    聚合 SmartRouter 注册表 / 健康报告 + eltdx/akshare 版本检查 +
+    系统概览（工具数/数据类型数/健康源比例）。
+
+    Args:
+        tool_count: MCP 工具总数，由调用方提供（避免在同步函数中触发异步）。
+
+    Returns:
+        看板数据字典，结构与 get_data_source_dashboard 工具返回一致。
+    """
+    from datetime import datetime
+
+    # 版本检查（独立模块，失败不影响看板主体）
+    try:
+        from ..utils.data_source_monitor import check_all_versions
+
+        versions = check_all_versions()
+    except Exception as e:
+        versions = [{"error": f"版本检查失败: {e}"}]
+
+    timestamp = datetime.now().isoformat(timespec="seconds")
+    router = _get_router()
+
+    if router is None:
+        return {
+            "timestamp": timestamp,
+            "summary": {
+                "total_tools": tool_count,
+                "data_types": 0,
+                "sources": 0,
+                "healthy_sources": 0,
+                "unhealthy_sources": 0,
+            },
+            "sources": [],
+            "health": [],
+            "versions": versions,
+        }
+
+    sources = router.get_registry_report()
+    health = router.get_health_report()
+    data_types = {s.get("data_type") for s in sources if s.get("data_type")}
+    healthy = [h for h in health if h.get("is_healthy")]
+    unhealthy = [h for h in health if not h.get("is_healthy")]
+
+    return {
+        "timestamp": timestamp,
+        "summary": {
+            "total_tools": tool_count,
+            "data_types": len(data_types),
+            "sources": len(sources),
+            "healthy_sources": len(healthy),
+            "unhealthy_sources": len(unhealthy),
+        },
+        "sources": sources,
+        "health": health,
+        "versions": versions,
+    }
 
 
 def register(mcp: FastMCP):
@@ -283,3 +345,32 @@ def register(mcp: FastMCP):
 
         result["issues"] = issues
         return dict_to_json(result)
+
+    @mcp.tool()
+    async def get_data_source_dashboard() -> str:
+        """
+        获取数据源看板数据（JSON）。
+
+        返回数据源健康/版本/统计信息，包含：
+        - 数据源列表（25 类型 34 源）
+        - 每个源的健康评分/延迟/成功率/独占标记
+        - eltdx/akshare 版本检查结果
+        - 系统概览（总工具数、注册数据类型数、健康源比例）
+
+        Returns:
+            看板数据 (JSON)，包含 timestamp、summary、sources、health、versions。
+            summary 含 total_tools / data_types / sources / healthy_sources /
+            unhealthy_sources；sources 为 SmartRouter 注册表；health 为健康报告；
+            versions 为 eltdx/akshare 版本检查结果列表。
+        """
+        try:
+            # 异步上下文中获取工具总数（mcp 由闭包捕获）
+            try:
+                tools = await mcp.list_tools()
+                tool_count = len(tools)
+            except Exception:
+                tool_count = 0
+            data = build_dashboard_data(tool_count=tool_count)
+            return dict_to_json(data)
+        except Exception as e:
+            return error_response(f"获取数据源看板失败: {e}", "get_data_source_dashboard")
