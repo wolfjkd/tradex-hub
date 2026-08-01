@@ -30,10 +30,11 @@ def _ak():
 # realtime_quote — 全量行情快照
 # ============================================================
 
-def fetch_realtime_quote(symbol: str = "", **kwargs):
+def fetch_realtime_quote(symbol: str = "", code: str = "", **kwargs):
     """A股实时行情快照（东方财富主，新浪备）。返回全量 DataFrame，含'代码'列。
 
     工具层负责按 symbol 过滤。
+    兼容 symbol/code 两种参数名（SmartRouter 路由归一化）。
     """
     ak = _ak()
     try:
@@ -55,15 +56,20 @@ def fetch_realtime_quote(symbol: str = "", **kwargs):
 
 def fetch_historical_kline(
     symbol: str = "",
+    code: str = "",
     period: str = "daily",
     start_date: str = "",
     end_date: str = "",
     adjust: str = "qfq",
     **kwargs,
 ):
-    """历史 K 线（东方财富 stock_zh_a_hist）。返回中文列名 DataFrame。"""
+    """历史 K 线（东方财富 stock_zh_a_hist）。返回中文列名 DataFrame。
+
+    兼容 symbol/code 两种参数名（SmartRouter 路由归一化）。
+    """
     ak = _ak()
-    em_kwargs: dict = {"symbol": symbol, "period": period, "adjust": adjust}
+    sym = symbol or code
+    em_kwargs: dict = {"symbol": sym, "period": period, "adjust": adjust}
     if start_date:
         em_kwargs["start_date"] = start_date
     if end_date:
@@ -75,13 +81,15 @@ def fetch_historical_kline(
 # minute_data — 分时数据
 # ============================================================
 
-def fetch_minute_data(symbol: str = "", **kwargs):
+def fetch_minute_data(symbol: str = "", code: str = "", **kwargs):
     """当日分时数据（东方财富 stock_intraday_em）。返回原始 DataFrame。
 
     工具层负责列名标准化与格式化。
+    兼容 symbol/code 两种参数名（SmartRouter 路由归一化）。
     """
     ak = _ak()
-    df = ak.stock_intraday_em(symbol=symbol)
+    sym = symbol or code
+    df = ak.stock_intraday_em(symbol=sym)
     if df is None or df.empty:
         raise RuntimeError("akshare intraday empty")
     return df

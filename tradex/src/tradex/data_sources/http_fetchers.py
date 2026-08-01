@@ -26,17 +26,21 @@ def _tencent_quote_vals(code: str) -> list:
     return raw.split('"')[1].split("~")
 
 
-def fetch_realtime_quote_tencent(symbol: str = "", **kwargs):
+def fetch_realtime_quote_tencent(symbol: str = "", code: str = "", **kwargs):
     """实时行情（腾讯 qt.gtimg.cn）。返回单行 DataFrame，含'代码'列。
 
     作为 realtime_quote 的 priority=200 兜底源。
+    兼容 symbol/code 两种参数名（SmartRouter 路由归一化）。
     """
     import pandas as pd
-    vals = _tencent_quote_vals(symbol)
+    sym = symbol or code
+    if not sym:
+        raise RuntimeError("stock code is required (symbol or code)")
+    vals = _tencent_quote_vals(sym)
     if len(vals) < 50:
         raise RuntimeError("tencent returned insufficient data")
     return pd.DataFrame([{
-        "代码": symbol,
+        "代码": sym,
         "名称": vals[1] if len(vals) > 1 else "",
         "最新价": float(vals[3]) if vals[3] else 0,
         "涨跌幅": float(vals[32]) if len(vals) > 32 and vals[32] else 0,
@@ -52,18 +56,22 @@ def fetch_realtime_quote_tencent(symbol: str = "", **kwargs):
     }])
 
 
-def fetch_profit_forecast_tencent(symbol: str = "", **kwargs) -> dict:
+def fetch_profit_forecast_tencent(symbol: str = "", code: str = "", **kwargs) -> dict:
     """一致预期（腾讯行情兜底）。仅返回价格/PE，无 EPS 预测数据。
 
     作为 profit_forecast 的 priority=100 备源（当同花顺抓取失败时）。
+    兼容 symbol/code 两种参数名（SmartRouter 路由归一化）。
     """
-    vals = _tencent_quote_vals(symbol)
+    sym = symbol or code
+    if not sym:
+        raise RuntimeError("stock code is required (symbol or code)")
+    vals = _tencent_quote_vals(sym)
     if len(vals) < 50:
         raise RuntimeError("tencent returned insufficient data for profit_forecast")
     price = float(vals[3]) if vals[3] else 0
     pe_ttm = float(vals[39]) if len(vals) > 39 and vals[39] else 0
     return {
-        "symbol": symbol,
+        "symbol": sym,
         "source": "tencent qt.gtimg.cn (price only)",
         "price": price,
         "pe_ttm": pe_ttm,
