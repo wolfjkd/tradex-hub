@@ -14,7 +14,7 @@ import ast
 # 项目根目录（tests 的上两级）
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _TOOLS_DIR = os.path.join(
-    _PROJECT_ROOT, "cn-financial-mcp", "src", "cn_financial_mcp", "tools"
+    _PROJECT_ROOT, "tradex", "src", "tradex", "tools"
 )
 _SIGNAL_DATA_PY = os.path.join(_TOOLS_DIR, "signal_data.py")
 

@@ -27,7 +27,7 @@ from ..utils.fallback import call_with_fallback
 from ..utils.formatter import df_to_json, error_response, slim_df
 from ..utils.symbol import format_with_exchange, normalize_symbol
 
-logger = logging.getLogger("cn-financial-mcp")
+logger = logging.getLogger("tradex")
 
 
 def register(mcp: FastMCP):

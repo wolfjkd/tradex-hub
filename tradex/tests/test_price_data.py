@@ -10,7 +10,7 @@ import pytest
 @pytest.mark.network
 class TestGetRealtimeQuote:
     async def test_basic(self):
-        from cn_financial_mcp.tools.price_data import register
+        from tradex.tools.price_data import register
         from mcp.server.fastmcp import FastMCP
 
         mcp = FastMCP("test")
@@ -22,7 +22,7 @@ class TestGetRealtimeQuote:
         assert len(data) > 0
 
     async def test_invalid_symbol(self):
-        from cn_financial_mcp.tools.price_data import register
+        from tradex.tools.price_data import register
         from mcp.server.fastmcp import FastMCP
 
         mcp = FastMCP("test")
@@ -37,7 +37,7 @@ class TestGetRealtimeQuote:
 @pytest.mark.network
 class TestGetHistoricalPrice:
     async def test_basic(self):
-        from cn_financial_mcp.tools.price_data import register
+        from tradex.tools.price_data import register
         from mcp.server.fastmcp import FastMCP
 
         mcp = FastMCP("test")

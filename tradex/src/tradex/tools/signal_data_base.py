@@ -28,11 +28,6 @@ from ..utils.formatter import error_response, dict_to_json
 from ..utils.symbol import normalize_symbol
 
 # Import astock_signals modules from Hub src/
-_HUB_SRC = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "src")
-)
-if _HUB_SRC not in sys.path:
-    sys.path.insert(0, _HUB_SRC)
 
 from astock_signals import (  # noqa: E402
     get_hot_stocks_json,

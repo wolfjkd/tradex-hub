@@ -14,7 +14,7 @@ import pytest
 @pytest.mark.network
 class TestSearchStock:
     async def test_search_by_name(self):
-        from cn_financial_mcp.tools.company_info import register
+        from tradex.tools.company_info import register
         from mcp.server.fastmcp import FastMCP
 
         mcp = FastMCP("test")
@@ -30,7 +30,7 @@ class TestSearchStock:
         assert len(data) > 0, "Expected non-empty results for '茅台'"
 
     async def test_search_by_code(self):
-        from cn_financial_mcp.tools.company_info import register
+        from tradex.tools.company_info import register
         from mcp.server.fastmcp import FastMCP
 
         mcp = FastMCP("test")
@@ -46,7 +46,7 @@ class TestSearchStock:
         assert len(data) > 0, "Expected non-empty results for '600519'"
 
     async def test_search_no_results(self):
-        from cn_financial_mcp.tools.company_info import register
+        from tradex.tools.company_info import register
         from mcp.server.fastmcp import FastMCP
 
         mcp = FastMCP("test")
@@ -65,7 +65,7 @@ class TestSearchStock:
 @pytest.mark.network
 class TestGetCompanyInfo:
     async def test_basic(self):
-        from cn_financial_mcp.tools.company_info import register
+        from tradex.tools.company_info import register
         from mcp.server.fastmcp import FastMCP
 
         mcp = FastMCP("test")

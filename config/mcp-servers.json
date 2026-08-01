@@ -2,8 +2,8 @@
   "version": "3.0",
   "description": "Buddy 金融数据中枢 - MCP Server 配置（v3.0.0）",
   "servers": {
-    "cn-financial-mcp": {
-      "name": "cn-financial-mcp 金融数据中枢",
+    "tradex": {
+      "name": "tradex 金融数据中枢",
       "type": "stdio",
       "tools": 88,
       "modules": ["company_info(4)", "price_data(5)", "financial_stmt(8)", "valuation(4)", "industry(5)", "market(5)", "news_events(4)", "macro_fx(8)", "signal_data(17)", "eltdx_data(5)", "technical_indicators(6)", "performance_metrics(2)", "signal_generation(3)", "factor_analysis(2)", "stock_screening(2)", "diagnostics(4)", "composite_analysis(3)", "analysis_engine(1)"],
@@ -15,36 +15,36 @@
       "type": "connector",
       "modules": ["quotes", "kline", "screener", "notice", "report", "news"],
       "source": "独立 MCP Server",
-      "note": "独立connector，非cn-financial-mcp子模块"
+      "note": "独立connector，非tradex子模块"
     }
   },
   "routing": {
     "realtime_quote": {
-      "primary": "cn-financial-mcp (get_realtime_price)",
+      "primary": "tradex (get_realtime_price)",
       "fallback": ["tdx-connector"]
     },
     "kline": {
-      "primary": "cn-financial-mcp (get_kline)",
+      "primary": "tradex (get_kline)",
       "fallback": ["tdx-connector"]
     },
     "financials": {
-      "primary": "cn-financial-mcp (get_financial_statements)",
+      "primary": "tradex (get_financial_statements)",
       "fallback": []
     },
     "industry_board": {
-      "primary": "cn-financial-mcp (get_industry_boards)",
+      "primary": "tradex (get_industry_boards)",
       "fallback": []
     },
     "macro": {
-      "primary": "cn-financial-mcp (macro_fx)",
+      "primary": "tradex (macro_fx)",
       "fallback": []
     },
     "dragon_tiger": {
-      "primary": "cn-financial-mcp (get_dragon_tiger)",
+      "primary": "tradex (get_dragon_tiger)",
       "fallback": ["signal_data (get_dragon_tiger_signal)"]
     },
     "northbound": {
-      "primary": "cn-financial-mcp (get_northbound_flow)",
+      "primary": "tradex (get_northbound_flow)",
       "fallback": ["signal_data (get_northbound_flow_signal)"]
     }
   }

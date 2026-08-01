@@ -8,9 +8,9 @@ import time
 import pandas as pd
 import pytest
 
-from cn_financial_mcp.utils.cache import TTLCache
-from cn_financial_mcp.utils.formatter import df_to_json, dict_to_json, error_response
-from cn_financial_mcp.utils.symbol import (
+from tradex.utils.cache import TTLCache
+from tradex.utils.formatter import df_to_json, dict_to_json, error_response
+from tradex.utils.symbol import (
     format_with_exchange,
     get_exchange,
     get_market_name,

@@ -19,7 +19,7 @@ from typing import Any, Callable
 
 import pandas as pd
 
-logger = logging.getLogger("cn-financial-mcp")
+logger = logging.getLogger("tradex")
 
 
 async def call_with_fallback(

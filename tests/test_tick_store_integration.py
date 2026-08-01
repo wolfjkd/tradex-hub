@@ -28,10 +28,10 @@ from astock_signals.tick_store import TickStore
 
 
 # ---------------------------------------------------------------------------
-# 路径设置：确保 cn_financial_mcp.tools.eltdx_data 可被 import
+# 路径设置：确保 tradex.tools.eltdx_data 可被 import
 # ---------------------------------------------------------------------------
 _CN_MCP_SRC = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), "..", "cn-financial-mcp", "src")
+    os.path.join(os.path.dirname(__file__), "..", "tradex", "src")
 )
 if _CN_MCP_SRC not in sys.path:
     sys.path.insert(0, _CN_MCP_SRC)
@@ -172,7 +172,7 @@ class TestEltdxGetTicksCacheLogic:
 
     def test_first_call_hits_network_second_call_from_cache(self, tmp_path, monkeypatch):
         """第一次调用走网络，第二次从缓存读取。"""
-        from cn_financial_mcp.tools import eltdx_data
+        from tradex.tools import eltdx_data
 
         # 准备临时 TickStore
         db_path = str(tmp_path / "cache_test.db")
@@ -241,7 +241,7 @@ class TestEltdxGetTicksCacheLogic:
 
     def test_cache_returns_same_data_as_network(self, tmp_path, monkeypatch):
         """缓存返回的数据与网络返回的数据一致。"""
-        from cn_financial_mcp.tools import eltdx_data
+        from tradex.tools import eltdx_data
 
         db_path = str(tmp_path / "consistency_test.db")
         test_store = TickStore(db_path=db_path)
@@ -296,7 +296,7 @@ class TestEltdxGetTicksCacheLogic:
 
     def test_no_cache_store_still_works(self, tmp_path, monkeypatch):
         """TickStore 不可用时（返回 None），eltdx_get_ticks 仍能正常工作。"""
-        from cn_financial_mcp.tools import eltdx_data
+        from tradex.tools import eltdx_data
 
         mock_tick = MagicMock()
         mock_tick.time = "09:30:01"

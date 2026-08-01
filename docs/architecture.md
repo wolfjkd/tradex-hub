@@ -16,7 +16,7 @@ trader-finance-hub 是为 AI Agent（Trae / Claude Code / Cursor）提供 A 股�
 - **协议**: Model Context Protocol (MCP) 1.0
 - **传输**: stdio (本地)
 - **框架**: FastMCP (Python)
-- **包名**: cn-financial-mcp (v3.0.0)
+- **包名**: tradex (v3.0.0)
 
 ### 2.2 数据源
 
@@ -33,7 +33,7 @@ trader-finance-hub 是为 AI Agent（Trae / Claude Code / Cursor）提供 A 股�
 ### 2.3 模块结构（三层架构）
 
 ```
-cn-financial-mcp (v3.0.0) ── FastMCP Server, 88 MCP 工具
+tradex (v3.0.0) ── FastMCP Server, 88 MCP 工具
 │
 ├── L1 数据获取层（65 工具）
 │   ├── company_info.py    (4 工具) — 搜索/概况/竞品
@@ -178,7 +178,7 @@ ws_server 模块从"独立僵尸"激活为可选推送服务，与 MCP stdio 通
 AI Agent (Trae / Claude Code / Cursor)
         │  MCP 协议 (stdio, JSON-RPC 2.0)
         ▼
-  cn-financial-mcp server.py
+  tradex server.py
         │
         ├── 注册 18 个工具模块 → 88 个 MCP 工具
         │
@@ -210,9 +210,9 @@ AI Agent (Trae / Claude Code / Cursor)
 ```json
 {
   "mcpServers": {
-    "cn-financial-mcp": {
+    "tradex": {
       "command": "/path/to/venv/Scripts/python.exe",
-      "args": ["-m", "cn_financial_mcp"],
+      "args": ["-m", "tradex"],
       "env": {}
     }
   }

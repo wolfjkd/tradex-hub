@@ -24,11 +24,11 @@ import pytest
 
 # ── 路径设置 ──────────────────────────────────────────────────
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_CN_MCP_SRC = os.path.join(_PROJECT_ROOT, "cn-financial-mcp", "src")
+_CN_MCP_SRC = os.path.join(_PROJECT_ROOT, "tradex", "src")
 if _CN_MCP_SRC not in sys.path:
     sys.path.insert(0, _CN_MCP_SRC)
 
-from cn_financial_mcp.tools import factor_analysis as fa  # noqa: E402
+from tradex.tools import factor_analysis as fa  # noqa: E402
 
 
 # ── 公共辅助 ──────────────────────────────────────────────────

@@ -6,7 +6,7 @@ import json
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-from cn_financial_mcp.server import mcp
+from tradex.server import mcp
 
 
 EXPECTED_NEW_TOOLS = [

@@ -1,4 +1,4 @@
-# cn-financial-mcp
+# tradex
 
 <p align="center">
   <strong>cn大陆金融数据 MCP Server · 智能决策中台</strong><br/>
@@ -32,7 +32,7 @@
 
 ## 简介
 
-**cn-financial-mcp** 是一个遵循 [Model Context Protocol (MCP)](https://modelcontextprotocol.io) 标准的金融数据服务器，专注于cn大陆市场。它让任何支持 MCP 的 AI Agent（如 Claude Code、Cursor、自定义 Agent）都能直接调用 A 股行情、财报、行业、宏观经济等 **80 个金融工具**（65 个数据获取 + 15 个量化计算），无需 API Key，开箱即用。
+**tradex** 是一个遵循 [Model Context Protocol (MCP)](https://modelcontextprotocol.io) 标准的金融数据服务器，专注于cn大陆市场。它让任何支持 MCP 的 AI Agent（如 Claude Code、Cursor、自定义 Agent）都能直接调用 A 股行情、财报、行业、宏观经济等 **80 个金融工具**（65 个数据获取 + 15 个量化计算），无需 API Key，开箱即用。
 
 底层数据来源于 [AKShare](https://akshare.akfamily.xyz)、eltdx 通达信协议、东财直连和同花顺，提供 80 个金融工具，覆盖行情、财务、估值、行业、新闻、宏观、信号数据等全方位金融数据，并内置技术指标计算、绩效分析、信号生成、因子分析、条件选股等量化计算能力（v2.5.0 新增）。
 
@@ -72,21 +72,21 @@
 ### 安装
 
 ```bash
-git clone https://github.com/<your-username>/cn-financial-mcp.git
-cd cn-financial-mcp
+git clone https://github.com/<your-username>/tradex.git
+cd tradex
 pip install -e .
 ```
 
 ### 验证安装
 
 ```bash
-PYTHONPATH=src python -m cn_financial_mcp --help
+PYTHONPATH=src python -m tradex --help
 ```
 
 ```
 usage: __main__.py [-h] [--http] [--port PORT] [--host HOST]
 
-cn-financial-mcp: China Financial Data MCP Server based on AKShare
+tradex: China Financial Data MCP Server based on AKShare
 
 options:
   -h, --help   show this help message and exit
@@ -109,22 +109,22 @@ options:
     "cn-financial": {
       "type": "stdio",
       "command": "python",
-      "args": ["-m", "cn_financial_mcp"],
+      "args": ["-m", "tradex"],
       "env": {
-        "PYTHONPATH": "/absolute/path/to/cn-financial-mcp/src"
+        "PYTHONPATH": "/absolute/path/to/tradex/src"
       }
     }
   }
 }
 ```
 
-> 将 `/absolute/path/to/cn-financial-mcp` 替换为你的实际路径。配置好后 Agent 会自动拉起 MCP 进程。
+> 将 `/absolute/path/to/tradex` 替换为你的实际路径。配置好后 Agent 会自动拉起 MCP 进程。
 
 ### 方式二：HTTP/SSE 模式（通用 MCP Client）
 
 ```bash
-cd cn-financial-mcp
-PYTHONPATH=src python -m cn_financial_mcp --http --host 0.0.0.0 --port 8000
+cd tradex
+PYTHONPATH=src python -m tradex --http --host 0.0.0.0 --port 8000
 ```
 
 MCP Client 连接 endpoint：
@@ -136,7 +136,7 @@ http://<your-ip>:8000/sse
 ### 方式三：Docker
 
 ```bash
-cd cn-financial-mcp
+cd tradex
 docker compose up -d
 ```
 
@@ -398,8 +398,8 @@ pytest tests/ -v -m "not network"
 ## 📁 项目结构
 
 ```
-cn-financial-mcp/
-├── src/cn_financial_mcp/
+tradex/
+├── src/tradex/
 │   ├── __init__.py
 │   ├── __main__.py          # CLI 入口
 │   ├── server.py             # MCP Server 实例

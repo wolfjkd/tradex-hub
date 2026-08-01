@@ -1,10 +1,10 @@
 """
-Entry point for running the cn-financial-mcp server.
+Entry point for running the tradex server.
 
 Usage:
-    python -m cn_financial_mcp                    # stdio mode (default)
-    python -m cn_financial_mcp --http             # HTTP/SSE mode
-    python -m cn_financial_mcp --http --port 9000 # HTTP/SSE on custom port
+    python -m tradex                    # stdio mode (default)
+    python -m tradex --http             # HTTP/SSE mode
+    python -m tradex --http --port 9000 # HTTP/SSE on custom port
 
 环境变量：
     WS_SERVER_ENABLED=true   启用 WebSocket 推送服务
@@ -26,13 +26,8 @@ def _start_ws_server(config):
     import threading
     import logging
 
-    logger = logging.getLogger("cn-financial-mcp.ws")
+    logger = logging.getLogger("tradex.ws")
     try:
-        _HUB_SRC = os.path.normpath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "..", "src")
-        )
-        if _HUB_SRC not in sys.path:
-            sys.path.insert(0, _HUB_SRC)
 
         from astock_signals.ws_server import get_ws_server
 
@@ -68,7 +63,7 @@ def _start_ws_server(config):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="cn-financial-mcp: China Financial Data MCP Server based on AKShare"
+        description="tradex: China Financial Data MCP Server based on AKShare"
     )
     parser.add_argument(
         "--http",

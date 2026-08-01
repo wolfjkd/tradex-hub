@@ -1,5 +1,5 @@
 """
-Shared test fixtures for cn-financial-mcp tests.
+Shared test fixtures for tradex tests.
 """
 
 import sys
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-# Add src to path so tests can import cn_financial_mcp
+# Add src to path so tests can import tradex
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 
@@ -25,5 +25,5 @@ def sample_symbols():
 @pytest.fixture
 def mcp_server():
     """Get the MCP server instance with all tools registered."""
-    from cn_financial_mcp.server import mcp
+    from tradex.server import mcp
     return mcp

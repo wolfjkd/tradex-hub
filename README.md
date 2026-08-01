@@ -43,7 +43,7 @@
 AI Agent (WorkBuddy / Claude Code / Cursor)
         │  MCP 协议 (stdio)
         ▼
-  cn-financial-mcp ── FastMCP Server
+  tradex ── FastMCP Server
         │
         ├── AKShare 封装（43 工具）
         │     ├── company_info (4)   → 搜索/概况/竞品
@@ -273,10 +273,10 @@ source venv/bin/activate  # Linux/Mac
 # 或 venv\Scripts\activate  # Windows
 ```
 
-### 3. 安装 cn-financial-mcp
+### 3. 安装 tradex
 
 ```bash
-cd cn-financial-mcp
+cd tradex
 pip install hatchling editables
 pip install --no-build-isolation -e .
 ```
@@ -296,16 +296,16 @@ pip install akshare mcp pandas pydantic eltdx
 ```json
 {
   "mcpServers": {
-    "cn-financial-mcp": {
+    "tradex": {
       "command": "/path/to/venv/Scripts/python.exe",
-      "args": ["-m", "cn_financial_mcp"],
+      "args": ["-m", "tradex"],
       "env": {}
     }
   }
 }
 ```
 
-保存后重启 AI Agent，连接器页面 `cn-financial-mcp` 应显示绿色。
+保存后重启 AI Agent，连接器页面 `tradex` 应显示绿色。
 
 ---
 
@@ -317,7 +317,7 @@ pip install akshare mcp pandas pydantic eltdx
 查中国能建（601868）K线
 ```
 
-AI 会调用 `mcp__cn-financial-mcp__eltdx_get_kline`，返回 100 根日 K 线。
+AI 会调用 `mcp__tradex__eltdx_get_kline`，返回 100 根日 K 线。
 
 ---
 
@@ -346,7 +346,7 @@ AI 会调用 `mcp__cn-financial-mcp__eltdx_get_kline`，返回 100 根日 K 线�
 | v2.0.1 | 2026-06-17 | 集成 eltdx 5 个工具；修复 pyproject.toml hatchling 配置；47 工具全跑通 |
 | v2.0.0 | 2026-06-04 | eltdx 通达信协议集成（原 `eltdx_provider.py`） |
 | v1.0.0 | 2026-06-02 | 全市场综合分析引擎 |
-| v0.1.0 | 2026-06-01 | 项目初始化；集成 cn-financial-mcp |
+| v0.1.0 | 2026-06-01 | 项目初始化；集成 tradex |
 
 ---
 

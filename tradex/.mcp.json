@@ -3,8 +3,8 @@
     "cn-financial": {
       "type": "stdio",
       "command": "python",
-      "args": ["-m", "cn_financial_mcp"],
-      "cwd": "cn-financial-mcp/src"
+      "args": ["-m", "tradex"],
+      "cwd": "tradex/src"
     }
   }
 }

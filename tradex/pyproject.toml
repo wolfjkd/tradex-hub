@@ -3,14 +3,14 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "cn-financial-mcp"
+name = "tradex"
 version = "3.0.0"
 description = "China Financial Data MCP Server based on AKShare - Free alternative to commercial financial data MCPs"
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.10"
 authors = [
-    { name = "cn-financial-mcp Contributors" },
+    { name = "tradex Contributors" },
 ]
 keywords = ["mcp", "akshare", "a-share", "stock", "finance", "china", "financial"]
 classifiers = [
@@ -50,7 +50,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/cn_financial_mcp"]
+packages = ["src/tradex"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

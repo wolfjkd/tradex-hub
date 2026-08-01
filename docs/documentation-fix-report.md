@@ -44,8 +44,8 @@
 - 补充 smart_router / tick_store / ws_server 3 个基础设施模块
 - 更新版本信息为 0.3.0
 
-### 问题9: cn-financial-mcp/README.md 严重过时 ✅ (新增)
-**问题描述**: cn-financial-mcp 子项目的 README.md 严重过时，仍描述为42个工具
+### 问题9: tradex/README.md 严重过时 ✅ (新增)
+**问题描述**: tradex 子项目的 README.md 严重过时，仍描述为42个工具
 **修复内容**:
 - 工具数量从42个更新为61个
 - 添加signal_data和eltdx_data模块说明
@@ -53,7 +53,7 @@
 - 更新版本信息和致谢部分
 - 添加新的数据源fallback机制说明
 
-### 问题10: cn-financial-mcp/tests/test_server.py 测试过时 ✅ (新增)
+### 问题10: tradex/tests/test_server.py 测试过时 ✅ (新增)
 **问题描述**: 测试文件中的工具计数和版本检查与实际不符
 **修复内容**:
 - 测试方法名从test_all_42_tools_registered改为test_all_61_tools_registered
@@ -81,7 +81,7 @@
 - [x] architecture.md 版本: v2.3.0 ✅
 - [x] signal_data.py 工具列表: 14个 ✅
 - [x] astock_signals/__init__.py 模块清单: 14个 ✅
-- [x] cn-financial-mcp/README.md: 61个工具 ✅
+- [x] tradex/README.md: 61个工具 ✅
 - [x] config/mcp-servers.json: 61个工具 ✅
 
 ## 影响范围
@@ -89,10 +89,10 @@
 ### 修复的文件
 1. `README.md` - 主项目文档
 2. `docs/architecture.md` - 架构设计文档
-3. `cn-financial-mcp/src/cn_financial_mcp/tools/signal_data.py` - 信号数据工具模块
+3. `tradex/src/tradex/tools/signal_data.py` - 信号数据工具模块
 4. `src/astock_signals/__init__.py` - 信号数据模块初始化
-5. `cn-financial-mcp/README.md` - 子项目文档
-6. `cn-financial-mcp/tests/test_server.py` - 测试文件
+5. `tradex/README.md` - 子项目文档
+6. `tradex/tests/test_server.py` - 测试文件
 7. `.workbuddy/memory/2026-06-24.md` - 工作日志
 
 ### 不受影响的部分

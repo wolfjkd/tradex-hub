@@ -24,10 +24,10 @@ from astock_signals.ws_server import WsServer
 
 
 # ---------------------------------------------------------------------------
-# 路径设置：确保 cn_financial_mcp.config 可被 import
+# 路径设置：确保 tradex.config 可被 import
 # ---------------------------------------------------------------------------
 _CN_MCP_SRC = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), "..", "cn-financial-mcp", "src")
+    os.path.join(os.path.dirname(__file__), "..", "tradex", "src")
 )
 if _CN_MCP_SRC not in sys.path:
     sys.path.insert(0, _CN_MCP_SRC)
@@ -172,20 +172,20 @@ class TestConfigDefaults:
     def test_ws_server_enabled_default_false(self):
         """WS_SERVER_ENABLED 默认为 False（不启动 WebSocket）。"""
         # 确保环境变量未设置（避免被 .env 影响）
-        from cn_financial_mcp.config import Config
+        from tradex.config import Config
         cfg = Config()
         # 默认应为 False
         assert cfg.WS_SERVER_ENABLED is False
 
     def test_ws_port_default_8765(self):
         """WS_PORT 默认为 8765。"""
-        from cn_financial_mcp.config import Config
+        from tradex.config import Config
         cfg = Config()
         assert cfg.WS_PORT == 8765
 
     def test_ws_token_default_empty(self):
         """WS_TOKEN 默认为空字符串（不要求认证）。"""
-        from cn_financial_mcp.config import Config
+        from tradex.config import Config
         cfg = Config()
         assert cfg.WS_TOKEN == ""
 
@@ -195,14 +195,14 @@ class TestMainIntegration:
 
     def test_start_ws_server_function_exists(self):
         """__main__.py 定义了 _start_ws_server 函数。"""
-        from cn_financial_mcp import __main__
+        from tradex import __main__
         assert hasattr(__main__, "_start_ws_server")
         assert callable(__main__._start_ws_server)
 
     def test_main_does_not_start_ws_when_disabled(self, monkeypatch):
         """WS_SERVER_ENABLED=False 时 main() 不启动 WsServer。"""
-        from cn_financial_mcp import __main__
-        from cn_financial_mcp.config import Config
+        from tradex import __main__
+        from tradex.config import Config
 
         # 强制 WS_SERVER_ENABLED=False
         test_config = Config()
@@ -233,8 +233,8 @@ class TestMainIntegration:
 
     def test_start_ws_server_called_when_enabled(self, monkeypatch):
         """WS_SERVER_ENABLED=True 时应调用 _start_ws_server。"""
-        from cn_financial_mcp import __main__
-        from cn_financial_mcp.config import Config
+        from tradex import __main__
+        from tradex.config import Config
 
         test_config = Config()
         test_config.WS_SERVER_ENABLED = True
@@ -254,8 +254,8 @@ class TestMainIntegration:
 
     def test_start_ws_server_failure_does_not_crash(self, monkeypatch):
         """_start_ws_server 启动失败不阻止主流程（try/except 包裹）。"""
-        from cn_financial_mcp import __main__
-        from cn_financial_mcp.config import Config
+        from tradex import __main__
+        from tradex.config import Config
 
         test_config = Config()
         test_config.WS_SERVER_ENABLED = True

@@ -7,7 +7,7 @@ import pytest
 
 class TestServerSetup:
     def test_server_name(self, mcp_server):
-        assert mcp_server.name == "cn-financial-mcp"
+        assert mcp_server.name == "tradex"
 
     def test_all_88_tools_registered(self, mcp_server):
         tools = mcp_server._tool_manager._tools

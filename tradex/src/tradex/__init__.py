@@ -1,4 +1,4 @@
-"""cn-financial-mcp: China Financial Data MCP Server based on AKShare."""
+"""tradex: China Financial Data MCP Server based on AKShare."""
 
 from pathlib import Path
 

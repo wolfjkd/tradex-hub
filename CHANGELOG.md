@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0
 ## [3.0.0] - 2026-08-01
 
 ### BREAKING CHANGES
-- 版本号统一：cn-financial-mcp v2.5.1 → v3.0.0，astock_signals v0.4.0 → v1.0.0，新增 VERSION 文件作为单一事实来源
+- 版本号统一：tradex v2.5.1 → v3.0.0，astock_signals v0.4.0 → v1.0.0，新增 VERSION 文件作为单一事实来源
 - 模块激活：smart_router / tick_store / ws_server 从"独立僵尸"变为"主流程组件"
 - 代码重复消除：删除 utils/em_client.py，统一使用 astock_signals.anti_ban_client
 - 文件拆分：signal_data.py 拆分为 5 个子模块（signal_data_base/flow/etf/cb/board）
@@ -128,8 +128,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0
 - 修复architecture.md架构文档严重过时，全面更新为当前架构
 - 修复signal_data.py内部注释不一致（工具数量和编号）
 - 修复astock_signals/__init__.py模块清单不全（11→14个模块）
-- 修复cn-financial-mcp/README.md严重过时（42→61工具）
-- 修复cn-financial-mcp/tests/test_server.py测试过时（42→61工具）
+- 修复tradex/README.md严重过时（42→61工具）
+- 修复tradex/tests/test_server.py测试过时（42→61工具）
 - 修复README.md数据源描述不准确（AKShare 50→56工具）
 
 ### Changed
@@ -151,7 +151,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0
 
 ### Changed
 - astock_signals 版本 0.2.0 → 0.3.0，模块数 9 → 14（含 smart_router/tick_store/ws_server）
-- cn-financial-mcp 版本 2.2.0 → 2.3.0，MCP 工具数 57 → 61（信号数据 10 → 14）
+- tradex 版本 2.2.0 → 2.3.0，MCP 工具数 57 → 61（信号数据 10 → 14）
 - signal_data.py V0.7 → V0.8，工具数 10 → 14
 
 ### Testing
@@ -174,7 +174,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 ### Changed
 - `astock_signals/__init__.py` 版本升至 0.2.0，导出 9 个模块（原 5 → 现 9）
 - `signal_data.py` 版本升至 V0.7，工具数从 6 增至 10
-- `cn-financial-mcp` 版本升至 2.2.0，MCP 工具总数 53 → 57
+- `tradex` 版本升至 2.2.0，MCP 工具总数 53 → 57
 - README 更新工具清单和版本历史
 
 ### Architecture

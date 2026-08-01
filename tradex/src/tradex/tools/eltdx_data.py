@@ -26,14 +26,8 @@ import time
 import threading
 from typing import Any, Optional
 
-logger = logging.getLogger("cn-financial-mcp.eltdx")
+logger = logging.getLogger("tradex.eltdx")
 
-# Hub src path for astock_signals imports (TickStore)
-_HUB_SRC = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "src")
-)
-if _HUB_SRC not in sys.path:
-    sys.path.insert(0, _HUB_SRC)
 
 # TickStore SQLite DB path: <project_root>/data/tick_store.db
 _PROJECT_ROOT = os.path.normpath(

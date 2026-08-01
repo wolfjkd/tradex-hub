@@ -4,7 +4,7 @@
 检测所有数据源的可用性和响应速度
 
 数据源架构（2026-06-24 更新）：
-  主力：cn-financial-mcp（AKShare + 东财直连 + 同花顺，61 工具）
+  主力：tradex（AKShare + 东财直连 + 同花顺，61 工具）
   辅助：tdx-connector（通达信协议，独立 connector）
   已废弃：ftshare / Wind MCP / 腾讯直连（均已下线或不可用）
 """
@@ -22,7 +22,7 @@ DATA_SOURCES = {
         "type": "HTTP",
         "test_url": "https://push2.eastmoney.com/api/qt/ulist.np/get?fields=f12,f14&secids=1.600519",
         "priority": "P0",
-        "note": "cn-financial-mcp 主力数据源"
+        "note": "tradex 主力数据源"
     },
     "akshare_tencent": {
         "name": "腾讯行情",
@@ -52,10 +52,10 @@ DATA_SOURCES = {
         "priority": "P1",
         "note": "北向资金/涨停归因数据源"
     },
-    "cn_financial_mcp": {
-        "name": "cn-financial-mcp",
+    "tradex": {
+        "name": "tradex",
         "type": "MCP",
-        "test_script": "import sys, os\nsys.path.insert(0, os.path.join('cn-financial-mcp', 'src'))\nfrom cn_financial_mcp.server import mcp\nprint('OK')",
+        "test_script": "import sys, os\nsys.path.insert(0, os.path.join('tradex', 'src'))\nfrom tradex.server import mcp\nprint('OK')",
         "priority": "P0",
         "note": "61 个 MCP 工具的统一入口"
     },

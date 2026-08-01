@@ -22,13 +22,13 @@ from astock_signals.smart_router import SmartRouter, SourceHealth, get_router
 
 
 # ---------------------------------------------------------------------------
-# 确保 cn_financial_mcp.tools.signal_data_flow 可被 import（注册 6 个源）
+# 确保 tradex.tools.signal_data_flow 可被 import（注册 6 个源）
 # ---------------------------------------------------------------------------
 import os
 import sys
 
 _CN_MCP_SRC = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), "..", "cn-financial-mcp", "src")
+    os.path.join(os.path.dirname(__file__), "..", "tradex", "src")
 )
 if _CN_MCP_SRC not in sys.path:
     sys.path.insert(0, _CN_MCP_SRC)
@@ -58,7 +58,7 @@ class TestSignalDataFlowRegistration:
     def test_six_sources_registered(self):
         """导入 signal_data_flow 后全局 router 注册 6 个源（3 类型 × 2 源）。"""
         # 导入触发模块级 _router.register() 调用（6 次）
-        from cn_financial_mcp.tools import signal_data_flow  # noqa: F401
+        from tradex.tools import signal_data_flow  # noqa: F401
 
         router = get_router()
         report = router.get_health_report()
@@ -78,7 +78,7 @@ class TestSignalDataFlowRegistration:
 
     def test_data_types_have_two_sources_each(self):
         """每种数据类型恰好有 2 个源（一主一备）。"""
-        from cn_financial_mcp.tools import signal_data_flow  # noqa: F401
+        from tradex.tools import signal_data_flow  # noqa: F401
 
         router = get_router()
         for data_type in ("fund_flow", "dragon_tiger", "industry_comparison"):

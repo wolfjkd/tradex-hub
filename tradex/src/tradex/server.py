@@ -1,5 +1,5 @@
 """
-cn-financial-mcp: China Financial Data MCP Server based on AKShare.
+tradex: China Financial Data MCP Server based on AKShare.
 
 Provides free financial data for Chinese mainland market via MCP protocol.
 Supports stdio (dev) and HTTP/SSE (production) transport modes.
@@ -14,9 +14,9 @@ logger = logging.getLogger(__name__)
 
 # Create the MCP server instance
 mcp = FastMCP(
-    name="cn-financial-mcp",
+    name="tradex",
     instructions=(
-        "cn-financial-mcp provides free Chinese mainland financial data via AKShare. "
+        "tradex provides free Chinese mainland financial data via AKShare. "
         "Use the available tools to search stocks, get real-time quotes, historical prices, "
         "financial statements, valuation metrics, industry data, market overview, news, "
         "and macroeconomic indicators. All stock codes should be 6-digit A-share codes "
@@ -34,7 +34,7 @@ def register_all_tools():
     """
     from .tools.registry import ToolRegistry
 
-    tools_package = importlib.import_module("cn_financial_mcp.tools")
+    tools_package = importlib.import_module("tradex.tools")
     registered = ToolRegistry.discover_and_register(tools_package, mcp)
     logger.info("已注册 %d 个工具模块: %s", len(registered), ", ".join(registered))
 

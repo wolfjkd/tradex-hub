@@ -21,7 +21,7 @@ Usage:
             ...
 
     # 自动发现所有工具模块
-    ToolRegistry.auto_discover(importlib.import_module("cn_financial_mcp.tools"))
+    ToolRegistry.auto_discover(importlib.import_module("tradex.tools"))
 
     # 按分类查询工具
     tools = ToolRegistry.get_by_category("L1-数据获取")
