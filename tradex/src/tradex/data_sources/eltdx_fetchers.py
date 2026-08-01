@@ -22,7 +22,8 @@ logger = logging.getLogger("tradex.eltdx")
 # ============================================================
 
 _client: Optional[Any] = None
-_client_lock = False
+_client_lock = threading.Lock()
+_client_initializing = False
 
 
 def _get_client():
@@ -30,13 +31,18 @@ def _get_client():
 
     关闭 probe_hosts（避免冷启动慢），使用默认 host 列表。
     第一次调用时建立连接，后续复用。
+    v3.1.4 起：使用 threading.Lock 替代布尔值标志，修复多线程竞态。
     """
-    global _client, _client_lock
+    global _client, _client_initializing
     if _client is not None:
         return _client
-    if _client_lock:
-        return None
-    _client_lock = True
+    with _client_lock:
+        # 双重检查：拿到锁后再次确认（其他线程可能已初始化）
+        if _client is not None:
+            return _client
+        if _client_initializing:
+            return None
+        _client_initializing = True
     try:
         from eltdx import TdxClient
         _client = TdxClient.from_hosts(timeout=8.0, pool_size=1)
@@ -48,7 +54,8 @@ def _get_client():
         _client = None
         return None
     finally:
-        _client_lock = False
+        with _client_lock:
+            _client_initializing = False
 
 
 def _shutdown_client() -> None:
@@ -171,7 +178,8 @@ def fetch_f10_profile(code: str = "", symbol: str = "", **kwargs) -> dict:
 def fetch_realtime_quote(code: str = "", symbol: str = "", **kwargs):
     """实时行情（eltdx 源）。返回单行 DataFrame，含'代码'列。
 
-    eltdx 无全市场快照接口，使用 bars.get(count=1) 取最新一根 K 线作为快照。
+    使用 client.get_quote() 获取真正的实时报价（QuoteSnapshot），
+    字段比 K 线最后一根完整：含涨跌额/涨跌幅/昨收/内外盘/现手等。
     兼容 symbol/code 两种参数名（SmartRouter 路由归一化）。
     """
     import pandas as pd
@@ -179,21 +187,24 @@ def fetch_realtime_quote(code: str = "", symbol: str = "", **kwargs):
     if client is None:
         raise RuntimeError("eltdx client not available")
     norm_code = _normalize_symbol_code(symbol, code)
-    result = client.bars.get(norm_code, period="day", count=1)
-    bars = getattr(result, "bars", None) or []
-    if not bars:
-        raise RuntimeError("eltdx returned no bars")
-    b = bars[-1]
+    quotes = client.get_quote(norm_code)
+    if not quotes:
+        raise RuntimeError("eltdx returned no quote")
+    q = quotes[0]
     return pd.DataFrame([{
-        "代码": _strip_prefix(norm_code),
-        "最新价": getattr(b, "close", None),
-        "今开": getattr(b, "open", None),
-        "最高": getattr(b, "high", None),
-        "最低": getattr(b, "low", None),
-        "收盘": getattr(b, "close", None),
-        "开盘": getattr(b, "open", None),
-        "成交量": getattr(b, "volume_lots", None),
-        "成交额": getattr(b, "amount", None),
+        "代码": getattr(q, "code", _strip_prefix(norm_code)),
+        "最新价": getattr(q, "last_price", None),
+        "昨收": getattr(q, "pre_close_price", None),
+        "今开": getattr(q, "open_price", None),
+        "最高": getattr(q, "high_price", None),
+        "最低": getattr(q, "low_price", None),
+        "涨跌额": getattr(q, "change", None),
+        "涨跌幅": getattr(q, "change_pct", None),
+        "成交量": getattr(q, "total_hand", None),  # 单位：手
+        "成交额": getattr(q, "amount", None),
+        "内盘": getattr(q, "inside_dish", None),
+        "外盘": getattr(q, "outer_disc", None),
+        "现手": getattr(q, "current_hand", None),
     }])
 
 

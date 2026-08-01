@@ -84,8 +84,8 @@ def register_all_sources() -> None:
     router.register("market_overview", "akshare", akf.fetch_market_overview, priority=1)
     router.register("news_data", "akshare", akf.fetch_news_data, priority=1)
     router.register("macro_data", "akshare", akf.fetch_macro_data, priority=1)
-    router.register("etf_data", "akshare", asf.fetch_etf_data, priority=1)
-    router.register("cb_data", "akshare", asf.fetch_cb_data, priority=1)
+    router.register("etf_data", "astock_signals", asf.fetch_etf_data, priority=1)
+    router.register("cb_data", "astock_signals", asf.fetch_cb_data, priority=1)
     router.register("hot_stocks", "akshare", akf.fetch_hot_stocks, priority=1)
 
     # ── 东财主 + akshare 备 ──

@@ -42,44 +42,55 @@ class TestEltdxFetcherParamCompat:
         """关键回归：route('realtime_quote', symbol=...) 必须能路由到 eltdx。"""
         from tradex.data_sources import eltdx_fetchers
 
-        # mock client 返回 1 根 bar
-        fake_bar = MagicMock()
-        fake_bar.close = 1350.6
-        fake_bar.open = 1330.0
-        fake_bar.high = 1355.0
-        fake_bar.low = 1325.0
-        fake_bar.volume_lots = 55127.52
-        fake_bar.amount = 7373462528.0
-        fake_result = MagicMock()
-        fake_result.bars = [fake_bar]
+        # mock client.get_quote() 返回 QuoteSnapshot（v3.1.4 起用 get_quote 替代 bars.get）
+        fake_quote = MagicMock()
+        fake_quote.code = "600519"
+        fake_quote.last_price = 1350.6
+        fake_quote.pre_close_price = 1361.76
+        fake_quote.open_price = 1330.03
+        fake_quote.high_price = 1355.72
+        fake_quote.low_price = 1325.77
+        fake_quote.change = -11.16
+        fake_quote.change_pct = -0.82
+        fake_quote.total_hand = 55127
+        fake_quote.amount = 7373462528.0
+        fake_quote.inside_dish = 28574
+        fake_quote.outer_disc = 26554
+        fake_quote.current_hand = 677
 
         with patch.object(eltdx_fetchers, "_get_client") as mock_client:
-            mock_client.return_value.bars.get.return_value = fake_result
+            mock_client.return_value.get_quote.return_value = [fake_quote]
             # 用 symbol= 调用（工具层 price_data.py 的调用方式）
             df = eltdx_fetchers.fetch_realtime_quote(symbol="600519")
             assert len(df) == 1
             assert df.iloc[0]["代码"] == "600519"
-            assert df.iloc[0]["成交量"] == 55127.52  # 不再是 None
-            # 验证 client.bars.get 收到的代码非空
-            call_args = mock_client.return_value.bars.get.call_args
+            assert df.iloc[0]["成交量"] == 55127  # total_hand
+            assert df.iloc[0]["涨跌幅"] == -0.82  # change_pct（v3.1.4 新增字段）
+            # 验证 get_quote 收到的代码非空
+            call_args = mock_client.return_value.get_quote.call_args
             assert call_args[0][0]  # norm_code 非空
 
     def test_fetch_realtime_quote_accepts_code(self):
         """eltdx_data.py 用 code= 调用，必须保持兼容。"""
         from tradex.data_sources import eltdx_fetchers
 
-        fake_bar = MagicMock()
-        fake_bar.close = 10.0
-        fake_bar.open = 9.5
-        fake_bar.high = 10.5
-        fake_bar.low = 9.0
-        fake_bar.volume_lots = 1000.0
-        fake_bar.amount = 100000.0
-        fake_result = MagicMock()
-        fake_result.bars = [fake_bar]
+        fake_quote = MagicMock()
+        fake_quote.code = "600519"
+        fake_quote.last_price = 10.0
+        fake_quote.pre_close_price = 9.8
+        fake_quote.open_price = 9.5
+        fake_quote.high_price = 10.5
+        fake_quote.low_price = 9.0
+        fake_quote.change = 0.2
+        fake_quote.change_pct = 2.04
+        fake_quote.total_hand = 1000
+        fake_quote.amount = 100000.0
+        fake_quote.inside_dish = 500
+        fake_quote.outer_disc = 500
+        fake_quote.current_hand = 10
 
         with patch.object(eltdx_fetchers, "_get_client") as mock_client:
-            mock_client.return_value.bars.get.return_value = fake_result
+            mock_client.return_value.get_quote.return_value = [fake_quote]
             df = eltdx_fetchers.fetch_realtime_quote(code="600519")
             assert df.iloc[0]["代码"] == "600519"
 
