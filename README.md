@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/License-Apache--2.0-yellow.svg" alt="License"/>
   <img src="https://img.shields.io/badge/Data-A股-red.svg" alt="Data Scope"/>
   <img src="https://img.shields.io/badge/Tools-89-orange.svg" alt="MCP Tools"/>
-  <img src="https://img.shields.io/badge/Version-3.1.1-blue.svg" alt="Version"/>
+  <img src="https://img.shields.io/badge/Version-3.1.2-blue.svg" alt="Version"/>
 </p>
 
 ---
@@ -344,6 +344,7 @@ AI 会调用 `mcp__tradex__eltdx_get_kline`，返回 100 根日 K 线。
 
 | 版本 | 日期 | 内容 |
 |------|------|------|
+| v3.1.2 | 2026-08-02 | 删除 v2.x 遗留 `src/` 目录（data_manager/market_analyzer，依赖已删的 eltdx_provider），清理 diagnostics.py 的 `src.astock_signals` fallback 死代码 |
 | v3.1.1 | 2026-08-02 | 修复 pytest warning：注册 `network` marker（根 + tradex pyproject.toml），消除 tradex/tests 4 个 PytestUnknownMarkWarning |
 | v3.1.0 | 2026-08-02 | 项目改名 tradex-hub（包名 cn_financial_mcp→tradex），astock_signals 独立成包 v1.1.0，SmartRouter 全量覆盖 25 数据类型 34 源，data_sources 数据源层接入，新增数据源看板（`python -m tradex.dashboard` 端口 8765 + MCP 工具 `get_data_source_dashboard`），工具数 88→89 |
 | v3.0.0 | 2026-08-01 | 架构大重构:版本号单一事实来源、僵尸模块激活、em_client 合并、signal_data 拆分、MCP_HOST 安全加固 |

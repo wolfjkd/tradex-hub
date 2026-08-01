@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
 
+## [3.1.2] - 2026-08-02
+
+### Removed
+- 删除 `src/` 目录（v2.x 遗留死代码）：
+  - `src/__init__.py`：引用 `data_manager`，链式依赖已删的 `eltdx_provider`，导致 `import src` 失败
+  - `src/data_manager.py`：v2.x 多数据源管理器，引用已删除的 `src/eltdx_provider`（v3.1.0 删除），功能已被 tradex 包的 `data_sources/` + SmartRouter 替代
+  - `src/market_analyzer.py`：v2.0 全市场分析引擎，功能已被 tradex 包的 `analysis_engine.py` 等替代
+- 版本号 3 处同步调整：`src/__init__.py` 删除后，版本号来源变为 `VERSION` 文件（单一事实来源）+ `tradex/pyproject.toml` + `tradex/src/tradex/__init__.py`（动态读 VERSION）
+
+### Changed
+- `tradex/src/tradex/tools/diagnostics.py` 的 `_get_router()`：移除 `from src.astock_signals.smart_router import get_router` 的 fallback 死代码（`src/astock_signals/` 在 v3.1.0 已删除独立成包），简化为直接 `from astock_signals.smart_router import get_router`
+
+### 验证
+- `import tradex` 正常（v3.1.2）
+- `_get_router()` 返回 SmartRouter 对象（astock_signals 独立包导入正常）
+- tests: 317 passed
+- tradex/tests: 33 passed, 1 skipped
+- 无 warning
+
+### 升级指引
+- 无需手动操作，`src/` 目录删除不影响 tradex 包运行（tradex 是独立包）
+
 ## [3.1.1] - 2026-08-02
 
 ### Fixed
