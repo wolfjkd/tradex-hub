@@ -1,13 +1,13 @@
 {
   "version": "3.1",
-  "description": "tradex-hub 金融数据中枢 - MCP Server 配置（v3.1.1）",
+  "description": "tradex-hub 金融数据中枢 - MCP Server 配置（v3.1.2）",
   "servers": {
     "tradex": {
       "name": "tradex 金融数据中枢",
       "type": "stdio",
       "tools": 89,
       "modules": ["company_info(4)", "price_data(5)", "financial_stmt(8)", "valuation(4)", "industry(5)", "market(5)", "news_events(4)", "macro_fx(8)", "signal_data(17)", "eltdx_data(5)", "technical_indicators(6)", "performance_metrics(2)", "signal_generation(3)", "factor_analysis(2)", "stock_screening(2)", "diagnostics(5)", "composite_analysis(3)", "analysis_engine(1)"],
-      "version": "3.1.1",
+      "version": "3.1.2",
       "note": "eltdx行情类第一主源+AKShare第二源+东财/同花顺备用，89个MCP工具，三层架构(L1数据/L2计算/L3决策)，SmartRouter 25类型34源全量覆盖，数据源看板 python -m tradex.dashboard"
     },
     "tdx-connector": {

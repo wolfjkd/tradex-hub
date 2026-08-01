@@ -26,18 +26,13 @@ from .registry import ToolRegistry
 def _get_router():
     """获取共享的 SmartRouter 单例（与 signal_data_flow 共享健康数据）。
 
-    优先从 astock_signals 导入（由 signal_data_flow 设置 sys.path），
-    回退到 src.astock_signals 路径。不可用时返回 None。
+    从 astock_signals 导入（独立包 v1.1.0）。不可用时返回 None。
     """
     try:
         from astock_signals.smart_router import get_router
         return get_router()
     except ImportError:
-        try:
-            from src.astock_signals.smart_router import get_router
-            return get_router()
-        except ImportError:
-            return None
+        return None
 
 
 def _ts_to_iso(ts) -> str:
