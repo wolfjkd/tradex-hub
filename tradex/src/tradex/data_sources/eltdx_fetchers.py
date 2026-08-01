@@ -94,12 +94,27 @@ def _strip_prefix(code: str) -> str:
 # fetch_fn 包装器
 # ============================================================
 
-def fetch_call_auction(code: str = "", **kwargs) -> Any:
-    """集合竞价数据（eltdx 独占源）。返回 eltdx auctions.series 原始结果对象。"""
+def _normalize_symbol_code(symbol: str = "", code: str = "") -> str:
+    """归一化股票代码参数：同时接受 symbol 和 code，返回非空者。
+
+    解决 SmartRouter.route(**kwargs) 原样转发参数时，
+    不同 fetcher 参数名不一致（symbol vs code）导致主源失败的 P0 bug。
+    """
+    raw = code or symbol
+    if not raw:
+        raise RuntimeError("stock code is required (symbol or code)")
+    return _normalize_code(raw)
+
+
+def fetch_call_auction(code: str = "", symbol: str = "", **kwargs) -> Any:
+    """集合竞价数据（eltdx 独占源）。返回 eltdx auctions.series 原始结果对象。
+
+    兼容 symbol/code 两种参数名（SmartRouter 路由归一化）。
+    """
     client = _get_client()
     if client is None:
         raise RuntimeError("eltdx client not available")
-    norm_code = _normalize_code(code)
+    norm_code = _normalize_symbol_code(symbol, code)
     result = client.auctions.series(norm_code)
     if result is None:
         raise RuntimeError("auction series is empty")
@@ -109,12 +124,15 @@ def fetch_call_auction(code: str = "", **kwargs) -> Any:
     return result
 
 
-def fetch_tick_data(code: str = "", trading_date: str = "", count: int = 2000, **kwargs) -> Any:
-    """逐笔成交数据（eltdx 独占源）。返回 eltdx trades.history 原始结果对象。"""
+def fetch_tick_data(code: str = "", symbol: str = "", trading_date: str = "", count: int = 2000, **kwargs) -> Any:
+    """逐笔成交数据（eltdx 独占源）。返回 eltdx trades.history 原始结果对象。
+
+    兼容 symbol/code 两种参数名（SmartRouter 路由归一化）。
+    """
     client = _get_client()
     if client is None:
         raise RuntimeError("eltdx client not available")
-    norm_code = _normalize_code(code)
+    norm_code = _normalize_symbol_code(symbol, code)
     norm_date = (trading_date or "").replace("-", "").replace("/", "")
     result = client.trades.history(norm_code, norm_date, count=count)
     ticks = getattr(result, "ticks", None) or []
@@ -123,12 +141,18 @@ def fetch_tick_data(code: str = "", trading_date: str = "", count: int = 2000, *
     return result
 
 
-def fetch_f10_profile(code: str = "", **kwargs) -> dict:
-    """F10 资料（eltdx 独占源）。返回含 profile/topics/diagnosis 原始响应的 dict。"""
+def fetch_f10_profile(code: str = "", symbol: str = "", **kwargs) -> dict:
+    """F10 资料（eltdx 独占源）。返回含 profile/topics/diagnosis 原始响应的 dict。
+
+    兼容 symbol/code 两种参数名（SmartRouter 路由归一化）。
+    """
     client = _get_client()
     if client is None:
         raise RuntimeError("eltdx client not available")
-    norm_code = code.strip()
+    raw = code or symbol
+    if not raw:
+        raise RuntimeError("stock code is required (symbol or code)")
+    norm_code = raw.strip()
     if norm_code.startswith(("sz", "sh", "bj")):
         norm_code = norm_code[2:]
 
@@ -144,16 +168,17 @@ def fetch_f10_profile(code: str = "", **kwargs) -> dict:
     }
 
 
-def fetch_realtime_quote(code: str = "", **kwargs):
+def fetch_realtime_quote(code: str = "", symbol: str = "", **kwargs):
     """实时行情（eltdx 源）。返回单行 DataFrame，含'代码'列。
 
     eltdx 无全市场快照接口，使用 bars.get(count=1) 取最新一根 K 线作为快照。
+    兼容 symbol/code 两种参数名（SmartRouter 路由归一化）。
     """
     import pandas as pd
     client = _get_client()
     if client is None:
         raise RuntimeError("eltdx client not available")
-    norm_code = _normalize_code(code)
+    norm_code = _normalize_symbol_code(symbol, code)
     result = client.bars.get(norm_code, period="day", count=1)
     bars = getattr(result, "bars", None) or []
     if not bars:
@@ -167,18 +192,22 @@ def fetch_realtime_quote(code: str = "", **kwargs):
         "最低": getattr(b, "low", None),
         "收盘": getattr(b, "close", None),
         "开盘": getattr(b, "open", None),
-        "成交量": getattr(b, "volume", None),
+        "成交量": getattr(b, "volume_lots", None),
         "成交额": getattr(b, "amount", None),
     }])
 
 
-def fetch_historical_kline(code: str = "", period: str = "day", count: int = 100, **kwargs):
-    """历史 K 线（eltdx 源）。返回中文列名 DataFrame（与 akshare 口径对齐）。"""
+def fetch_historical_kline(code: str = "", symbol: str = "", period: str = "day", count: int = 100, **kwargs):
+    """历史 K 线（eltdx 源）。返回中文列名 DataFrame（与 akshare 口径对齐）。
+
+    兼容 symbol/code 两种参数名（SmartRouter 路由归一化）。
+    KlineBar 字段映射（v3.1.3 修复）：date→time, volume→volume_lots。
+    """
     import pandas as pd
     client = _get_client()
     if client is None:
         raise RuntimeError("eltdx client not available")
-    norm_code = _normalize_code(code)
+    norm_code = _normalize_symbol_code(symbol, code)
     result = client.bars.get(norm_code, period=period, count=count)
     bars = getattr(result, "bars", None) or []
     if not bars:
@@ -186,24 +215,27 @@ def fetch_historical_kline(code: str = "", period: str = "day", count: int = 100
     rows = []
     for b in bars:
         rows.append({
-            "日期": getattr(b, "date", None) or getattr(b, "datetime", None),
+            "日期": getattr(b, "time", None),
             "开盘": getattr(b, "open", None),
             "最高": getattr(b, "high", None),
             "最低": getattr(b, "low", None),
             "收盘": getattr(b, "close", None),
-            "成交量": getattr(b, "volume", None),
+            "成交量": getattr(b, "volume_lots", None),
             "成交额": getattr(b, "amount", None),
         })
     return pd.DataFrame(rows)
 
 
-def fetch_minute_data(code: str = "", **kwargs):
-    """分时数据（eltdx 源）。返回中文列名 DataFrame（时间/价格/均价/成交量）。"""
+def fetch_minute_data(code: str = "", symbol: str = "", **kwargs):
+    """分时数据（eltdx 源）。返回中文列名 DataFrame（时间/价格/均价/成交量）。
+
+    兼容 symbol/code 两种参数名（SmartRouter 路由归一化）。
+    """
     import pandas as pd
     client = _get_client()
     if client is None:
         raise RuntimeError("eltdx client not available")
-    norm_code = _normalize_code(code)
+    norm_code = _normalize_symbol_code(symbol, code)
     result = client.minutes.today(norm_code)
     points = getattr(result, "points", None) or []
     if not points:

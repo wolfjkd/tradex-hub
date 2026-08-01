@@ -4,6 +4,34 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
 
+## [3.1.3] - 2026-08-02
+
+### Fixed
+- **P0 bug：SmartRouter 参数名不匹配导致 eltdx 主源永远失败**
+  - 根因：`SmartRouter.route(**kwargs)` 原样转发参数，但不同 fetcher 参数名不一致（eltdx 用 `code=`，akshare/http 行情类用 `symbol=`），导致工具层 `route("realtime_quote", symbol=...)` 传 `symbol=` 时，eltdx fetcher 收到 `code=""` 失败，SmartRouter 一直降级到 akshare 全量快照（14 秒 vs eltdx 200ms）
+  - 修复：所有行情/信号类 fetcher 同时接受 `symbol` 和 `code`，内部归一化（`code = code or symbol` 或 `symbol = symbol or code`）
+  - 影响 fetcher：`eltdx_fetchers.py`（6 函数）、`akshare_fetchers.py`（3 函数）、`http_fetchers.py`（2 函数）、`astock_signals_fetchers.py`（8 函数）
+- **P0 bug：eltdx KlineBar 字段映射错误**
+  - 根因：`eltdx_fetchers.py` 用 `getattr(b, "date", None)` 和 `getattr(b, "volume", None)`，但 eltdx 1.2.0 的 `KlineBar` 实际字段是 `time` 和 `volume_lots`
+  - 现象：`eltdx_get_kline` 工具返回 `date="None"`、`volume=0.0`
+  - 修复：字段映射改为 `time`（日期）和 `volume_lots`（成交量）
+
+### Added
+- 新增 `tests/test_fetcher_param_compat.py`：17 个参数归一化回归测试
+  - 覆盖 eltdx/akshare/http/astock_signals 四类 fetcher 的 symbol/code 兼容性
+  - 覆盖 KlineBar 字段映射（time/volume_lots）
+  - 覆盖 SmartRouter 端到端参数路由（含降级场景）
+
+### 验证
+- `python -m pytest tests -q`：334 passed（317 旧 + 17 新）
+- `python -m pytest tradex/tests -q`：33 passed, 1 skipped
+- 端到端实测：`get_realtime_quote(symbol=600519)` 路由到 eltdx 主源（200ms，单股返回，成交量 55127.52）
+- 端到端实测：`get_historical_price(symbol=600519)` 路由到 eltdx 主源，日期/成交量字段正确
+
+### 升级指引
+- 无需手动操作，`pip install -e . --force-reinstall --no-deps` 重新安装 tradex 包即可
+- eltdx 主源现在真正生效，行情类查询性能提升约 70 倍（14s → 200ms）
+
 ## [3.1.2] - 2026-08-02
 
 ### Removed

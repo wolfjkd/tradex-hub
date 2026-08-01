@@ -31,12 +31,14 @@ def _as():
 # fund_flow — 东财 em_push2 源（主源）
 # ============================================================
 
-def fetch_fund_flow_em(code: str = "", curr_date: str = "", include_history: bool = True, **kwargs) -> dict:
+def fetch_fund_flow_em(code: str = "", symbol: str = "", curr_date: str = "", include_history: bool = True, **kwargs) -> dict:
     """个股资金流向（东财 push2，via astock_signals.get_fund_flow_json）。
 
     空数据/异常时抛 RuntimeError 触发 SmartRouter 降级到 akshare。
+    兼容 symbol/code 两种参数名（SmartRouter 路由归一化）。
     """
     asig = _as()
+    code = code or symbol
     result = asig.get_fund_flow_json(code, curr_date, include_history)
     if result.get("error") or (not result.get("realtime") and not result.get("history")):
         err = result.get("error", "东财返回空数据")
@@ -48,12 +50,14 @@ def fetch_fund_flow_em(code: str = "", curr_date: str = "", include_history: boo
 # dragon_tiger — 东财 em_datacenter 源（主源）
 # ============================================================
 
-def fetch_dragon_tiger_em(code: str = "", trade_date: str = "", look_back_days: int = 30, **kwargs) -> dict:
+def fetch_dragon_tiger_em(code: str = "", symbol: str = "", trade_date: str = "", look_back_days: int = 30, **kwargs) -> dict:
     """龙虎榜（东财 datacenter，via astock_signals.get_dragon_tiger_board_json）。
 
     空数据/异常时抛 RuntimeError 触发 SmartRouter 降级到 akshare。
+    兼容 symbol/code 两种参数名（SmartRouter 路由归一化）。
     """
     asig = _as()
+    code = code or symbol
     result = asig.get_dragon_tiger_board_json(code, trade_date, look_back_days)
     has_data = (
         result.get("appearances")
@@ -71,12 +75,14 @@ def fetch_dragon_tiger_em(code: str = "", trade_date: str = "", look_back_days: 
 # industry_comparison — 东财 em_push2 源（主源）
 # ============================================================
 
-def fetch_industry_comparison_em(code: str = "", trade_date: str = "", top_n: int = 20, **kwargs) -> dict:
+def fetch_industry_comparison_em(code: str = "", symbol: str = "", trade_date: str = "", top_n: int = 20, **kwargs) -> dict:
     """行业横向对比（东财 push2，via astock_signals.get_industry_comparison_json）。
 
     空数据/异常时抛 RuntimeError 触发 SmartRouter 降级到 akshare。
+    兼容 symbol/code 两种参数名（SmartRouter 路由归一化）。
     """
     asig = _as()
+    code = code or symbol
     result = asig.get_industry_comparison_json(code, trade_date, top_n)
     if result.get("error") or not result.get("industries"):
         err = result.get("error", "东财返回空数据")
@@ -104,14 +110,16 @@ def fetch_northbound_ths(curr_date: str = "", include_history: bool = False, **k
 # hot_money — 同花顺 ths_editorial 源（独占）
 # ============================================================
 
-def fetch_hot_money(date: str = "", code: str = "", **kwargs):
+def fetch_hot_money(date: str = "", code: str = "", symbol: str = "", **kwargs):
     """涨停归因/涨停揭秘（同花顺 editorial，独占源）。
 
     通过 code 参数分派：
       - code 为空: 调用 get_hot_stocks_json(date) 返回涨停归因
       - code 非空: 调用 get_limit_up_insight(code) 返回涨停揭秘
+    兼容 symbol/code 两种参数名（SmartRouter 路由归一化）。
     """
     asig = _as()
+    code = code or symbol
     if code:
         return asig.get_limit_up_insight(code)
     return asig.get_hot_stocks_json(date)
@@ -121,9 +129,13 @@ def fetch_hot_money(date: str = "", code: str = "", **kwargs):
 # lockup_expiry — 东财 em_datacenter 源（独占）
 # ============================================================
 
-def fetch_lockup_expiry(symbol: str = "", trade_date: str = "", forward_days: int = 90, **kwargs) -> dict:
-    """限售解禁日历（东财 datacenter，独占源，via astock_signals.get_lockup_expiry_json）。"""
+def fetch_lockup_expiry(symbol: str = "", code: str = "", trade_date: str = "", forward_days: int = 90, **kwargs) -> dict:
+    """限售解禁日历（东财 datacenter，独占源，via astock_signals.get_lockup_expiry_json）。
+
+    兼容 symbol/code 两种参数名（SmartRouter 路由归一化）。
+    """
     asig = _as()
+    symbol = symbol or code
     return asig.get_lockup_expiry_json(symbol, trade_date, forward_days)
 
 
@@ -131,9 +143,13 @@ def fetch_lockup_expiry(symbol: str = "", trade_date: str = "", forward_days: in
 # concept_attribution — 东财 em_push2delay 源
 # ============================================================
 
-def fetch_concept_attribution(symbol: str = "", **kwargs) -> dict:
-    """概念板块归属（东财 push2delay，via astock_signals.get_concept_blocks_json）。"""
+def fetch_concept_attribution(symbol: str = "", code: str = "", **kwargs) -> dict:
+    """概念板块归属（东财 push2delay，via astock_signals.get_concept_blocks_json）。
+
+    兼容 symbol/code 两种参数名（SmartRouter 路由归一化）。
+    """
     asig = _as()
+    symbol = symbol or code
     return asig.get_concept_blocks_json(symbol)
 
 
@@ -160,6 +176,7 @@ def fetch_limit_up_board(board_type: str = "zt", **kwargs):
 
 def fetch_etf_data(
     symbol: str = "",
+    code: str = "",
     period: str = "daily",
     start_date: str = "",
     end_date: str = "",
@@ -173,8 +190,10 @@ def fetch_etf_data(
     通过 symbol 分派：
       - symbol 非空: 调用 get_etf_kline_json 返回历史 K 线
       - symbol 为空: 调用 get_etf_realtime_json 返回实时行情
+    兼容 symbol/code 两种参数名（SmartRouter 路由归一化）。
     """
     asig = _as()
+    symbol = symbol or code
     if symbol:
         return asig.get_etf_kline_json(symbol, period, start_date, end_date, adjust)
     return asig.get_etf_realtime_json(top_n, sort_by)
@@ -186,6 +205,7 @@ def fetch_etf_data(
 
 def fetch_cb_data(
     symbol: str = "",
+    code: str = "",
     top_n: int = 50,
     sort_by: str = "成交额",
     days: int = 30,
@@ -196,8 +216,10 @@ def fetch_cb_data(
     通过 symbol 分派：
       - symbol 非空: 调用 get_cb_value_analysis_json 返回价值分析
       - symbol 为空: 调用 get_cb_realtime_json 返回实时行情
+    兼容 symbol/code 两种参数名（SmartRouter 路由归一化）。
     """
     asig = _as()
+    symbol = symbol or code
     if symbol:
         return asig.get_cb_value_analysis_json(symbol, days)
     return asig.get_cb_realtime_json(top_n, sort_by)
