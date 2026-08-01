@@ -4,6 +4,87 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
 
+## [3.1.0] - 2026-08-02
+
+### BREAKING CHANGES
+- 项目改名：仓库目录 `trader-finance-hub` → `tradex-hub`，Python 包 `cn_financial_mcp` → `tradex`，GitHub 仓库名同步
+- astock_signals 独立成包：从 `tradex-hub/src/astock_signals/` 独立为 `trae_projects/astock_signals/`（pip install -e 安装）
+- 所有 L1 工具走 SmartRouter：L1 数据获取工具不再直接 import akshare/eltdx，统一通过 SmartRouter.route() 选择数据源
+- eltdx 升为行情类第一主源：实时行情/历史K线/分时数据，eltdx(TCP) 为主源，akshare 降为备用
+- MCP 工具入口变更：`python -m cn_financial_mcp` → `python -m tradex`
+
+### Added
+- 数据源看板：MCP 工具 `get_data_source_dashboard` 返回 JSON + HTML 单页可视化（`python -m tradex.dashboard`，端口 8765）
+- 数据源版本检查模块 `data_source_monitor.py`：eltdx GitHub release + akshare PyPI 版本检查（只提醒不升级）
+- SmartRouter 独占源标记（exclusive=True）：集合竞价/逐笔成交/F10/涨停归因/解禁日历/涨停板 6 个独占源失败不降级
+- SmartRouter `get_registry_report()` 方法：返回全量注册表供看板使用
+- data_sources 数据源层：akshare_fetchers / eltdx_fetchers / http_fetchers / astock_signals_fetchers / registry，25 数据类型 34 源注册
+- HTTP 防封参数环境变量化：EM_RATE_LIMIT_INTERVAL / EM_JITTER_MIN / EM_JITTER_MAX / EM_MAX_RETRY
+- anti_ban_client 新增 set_jitter_range() / set_max_retry() 函数
+
+### Changed
+- akshare 升级 1.18.80 → 1.18.81
+- eltdx 版本标注更新 1.0.2 → 1.2.0
+- 25 个数据类型全量注册到 SmartRouter（原仅 3 个）
+- 89 个 MCP 工具（原 88，+1 看板工具）
+- MCP_HOST 默认值 0.0.0.0 → 127.0.0.1（安全默认）
+- trader-data-router 下游适配：删除 sys.path 路径探测，直接 import astock_signals
+- quantterminal/tfhub_service.py 迁移：从已删除的 eltdx_provider 改为 eltdx.TdxClient 直调
+
+### Removed
+- 删除 `src/eltdx_provider.py` 孤儿模块（v2.0.0 时代老封装，无人调用）
+- 删除所有 `sys.path.insert` hack（8 个文件，改正式 import astock_signals）
+- 删除 `src/astock_signals/` 旧目录（已迁移为独立包）
+
+### 升级指引
+1. `pip install -e trae_projects/astock_signals/`（安装独立包）
+2. `pip install -e tradex-hub/tradex/`（重装改名后的 tradex 包）
+3. 更新 MCP 配置：server 名改为 `tradex`，args 改为 `["-m", "tradex"]`
+4. `pip install -U akshare==1.18.81`
+5. 访问数据源看板：`python -m tradex.dashboard`
+
+## [3.0.0] - 2026-08-01
+
+### BREAKING CHANGES
+- 版本号统一：tradex v2.5.1 → v3.0.0，astock_signals v0.4.0 → v1.0.0，新增 VERSION 文件作为单一事实来源
+- 模块激活：smart_router / tick_store / ws_server 从"独立僵尸"变为"主流程组件"
+- 代码重复消除：删除 utils/em_client.py，统一使用 astock_signals.anti_ban_client
+- 文件拆分：signal_data.py 拆分为 5 个子模块（signal_data_base/flow/etf/cb/board）
+- 安全默认值：MCP_HOST 默认值从 0.0.0.0 改为 127.0.0.1
+
+### Added
+- VERSION 文件作为版本号单一事实来源
+- L2 计算引擎层：technical_indicators（6 工具）、performance_metrics（2 工具）
+- L3 决策支持层：signal_generation（3）、factor_analysis（2）、stock_screening（2）、diagnostics（4）、composite_analysis（3）、analysis_engine（1）
+- smart_router 接入数据源自动选择
+- tick_store 接入 eltdx_get_ticks 数据落盘
+- ws_server 作为可选推送服务（WS_SERVER_ENABLED 控制）
+- anti_ban_client 锁内 sleep 并发修复
+- tests/test_anti_ban_client.py 并发测试
+
+### Changed
+- 旧代码原地重构：data_manager.py / market_analyzer.py / eltdx_provider.py（print→logging、Type Hint、except 细化）
+- architecture.md 升级到 v3.0.0，补充 L2/L3 三层架构说明
+- README.md 工具数纠正为 88
+
+### Fixed
+- em_client.py 与 anti_ban_client.py 代码重复导致节流计数分裂
+- anti_ban_client.em_get 锁内 sleep 高并发阻塞
+- MCP_HOST 默认 0.0.0.0 公网暴露风险
+- architecture.md 严重过时（v2.3.0）
+- README 工具数不一致（80 vs 实际 88）
+
+### Removed
+- utils/em_client.py（与 anti_ban_client.py 重复）
+- 硬编码版本号（改为从 VERSION 文件读取）
+
+### 升级指引
+- 从 v2.5.1 升级到 v3.0.0 注意事项：
+  1. 如果代码 import 了 em_client，改为 import astock_signals.anti_ban_client
+  2. MCP_HOST 默认改为 127.0.0.1，外网部署需显式设置 MCP_HOST=0.0.0.0
+  3. signal_data.py 已拆分为 5 个子模块，但兼容入口保留，旧 import 仍可用
+  4. astock_signals __version__ 从 0.4.0 升到 1.0.0
+
 ## [2.5.1] - 2026-08-01
 
 ### Added
@@ -86,8 +167,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0
 - 修复architecture.md架构文档严重过时，全面更新为当前架构
 - 修复signal_data.py内部注释不一致（工具数量和编号）
 - 修复astock_signals/__init__.py模块清单不全（11→14个模块）
-- 修复cn-financial-mcp/README.md严重过时（42→61工具）
-- 修复cn-financial-mcp/tests/test_server.py测试过时（42→61工具）
+- 修复tradex/README.md严重过时（42→61工具）
+- 修复tradex/tests/test_server.py测试过时（42→61工具）
 - 修复README.md数据源描述不准确（AKShare 50→56工具）
 
 ### Changed
@@ -109,7 +190,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0
 
 ### Changed
 - astock_signals 版本 0.2.0 → 0.3.0，模块数 9 → 14（含 smart_router/tick_store/ws_server）
-- cn-financial-mcp 版本 2.2.0 → 2.3.0，MCP 工具数 57 → 61（信号数据 10 → 14）
+- tradex 版本 2.2.0 → 2.3.0，MCP 工具数 57 → 61（信号数据 10 → 14）
 - signal_data.py V0.7 → V0.8，工具数 10 → 14
 
 ### Testing
@@ -132,7 +213,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 ### Changed
 - `astock_signals/__init__.py` 版本升至 0.2.0，导出 9 个模块（原 5 → 现 9）
 - `signal_data.py` 版本升至 V0.7，工具数从 6 增至 10
-- `cn-financial-mcp` 版本升至 2.2.0，MCP 工具总数 53 → 57
+- `tradex` 版本升至 2.2.0，MCP 工具总数 53 → 57
 - README 更新工具清单和版本历史
 
 ### Architecture

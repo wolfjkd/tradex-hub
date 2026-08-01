@@ -39,3 +39,13 @@ test_output/
 # Coverage
 .coverage
 coverage/
+
+# Cache
+.cache/
+*.cache/
+
+# Test data
+data/
+
+# Temp verification scripts
+_verify_*.py

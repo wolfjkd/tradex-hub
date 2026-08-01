@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "tradex": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["-m", "tradex"],
+      "cwd": "."
+    }
+  }
+}

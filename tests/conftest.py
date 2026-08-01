@@ -1,5 +1,5 @@
 """
-Pytest 共享 fixtures — trader-finance-hub 测试套件。
+Pytest 共享 fixtures — tradex-hub 测试套件。
 """
 
 import os

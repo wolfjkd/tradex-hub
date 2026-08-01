@@ -1,0 +1,10 @@
+[run]
+source = tradex,astock_signals
+omit = */tests/*,*/test_*
+
+[report]
+exclude_lines =
+    def __repr__
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    pass

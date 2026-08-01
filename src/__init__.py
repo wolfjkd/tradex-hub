@@ -1,8 +1,8 @@
-# trader-finance-hub: AI投研数据底座
+# tradex-hub: AI投研数据底座
 # 核心引擎: market_analyzer.py (新闻+THS+分析模型)
 # 数据源管理: data_manager.py (多数据源自动降级)
 
-__version__ = '2.5.1'
+__version__ = '3.1.0'
 
 from .data_manager import (
     DataFetcherManager,

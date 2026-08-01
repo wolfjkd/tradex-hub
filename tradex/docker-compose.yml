@@ -1,0 +1,15 @@
+version: "3.8"
+
+services:
+  tradex:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONPATH=/app/src
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/mcp')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
