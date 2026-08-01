@@ -165,42 +165,22 @@ def register(mcp: FastMCP):
     @mcp.tool()
     async def list_all_tools() -> str:
         """
-        返回所有注册工具的分类清单。
+        返回所有已注册工具的清单。
 
-        从 ToolRegistry 读取通过装饰器注册的工具元数据，按分类分组返回。
-        每个工具包含 name、category、description。
+        从 FastMCP 实例读取所有通过 register(mcp) 注册的工具，返回工具名列表与总数。
+        v3.1.4 起：改为从 mcp 实例获取（替代原装饰器注册机制，避免返回空清单）。
 
         Returns:
-            工具分类清单 (JSON)，包含 status、total 与 categories 字典，
-            categories 按分类名分组，每组为工具列表。
-            若无装饰器注册的工具，返回提示信息。
+            工具清单 (JSON)，包含 status、total、tools（工具名列表）。
         """
         try:
-            tools = ToolRegistry.get_all()
-            if not tools:
-                return dict_to_json(
-                    {
-                        "status": "empty",
-                        "message": "暂无通过装饰器注册的工具，工具可能通过 register(mcp) 方式注册",
-                        "total": 0,
-                        "categories": {},
-                    }
-                )
-
-            categories: dict[str, list[dict]] = {}
-            for tool in tools:
-                categories.setdefault(tool.category, []).append(
-                    {
-                        "name": tool.name,
-                        "category": tool.category,
-                        "description": tool.description,
-                    }
-                )
+            tools = await mcp.list_tools()
+            tool_names = sorted([t.name for t in tools])
             return dict_to_json(
                 {
                     "status": "ok",
-                    "total": len(tools),
-                    "categories": categories,
+                    "total": len(tool_names),
+                    "tools": tool_names,
                 }
             )
         except Exception as e:
@@ -303,12 +283,10 @@ def register(mcp: FastMCP):
             result["data_sources"] = {"available": False, "error": str(e)}
             issues.append("数据源健康检查失败")
 
-        # 工具清单
+        # 工具清单（v3.1.4 起：从 mcp 实例获取，替代装饰器注册机制）
         try:
-            tools = ToolRegistry.get_all()
+            tools = await mcp.list_tools()
             result["tools"] = {"available": True, "total": len(tools)}
-            if not tools:
-                issues.append("无装饰器注册工具")
         except Exception as e:
             result["tools"] = {"available": False, "error": str(e)}
             issues.append("工具清单获取失败")

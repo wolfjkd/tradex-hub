@@ -4,6 +4,40 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
 
+## [3.1.4] - 2026-08-02
+
+### Fixed
+- **P1: eltdx realtime_quote 语义不完整**
+  - 根因：原实现用 `client.bars.get(count=1)` 取 K 线最后一根作为"实时行情"，缺涨跌幅/涨跌额/昨收/内外盘/现手等实时字段
+  - 修复：改用 `client.get_quote()` 获取真正的 `QuoteSnapshot`，字段完整：最新价/昨收/今开/最高/最低/涨跌额/涨跌幅/成交量(手)/成交额/内盘/外盘/现手
+- **P1: 装饰器注册机制死代码导致 health_check/list_all_tools 误报**
+  - 根因：`ToolRegistry` 设计了 `@register_tool` 装饰器双轨制，但无任何工具使用，`_tools` 字典永远为空
+  - 影响：`list_all_tools` 返回 `{"status":"empty","total":0}`；`health_check` 永远报 "无装饰器注册工具" 状态为 `degraded`
+  - 修复：`list_all_tools` 和 `health_check` 改为从 `mcp.list_tools()` 获取工具列表（v3.1.4 起）
+- **P1: architecture.md 文档与代码不符**
+  - 根因：文档描述 `data_sources/smart_router.py` 和 `providers/` 子目录，实际不存在
+  - 修复：改为实际的 4 个 fetchers 模块结构（eltdx/akshare/http/astock_signals_fetchers.py），注明 SmartRouter 在 astock_signals 包内
+- **P1: 源名标识不准**
+  - 根因：`etf_data` / `cb_data` 的源名注册为 `"akshare"`，但 fetcher 实际来自 `astock_signals_fetchers`
+  - 修复：源名改为 `"astock_signals"`，监控面板显示更准确
+- **P2: _client_lock 线程安全**
+  - 根因：`_client_lock` 是布尔值标志，多线程下有竞态条件
+  - 修复：改用 `threading.Lock()` + 双重检查模式
+- **P2: ETF 列名重复 warning**（astock_signals 包）
+  - 根因：`ak.fund_etf_spot_em()` 偶尔返回重复列名，触发 pandas warning
+  - 修复：在 rename 前加 `df.loc[:, ~df.columns.duplicated()]` 去重
+
+### 验证
+- `python -m pytest tests -q`：334 passed
+- `python -m pytest tradex/tests -q`：33 passed, 1 skipped
+- 端到端实测 `get_realtime_quote`：返回完整字段（涨跌额-11.16/涨跌幅-0.82/昨收/内盘/外盘/现手）
+- 端到端实测 `health_check`：status 从 `degraded` 变为 `healthy`（issues=[]，tools.total=89）
+- 端到端实测 `list_all_tools`：status 从 `empty` 变为 `ok`（total=89）
+
+### 升级指引
+- `pip install -e . --force-reinstall --no-deps` 重新安装 tradex 包
+- astock_signals 包本地源码已修复（editable 安装直接生效），无需重新发版
+
 ## [3.1.3] - 2026-08-02
 
 ### Fixed

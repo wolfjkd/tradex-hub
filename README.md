@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/License-Apache--2.0-yellow.svg" alt="License"/>
   <img src="https://img.shields.io/badge/Data-A股-red.svg" alt="Data Scope"/>
   <img src="https://img.shields.io/badge/Tools-89-orange.svg" alt="MCP Tools"/>
-  <img src="https://img.shields.io/badge/Version-3.1.3-blue.svg" alt="Version"/>
+  <img src="https://img.shields.io/badge/Version-3.1.4-blue.svg" alt="Version"/>
 </p>
 
 ---
@@ -344,6 +344,7 @@ AI 会调用 `mcp__tradex__eltdx_get_kline`，返回 100 根日 K 线。
 
 | 版本 | 日期 | 内容 |
 |------|------|------|
+| v3.1.4 | 2026-08-02 | 修复 P1/P2 遗留：eltdx realtime_quote 改用 get_quote()（QuoteSnapshot 完整字段含涨跌幅/内外盘）；装饰器死代码修复（list_all_tools/health_check 改用 mcp 实例，不再误报 degraded）；源名标识修正（etf_data/cb_data akshare→astock_signals）；_client_lock 改用 threading.Lock；architecture.md 文档修正；ETF 列名重复 warning 修复 |
 | v3.1.3 | 2026-08-02 | 修复 P0 bug：SmartRouter 参数名不匹配导致 eltdx 主源永远失败降级 akshare（行情类 fetcher 统一兼容 symbol/code）；修复 eltdx KlineBar 字段映射（date→time, volume→volume_lots），新增 17 个参数归一化回归测试 |
 | v3.1.2 | 2026-08-02 | 删除 v2.x 遗留 `src/` 目录（data_manager/market_analyzer，依赖已删的 eltdx_provider），清理 diagnostics.py 的 `src.astock_signals` fallback 死代码 |
 | v3.1.1 | 2026-08-02 | 修复 pytest warning：注册 `network` marker（根 + tradex pyproject.toml），消除 tradex/tests 4 个 PytestUnknownMarkWarning |

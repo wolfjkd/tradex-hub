@@ -1,6 +1,6 @@
 # 金融数据中枢 - 架构设计文档
 
-> 最后更新：2026-08-02 | v3.1.3
+> 最后更新：2026-08-02 | v3.1.4
 
 ## 1. 系统概览
 
@@ -37,9 +37,12 @@ tradex-hub 是为 AI Agent（Trae / Claude Code / Cursor）提供 A 股金融数
 tradex (v3.1.0) ── FastMCP Server, 89 MCP 工具
 │
 ├── data_sources/         — 数据源层（25 类型 34 源，注册到 SmartRouter）
-│   ├── registry.py       — 数据源注册表
-│   ├── smart_router.py   — SmartRouter（健康评分/自动降级/故障隔离，全量覆盖）
-│   └── providers/        — eltdx/AKShare/东财/同花顺/腾讯 等 Provider
+│   ├── registry.py       — 数据源注册表（register_all_sources 注册 25 类型 34 源）
+│   ├── eltdx_fetchers.py     — eltdx 通达信协议 fetcher（行情/K线/分时/竞价/逐笔/F10）
+│   ├── akshare_fetchers.py   — AKShare fetcher（行情/财务/估值/行业/新闻/宏观等）
+│   ├── http_fetchers.py      — 腾讯 HTTP fetcher（实时行情/一致预期兜底）
+│   └── astock_signals_fetchers.py — astock_signals 包 fetcher（资金流/龙虎榜/涨停板/ETF/可转债等）
+│   ※ SmartRouter 实现在 astock_signals 包内（astock_signals.smart_router），非本目录
 │
 ├── L1 数据获取层（65 工具）— 通过 SmartRouter.route() 统一获取数据
 │   ├── company_info.py    (4 工具) — 搜索/概况/竞品
