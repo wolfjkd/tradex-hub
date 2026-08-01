@@ -1,0 +1,3 @@
+[tool.pytest.ini_options]
+testpaths = ["tests", "cn-financial-mcp/tests"]
+addopts = "-v --tb=short"

@@ -14,14 +14,28 @@ Data source:
 
 from __future__ import annotations
 
+import os
+import sys
+
 import akshare as ak
 from mcp.server.fastmcp import FastMCP
 
 from ..utils.cache import TTL_DAILY, TTL_REALTIME, cache
-from ..utils.em_client import em_push2_fund_flow, em_push2his_fund_flow
 from ..utils.fallback import call_with_fallback
 from ..utils.formatter import df_to_json, error_response, slim_df
 from ..utils.symbol import get_exchange, normalize_symbol
+
+# Import astock_signals modules from Hub src/ (anti_ban_client 是唯一东财防封实现)
+_HUB_SRC = os.path.normpath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "src")
+)
+if _HUB_SRC not in sys.path:
+    sys.path.insert(0, _HUB_SRC)
+
+from astock_signals.anti_ban_client import (  # noqa: E402
+    em_push2_fund_flow,
+    em_push2his_fund_flow,
+)
 
 
 def register(mcp: FastMCP):

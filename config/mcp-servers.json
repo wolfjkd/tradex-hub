@@ -1,14 +1,14 @@
 {
-  "version": "2.0",
-  "description": "Buddy 金融数据中枢 - MCP Server 配置（v2.3.0）",
+  "version": "3.0",
+  "description": "Buddy 金融数据中枢 - MCP Server 配置（v3.0.0）",
   "servers": {
     "cn-financial-mcp": {
       "name": "cn-financial-mcp 金融数据中枢",
       "type": "stdio",
-      "tools": 61,
-      "modules": ["company_info(4)", "price_data(4)", "financial_stmt(8)", "valuation(4)", "industry(5)", "market(5)", "news_events(4)", "macro_fx(8)", "signal_data(14)", "eltdx_data(5)"],
-      "version": "2.3.0",
-      "note": "AKShare主+东财直连+同花顺，61个MCP工具"
+      "tools": 88,
+      "modules": ["company_info(4)", "price_data(5)", "financial_stmt(8)", "valuation(4)", "industry(5)", "market(5)", "news_events(4)", "macro_fx(8)", "signal_data(17)", "eltdx_data(5)", "technical_indicators(6)", "performance_metrics(2)", "signal_generation(3)", "factor_analysis(2)", "stock_screening(2)", "diagnostics(4)", "composite_analysis(3)", "analysis_engine(1)"],
+      "version": "3.0.0",
+      "note": "AKShare主+东财直连+同花顺，88个MCP工具，三层架构(L1数据/L2计算/L3决策)"
     },
     "tdx-connector": {
       "name": "通达信 MCP",

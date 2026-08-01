@@ -4,6 +4,48 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
 
+## [3.0.0] - 2026-08-01
+
+### BREAKING CHANGES
+- 版本号统一：cn-financial-mcp v2.5.1 → v3.0.0，astock_signals v0.4.0 → v1.0.0，新增 VERSION 文件作为单一事实来源
+- 模块激活：smart_router / tick_store / ws_server 从"独立僵尸"变为"主流程组件"
+- 代码重复消除：删除 utils/em_client.py，统一使用 astock_signals.anti_ban_client
+- 文件拆分：signal_data.py 拆分为 5 个子模块（signal_data_base/flow/etf/cb/board）
+- 安全默认值：MCP_HOST 默认值从 0.0.0.0 改为 127.0.0.1
+
+### Added
+- VERSION 文件作为版本号单一事实来源
+- L2 计算引擎层：technical_indicators（6 工具）、performance_metrics（2 工具）
+- L3 决策支持层：signal_generation（3）、factor_analysis（2）、stock_screening（2）、diagnostics（4）、composite_analysis（3）、analysis_engine（1）
+- smart_router 接入数据源自动选择
+- tick_store 接入 eltdx_get_ticks 数据落盘
+- ws_server 作为可选推送服务（WS_SERVER_ENABLED 控制）
+- anti_ban_client 锁内 sleep 并发修复
+- tests/test_anti_ban_client.py 并发测试
+
+### Changed
+- 旧代码原地重构：data_manager.py / market_analyzer.py / eltdx_provider.py（print→logging、Type Hint、except 细化）
+- architecture.md 升级到 v3.0.0，补充 L2/L3 三层架构说明
+- README.md 工具数纠正为 88
+
+### Fixed
+- em_client.py 与 anti_ban_client.py 代码重复导致节流计数分裂
+- anti_ban_client.em_get 锁内 sleep 高并发阻塞
+- MCP_HOST 默认 0.0.0.0 公网暴露风险
+- architecture.md 严重过时（v2.3.0）
+- README 工具数不一致（80 vs 实际 88）
+
+### Removed
+- utils/em_client.py（与 anti_ban_client.py 重复）
+- 硬编码版本号（改为从 VERSION 文件读取）
+
+### 升级指引
+- 从 v2.5.1 升级到 v3.0.0 注意事项：
+  1. 如果代码 import 了 em_client，改为 import astock_signals.anti_ban_client
+  2. MCP_HOST 默认改为 127.0.0.1，外网部署需显式设置 MCP_HOST=0.0.0.0
+  3. signal_data.py 已拆分为 5 个子模块，但兼容入口保留，旧 import 仍可用
+  4. astock_signals __version__ 从 0.4.0 升到 1.0.0
+
 ## [2.5.1] - 2026-08-01
 
 ### Added

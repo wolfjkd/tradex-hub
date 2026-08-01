@@ -154,4 +154,5 @@ def __getattr__(name):
 
     raise AttributeError(f"module 'astock_signals' has no attribute '{name}'")
 
-__version__ = "0.4.0"
+# astock_signals 是独立子包,版本号独立维护,不读取项目根目录的 VERSION 文件
+__version__ = "1.0.0"

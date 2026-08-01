@@ -52,8 +52,10 @@ class WsServer:
         self.port = port
         self._token = token or os.environ.get("WS_TOKEN", "")
         self._clients: dict = {}  # websocket -> {"codes": set, "authed": bool}
+        self._disconnected_clients: set = set()  # 已断开但未清理的客户端
         self._server = None
         self._running = False
+        self._loop = None  # 运行 WsServer 的事件循环（跨线程推送用）
 
     async def start(self):
         """启动 WebSocket 服务器。"""
@@ -63,6 +65,7 @@ class WsServer:
             logger.error("websockets not installed. Run: pip install websockets")
             raise
 
+        self._loop = asyncio.get_running_loop()
         self._server = await websockets.serve(
             self._handler, self.host, self.port
         )
@@ -169,6 +172,7 @@ class WsServer:
                 *[self._safe_send(ws, msg) for ws in targets],
                 return_exceptions=True,
             )
+        self._cleanup_disconnected()
 
     async def push_signal(self, signal_type: str, data: dict):
         """推送异动信号到所有已认证客户端（全局广播）。"""
@@ -188,6 +192,7 @@ class WsServer:
                 *[self._safe_send(ws, msg) for ws in targets],
                 return_exceptions=True,
             )
+        self._cleanup_disconnected()
 
     async def push_tick(self, code: str, tick_data: dict):
         """推送 tick 数据到订阅了该代码的所有客户端。"""
@@ -207,14 +212,23 @@ class WsServer:
                 *[self._safe_send(ws, msg) for ws in targets],
                 return_exceptions=True,
             )
+        self._cleanup_disconnected()
 
     async def _safe_send(self, ws, msg: str):
-        """安全发送消息（捕获断连异常）。"""
+        """安全发送消息（异常时标记为已断开，不立即移除）。"""
         try:
             await ws.send(msg)
         except Exception as e:
-            logger.debug("safe_send failed, removing client: %s", e)
+            logger.debug("safe_send failed, marking client disconnected: %s", e)
+            self._disconnected_clients.add(ws)
+
+    def _cleanup_disconnected(self):
+        """统一清理已断开的客户端（在推送方法结束后调用）。"""
+        if not self._disconnected_clients:
+            return
+        for ws in self._disconnected_clients:
             self._clients.pop(ws, None)
+        self._disconnected_clients.clear()
 
     @property
     def client_count(self) -> int:

@@ -82,6 +82,7 @@ class DataProvider(ABC):
             result = self.health_check()
             return result.get("status") == "healthy"
         except Exception:
+            logger.exception("健康检查异常，判定数据源不可用")
             return False
 
 
@@ -95,7 +96,7 @@ class EltdxDataProvider(DataProvider):
     NAME = "eltdx"
     PRIORITY = 10
     
-    def __init__(self, timeout: int = 5):
+    def __init__(self, timeout: int = 5) -> None:
         self.timeout = timeout
         self.provider = None
     
@@ -114,7 +115,7 @@ class EltdxDataProvider(DataProvider):
             try:
                 return self.provider.get_quote(codes)
             except Exception as e:
-                logger.error(f"eltdx get_quote 失败: {e}")
+                logger.exception("eltdx get_quote 失败")
                 self.provider = None
         return {}
     
@@ -124,7 +125,7 @@ class EltdxDataProvider(DataProvider):
             try:
                 return self.provider.get_auction(code)
             except Exception as e:
-                logger.error(f"eltdx get_auction 失败: {e}")
+                logger.exception("eltdx get_auction 失败")
                 self.provider = None
         return AuctionData(code=code, status="error", error_message="eltdx不可用")
     
@@ -134,7 +135,7 @@ class EltdxDataProvider(DataProvider):
             try:
                 return self.provider.get_ticks(code, date)
             except Exception as e:
-                logger.error(f"eltdx get_ticks 失败: {e}")
+                logger.exception("eltdx get_ticks 失败")
                 self.provider = None
         return TickData(code=code, date=date, status="error", error_message="eltdx不可用")
     
@@ -144,7 +145,7 @@ class EltdxDataProvider(DataProvider):
             try:
                 return self.provider.get_minute(code)
             except Exception as e:
-                logger.error(f"eltdx get_minute 失败: {e}")
+                logger.exception("eltdx get_minute 失败")
                 self.provider = None
         return MinuteData(code=code, status="error", error_message="eltdx不可用")
     
@@ -154,7 +155,7 @@ class EltdxDataProvider(DataProvider):
             try:
                 return self.provider.get_f10(code)
             except Exception as e:
-                logger.error(f"eltdx get_f10 失败: {e}")
+                logger.exception("eltdx get_f10 失败")
                 self.provider = None
         return F10Data(code=code, status="error", error_message="eltdx不可用")
     
@@ -164,6 +165,7 @@ class EltdxDataProvider(DataProvider):
             try:
                 return self.provider.health_check()
             except Exception as e:
+                logger.exception("eltdx health_check 失败")
                 return {"status": "unhealthy", "error": str(e)}
         return {"status": "unhealthy", "error": "未连接"}
 
@@ -178,7 +180,7 @@ class TencentDataProvider(DataProvider):
     NAME = "tencent"
     PRIORITY = 20
     
-    def __init__(self):
+    def __init__(self) -> None:
         self.session = None
     
     def _get_session(self):
@@ -223,7 +225,7 @@ class TencentDataProvider(DataProvider):
             
             return result
         except Exception as e:
-            logger.error(f"tencent get_quote 失败: {e}")
+            logger.exception("tencent get_quote 失败")
             return {}
     
     def _safe_float(self, value, default=0):
@@ -262,7 +264,7 @@ class TencentDataProvider(DataProvider):
             
             return AuctionData(code=code, status="no_data")
         except Exception as e:
-            logger.error(f"tencent get_auction 失败: {e}")
+            logger.exception("tencent get_auction 失败")
             return AuctionData(code=code, status="error", error_message=str(e))
     
     def get_ticks(self, code: str, date: str) -> TickData:
@@ -298,7 +300,7 @@ class TencentDataProvider(DataProvider):
             
             return MinuteData(code=code, status="no_data")
         except Exception as e:
-            logger.error(f"tencent get_minute 失败: {e}")
+            logger.exception("tencent get_minute 失败")
             return MinuteData(code=code, status="error", error_message=str(e))
     
     def get_f10(self, code: str) -> F10Data:
@@ -321,6 +323,7 @@ class TencentDataProvider(DataProvider):
                 }
             }
         except Exception as e:
+            logger.exception("tencent health_check 失败")
             return {
                 "status": "unhealthy",
                 "latency_ms": round((time.time() - start) * 1000, 1),
@@ -338,7 +341,7 @@ class AkShareDataProvider(DataProvider):
     NAME = "akshare"
     PRIORITY = 30
     
-    def __init__(self):
+    def __init__(self) -> None:
         self.ak = None
     
     def _ensure_akshare(self):
@@ -377,11 +380,12 @@ class AkShareDataProvider(DataProvider):
                             amount=float(data.get("成交额", 0))
                         )
                 except Exception:
+                    logger.exception(f"akshare 解析个股行情失败: {code}")
                     continue
             
             return result
         except Exception as e:
-            logger.error(f"akshare get_quote 失败: {e}")
+            logger.exception("akshare get_quote 失败")
             return {}
     
     def get_auction(self, code: str) -> AuctionData:
@@ -417,7 +421,7 @@ class AkShareDataProvider(DataProvider):
             
             return MinuteData(code=code, status="no_data")
         except Exception as e:
-            logger.error(f"akshare get_minute 失败: {e}")
+            logger.exception("akshare get_minute 失败")
             return MinuteData(code=code, status="error", error_message=str(e))
     
     def get_f10(self, code: str) -> F10Data:
@@ -436,7 +440,7 @@ class AkShareDataProvider(DataProvider):
             
             return F10Data(code=code, status="no_data")
         except Exception as e:
-            logger.error(f"akshare get_f10 失败: {e}")
+            logger.exception("akshare get_f10 失败")
             return F10Data(code=code, status="error", error_message=str(e))
     
     def health_check(self) -> Dict[str, Any]:
@@ -458,6 +462,7 @@ class AkShareDataProvider(DataProvider):
                 }
             }
         except Exception as e:
+            logger.exception("akshare health_check 失败")
             return {
                 "status": "unhealthy",
                 "latency_ms": round((time.time() - start) * 1000, 1),
@@ -484,10 +489,10 @@ class DataFetcherManager:
         
         # 检查当前使用的数据源
         current = manager.get_current_provider_name()
-        print(f"当前数据源: {current}")
+        # current 变量即当前数据源名称
     """
     
-    def __init__(self, providers: Optional[List[DataProvider]] = None):
+    def __init__(self, providers: Optional[List[DataProvider]] = None) -> None:
         """
         初始化数据源管理器。
         
@@ -764,45 +769,3 @@ def get_global_manager() -> DataFetcherManager:
     return _global_manager
 
 
-# ============================================================
-# CLI测试
-# ============================================================
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-    
-    print("=== DataFetcherManager 测试 ===\n")
-    
-    manager = DataFetcherManager()
-    
-    # 1. 健康检查
-    print("1. 健康检查...")
-    health = manager.health_check()
-    print(f"   状态: {health['status']}")
-    print(f"   当前数据源: {health['current_provider']}")
-    print(f"   延迟: {health['latency_ms']}ms")
-    
-    # 2. 获取行情快照
-    print("\n2. 获取行情快照...")
-    quotes = manager.get_quote(["sz000001", "sh600000"])
-    print(f"   当前数据源: {manager.get_current_provider_name()}")
-    for code, quote in quotes.items():
-        print(f"   {code}: {quote.price}元 ({quote.change_pct:+.2f}%)")
-    
-    # 3. 获取集合竞价
-    print("\n3. 获取集合竞价...")
-    auction = manager.get_auction("sz000001")
-    print(f"   状态: {auction.status}")
-    if auction.status == "success":
-        print(f"   价格: {auction.last_price}元")
-        print(f"   匹配量: {auction.last_matched_volume}手")
-    
-    # 4. 获取数据源状态
-    print("\n4. 数据源状态...")
-    status = manager.get_provider_status()
-    for name, info in status.items():
-        print(f"   {name}: {'当前' if info['is_current'] else '备用'} | "
-              f"可用: {'是' if info['is_available'] else '否'} | "
-              f"失败次数: {info['failure_count']}")
-    
-    print("\n=== 测试完成 ===")

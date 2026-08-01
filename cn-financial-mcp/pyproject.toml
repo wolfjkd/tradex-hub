@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cn-financial-mcp"
-version = "2.5.0"
+version = "3.0.0"
 description = "China Financial Data MCP Server based on AKShare - Free alternative to commercial financial data MCPs"
 readme = "README.md"
 license = "Apache-2.0"
@@ -32,6 +32,7 @@ dependencies = [
     "pydantic>=2.0.0",
     "requests>=2.28.0",
     "stockstats>=0.6.0",
+    "python-dotenv>=1.0.0",
 ]
 
 [project.optional-dependencies]

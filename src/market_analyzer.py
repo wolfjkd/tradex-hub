@@ -28,6 +28,7 @@ market_analyzer.py - 全市场综合分析引擎 v2.0
 """
 
 import json
+import logging
 import math
 import sys
 import time
@@ -42,6 +43,8 @@ try:
     ELTDX_AVAILABLE = True
 except ImportError:
     ELTDX_AVAILABLE = False
+
+logger = logging.getLogger(__name__)
 
 # ============================================================
 # 模块1: 新闻事件采集器
@@ -107,6 +110,7 @@ class NewsFetcher:
                 ))
             return items
         except Exception as e:
+            logger.exception("EM stock news fetch failed: symbol=%s", symbol)
             return [NewsItem(title=f"[EM Stock News Error] {e}", source="error")]
 
     @classmethod
@@ -125,6 +129,7 @@ class NewsFetcher:
                 ))
             return items
         except Exception as e:
+            logger.exception("EM main news fetch failed: limit=%s", limit)
             return [NewsItem(title=f"[EM Main News Error] {e}", source="error")]
 
     @classmethod
@@ -144,6 +149,7 @@ class NewsFetcher:
                 ))
             return items
         except Exception as e:
+            logger.exception("EM global news fetch failed: limit=%s", limit)
             return [NewsItem(title=f"[EM Global News Error] {e}", source="error")]
 
     @classmethod
@@ -162,6 +168,7 @@ class NewsFetcher:
                 ))
             return items
         except Exception as e:
+            logger.exception("CCTV news fetch failed: limit=%s", limit)
             return [NewsItem(title=f"[CCTV Error] {e}", source="error")]
 
     @classmethod
@@ -261,6 +268,7 @@ class THSDataFetcher:
         try:
             return fn()
         except Exception:
+            logger.exception("THS safe_call failed")
             return default
 
     # ---- 板块列表 ----
@@ -274,6 +282,7 @@ class THSDataFetcher:
             return [{"name": row["name"], "code": row["code"]}
                     for _, row in df.iterrows()]
         except Exception:
+            logger.exception("THS concept list fetch failed")
             return []
 
     @classmethod
@@ -285,6 +294,7 @@ class THSDataFetcher:
             return [{"name": row["name"], "code": row["code"]}
                     for _, row in df.iterrows()]
         except Exception:
+            logger.exception("THS industry list fetch failed")
             return []
 
     # ---- 板块行情 ----
@@ -316,6 +326,7 @@ class THSDataFetcher:
                 "raw": df.tail(days).to_dict(orient="records"),
             }
         except Exception:
+            logger.exception("THS concept index fetch failed: name=%s", name)
             return {}
 
     @classmethod
@@ -345,6 +356,7 @@ class THSDataFetcher:
                 "raw": df.tail(days).to_dict(orient="records"),
             }
         except Exception:
+            logger.exception("THS industry index fetch failed: name=%s", name)
             return {}
 
     # ---- 板块信息 ----
@@ -362,6 +374,7 @@ class THSDataFetcher:
                 info[key] = val
             return info
         except Exception:
+            logger.exception("THS concept info fetch failed: name=%s", name)
             return {}
 
     @classmethod
@@ -377,6 +390,7 @@ class THSDataFetcher:
                 info[key] = val
             return info
         except Exception:
+            logger.exception("THS industry info fetch failed: name=%s", name)
             return {}
 
     # ---- 板块摘要 ----
@@ -389,6 +403,7 @@ class THSDataFetcher:
             df = ak.stock_board_concept_summary_ths()
             return df.to_dict(orient="records")
         except Exception:
+            logger.exception("THS concept summary fetch failed")
             return []
 
     # ---- 热门排名 ----
@@ -401,6 +416,7 @@ class THSDataFetcher:
             df = ak.stock_hot_rank_em()
             return df.head(30).to_dict(orient="records")
         except Exception:
+            logger.exception("EM hot rank fetch failed")
             return []
 
     @classmethod
@@ -411,6 +427,7 @@ class THSDataFetcher:
             df = ak.stock_rank_cxg_ths()
             return df.head(20).to_dict(orient="records")
         except Exception:
+            logger.exception("THS continuous high (cxg) fetch failed")
             return []
 
     @classmethod
@@ -421,6 +438,7 @@ class THSDataFetcher:
             df = ak.stock_rank_cxd_ths()
             return df.head(20).to_dict(orient="records")
         except Exception:
+            logger.exception("THS continuous low (cxd) fetch failed")
             return []
 
     # ---- 批量获取板块行情（用于四象限）----
@@ -465,6 +483,7 @@ class THSDataFetcher:
             df = ak.stock_board_concept_cons_em(symbol=concept_code)
             return df.head(30).to_dict(orient="records")
         except Exception:
+            logger.exception("EM concept members fetch failed: code=%s", concept_code)
             return []
 
 
@@ -779,10 +798,10 @@ class EltdxAnalyzer:
     
     NAME = "eltdx_analyzer"
     
-    def __init__(self, provider):
+    def __init__(self, provider: Any) -> None:
         """
         初始化分析器。
-        
+
         Args:
             provider: EltdxProvider实例
         """
@@ -1121,79 +1140,80 @@ def _safe_float(val: Any) -> float | None:
         return None
 
 
-def cmd_health():
+def cmd_health() -> None:
     """全链路健康检测"""
-    print("=" * 60)
-    print("  market_analyzer.py 全链路健康检测")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("  market_analyzer.py 全链路健康检测")
+    logger.info("=" * 60)
 
     # 1. 新闻检测
-    print("\n[1/5] 新闻采集器...")
+    logger.info("[1/5] 新闻采集器...")
     try:
         headlines = NewsFetcher.fetch_headlines("600170")
-        print(f"  [OK] 4源聚合: {len(headlines)}条头条新闻")
+        logger.info("  [OK] 4源聚合: %s条头条新闻", len(headlines))
         sources = defaultdict(int)
         for h in headlines:
             sources[h.source] += 1
         for src, cnt in sources.items():
-            print(f"    - {src}: {cnt}条")
+            logger.info("    - %s: %s条", src, cnt)
     except Exception as e:
-        print(f"  [FAIL] {e}")
+        logger.exception("  [FAIL] %s", e)
 
     # 2. THS数据检测
-    print("\n[2/5] 同花顺板块数据...")
+    logger.info("[2/5] 同花顺板块数据...")
     try:
         concepts = THSDataFetcher.get_concept_list()
         industries = THSDataFetcher.get_industry_list()
-        print(f"  [OK] 概念板块: {len(concepts)}个")
-        print(f"  [OK] 行业板块: {len(industries)}个")
+        logger.info("  [OK] 概念板块: %s个", len(concepts))
+        logger.info("  [OK] 行业板块: %s个", len(industries))
 
         # 尝试取行情
         test_quote = THSDataFetcher.get_concept_index("人形机器人")
         if test_quote:
-            print(f"  [OK] 概念行情: 人形机器人 {test_quote.get('change_pct', '?')}%")
+            logger.info("  [OK] 概念行情: 人形机器人 %s%%", test_quote.get('change_pct', '?'))
         else:
-            print("  [WARN] 概念行情返回空")
+            logger.warning("  [WARN] 概念行情返回空")
     except Exception as e:
-        print(f"  [FAIL] {e}")
+        logger.exception("  [FAIL] %s", e)
 
     # 3. EM数据检测
-    print("\n[3/5] 东方财富特色数据...")
+    logger.info("[3/5] 东方财富特色数据...")
     try:
         hot = THSDataFetcher.get_hot_rank()
-        print(f"  [OK] 热门排名: {len(hot)}只")
+        logger.info("  [OK] 热门排名: %s只", len(hot))
 
         chi_high = THSDataFetcher.get_continuous_high()
-        print(f"  [OK] 持续新高: {len(chi_high)}只")
+        logger.info("  [OK] 持续新高: %s只", len(chi_high))
 
         summary = THSDataFetcher.get_concept_summary()
-        print(f"  [OK] 概念摘要: {len(summary)}条")
+        logger.info("  [OK] 概念摘要: %s条", len(summary))
 
         members = THSDataFetcher.get_em_concept_members()
-        print(f"  [OK] 概念成分股: {len(members)}只")
+        logger.info("  [OK] 概念成分股: %s只", len(members))
     except Exception as e:
-        print(f"  [FAIL] {e}")
+        logger.exception("  [FAIL] %s", e)
 
     # 4. eltdx数据检测
-    print("\n[4/5] eltdx通达信行情协议...")
+    logger.info("[4/5] eltdx通达信行情协议...")
     if not ELTDX_AVAILABLE:
-        print("  [SKIP] eltdx库未安装")
+        logger.info("  [SKIP] eltdx库未安装")
     else:
         try:
             with EltdxProvider() as provider:
                 health = provider.health_check()
                 status = health.get("status", "unknown")
                 latency = health.get("latency_ms", 0)
-                print(f"  [{'OK' if status == 'healthy' else 'FAIL'}] 状态: {status}, 延迟: {latency}ms")
+                logger.info("  [%s] 状态: %s, 延迟: %sms",
+                            'OK' if status == 'healthy' else 'FAIL', status, latency)
                 for test_name, test_result in health.get("tests", {}).items():
                     test_status = test_result.get("status", "unknown")
                     test_latency = test_result.get("latency_ms", 0)
-                    print(f"    - {test_name}: {test_status} ({test_latency}ms)")
+                    logger.info("    - %s: %s (%sms)", test_name, test_status, test_latency)
         except Exception as e:
-            print(f"  [FAIL] {e}")
+            logger.exception("  [FAIL] %s", e)
 
     # 5. 分析模型检测
-    print("\n[5/5] 分析模型...")
+    logger.info("[5/5] 分析模型...")
     try:
         # 用模拟数据验证模型
         test_sectors = [
@@ -1208,46 +1228,46 @@ def cmd_health():
         entropy = MarketModels.entropy_consensus(quad)
         clock = MarketModels.sentiment_clock(1.2, 2.5, 35, 5, 30.0)
 
-        print(f"  [OK] 四象限: {len(quad)}个板块分类")
-        print(f"  [OK] 信息熵: {entropy['entropy']} ({entropy['consensus_level']})")
-        print(f"  [OK] 情绪时钟: {clock['total_score']}分 → {clock['phase']}")
+        logger.info("  [OK] 四象限: %s个板块分类", len(quad))
+        logger.info("  [OK] 信息熵: %s (%s)", entropy['entropy'], entropy['consensus_level'])
+        logger.info("  [OK] 情绪时钟: %s分 → %s", clock['total_score'], clock['phase'])
     except Exception as e:
-        print(f"  [FAIL] {e}")
+        logger.exception("  [FAIL] %s", e)
 
-    print("\n" + "=" * 60)
-    print("  检测完成")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("  检测完成")
+    logger.info("=" * 60)
 
 
-def cmd_news():
+def cmd_news() -> None:
     """今日财经要闻"""
-    print("=" * 60)
-    print(f"  今日财经要闻 ({datetime.now().strftime('%Y-%m-%d %H:%M')})")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("  今日财经要闻 (%s)", datetime.now().strftime('%Y-%m-%d %H:%M'))
+    logger.info("=" * 60)
     headlines = NewsFetcher.fetch_headlines()
     for i, h in enumerate(headlines, 1):
         emoji = {"positive": "[+]", "negative": "[-]", "neutral": "[*]"}.get(h.sentiment, "[*]")
-        print(f"\n{i:2d}. {emoji} {h.title}")
+        logger.info("%2d. %s %s", i, emoji, h.title)
         if h.content:
-            print(f"    {h.content[:100]}")
-        print(f"    来源: {h.source} | 影响度: {h.impact_score:.0f}")
+            logger.info("    %s", h.content[:100])
+        logger.info("    来源: %s | 影响度: %.0f", h.source, h.impact_score)
 
 
-def cmd_sector():
+def cmd_sector() -> None:
     """板块四象限分析"""
-    print("[Analyzing] 正在获取板块数据（约需1-2分钟）...")
+    logger.info("[Analyzing] 正在获取板块数据（约需1-2分钟）...")
     sectors = THSDataFetcher.get_concept_batch_quotes([], max_names=40)
     if not sectors:
-        print("无板块数据")
+        logger.warning("无板块数据")
         return
 
     quad_items = MarketModels.four_quadrant(sectors)
     entropy = MarketModels.entropy_consensus(quad_items)
 
-    print(f"\n{'='*60}")
-    print(f"  板块四象限分析 ({datetime.now().strftime('%Y-%m-%d %H:%M')})")
-    print(f"  信息熵: {entropy['entropy']} → {entropy['consensus_level']}")
-    print(f"{'='*60}")
+    logger.info("=" * 60)
+    logger.info("  板块四象限分析 (%s)", datetime.now().strftime('%Y-%m-%d %H:%M'))
+    logger.info("  信息熵: %s → %s", entropy['entropy'], entropy['consensus_level'])
+    logger.info("=" * 60)
 
     # 按象限分组
     by_quad: dict[str, list[QuadrantItem]] = defaultdict(list)
@@ -1263,33 +1283,34 @@ def cmd_sector():
 
     for q in ["I", "II", "III", "IV"]:
         items = sorted(by_quad.get(q, []), key=lambda x: abs(x.change_pct), reverse=True)
-        print(f"\n[象限{q}] {quad_names.get(q, '')}: {len(items)}个板块")
-        print(f"{'板块名称':<16} {'涨跌幅':>8} {'共识度':>8} {'量比':>6}")
-        print("-" * 44)
+        logger.info("[象限%s] %s: %s个板块", q, quad_names.get(q, ''), len(items))
+        logger.info("%s %s %s %s", "板块名称".ljust(16), "涨跌幅".rjust(8), "共识度".rjust(8), "量比".rjust(6))
+        logger.info("-" * 44)
         for item in items[:8]:
-            print(f"{item.name:<16} {item.change_pct:>+7.2f}% {item.consensus_strength:>7.1f} {item.volume_ratio:>5.2f}x")
+            logger.info("%s %+7.2f%% %7.1f %5.2fx",
+                        item.name.ljust(16), item.change_pct, item.consensus_strength, item.volume_ratio)
 
 
-def cmd_sentiment(market_change: float = 0, up_down: float = 1, lt_up: int = 0, lt_down: int = 0, nb_net: float = 0):
+def cmd_sentiment(market_change: float = 0, up_down: float = 1, lt_up: int = 0, lt_down: int = 0, nb_net: float = 0) -> None:
     """情绪时钟"""
     clock = MarketModels.sentiment_clock(market_change, up_down, lt_up, lt_down, nb_net)
-    print(f"\n{'='*60}")
-    print(f"  市场情绪时钟 ({datetime.now().strftime('%Y-%m-%d %H:%M')})")
-    print(f"{'='*60}")
-    print(f"  总评分: {clock['total_score']}/100")
-    print(f"  情绪阶段: {clock['phase']}")
-    print(f"  描述: {clock['description']}")
-    print(f"  建议: {clock['action']}")
-    print(f"\n  评分明细:")
+    logger.info("=" * 60)
+    logger.info("  市场情绪时钟 (%s)", datetime.now().strftime('%Y-%m-%d %H:%M'))
+    logger.info("=" * 60)
+    logger.info("  总评分: %s/100", clock['total_score'])
+    logger.info("  情绪阶段: %s", clock['phase'])
+    logger.info("  描述: %s", clock['description'])
+    logger.info("  建议: %s", clock['action'])
+    logger.info("  评分明细:")
     for dim, score in clock['breakdown'].items():
         bar = '█' * int(score / 2.5) + '░' * (10 - int(score / 2.5))
-        print(f"    {dim}: {bar} {score}/25")
-    print(f"\n  输入参数:")
+        logger.info("    %s: %s %s/25", dim, bar, score)
+    logger.info("  输入参数:")
     for k, v in clock['inputs'].items():
-        print(f"    {k}: {v}")
+        logger.info("    %s: %s", k, v)
 
 
-def cmd_report():
+def cmd_report() -> dict:
     """生成综合分析报告JSON"""
     report = {
         "timestamp": datetime.now().isoformat(),
@@ -1298,7 +1319,7 @@ def cmd_report():
     }
 
     # 1. 新闻头条
-    print("[1/6] 采集新闻...")
+    logger.info("[1/6] 采集新闻...")
     headlines = NewsFetcher.fetch_headlines()
     report["modules"]["news"] = {
         "count": len(headlines),
@@ -1310,7 +1331,7 @@ def cmd_report():
     }
 
     # 2. 板块数据
-    print("[2/6] 获取板块数据...")
+    logger.info("[2/6] 获取板块数据...")
     sectors = THSDataFetcher.get_concept_batch_quotes([], max_names=30)
     if sectors:
         quad = MarketModels.four_quadrant(sectors)
@@ -1328,7 +1349,7 @@ def cmd_report():
         }
 
     # 3. 情绪时钟
-    print("[3/6] 计算情绪时钟...")
+    logger.info("[3/6] 计算情绪时钟...")
     hot = THSDataFetcher.get_hot_rank()
     lt_up = sum(1 for h in hot if _safe_float(h.get("涨跌幅")) and _safe_float(h.get("涨跌幅")) >= 9.5)
     lt_down = sum(1 for h in hot if _safe_float(h.get("涨跌幅")) and _safe_float(h.get("涨跌幅")) <= -9.5)
@@ -1347,45 +1368,45 @@ def cmd_report():
     report["modules"]["sentiment_clock"] = clock
 
     # 4. 热门股票
-    print("[4/6] 获取热门排名...")
+    logger.info("[4/6] 获取热门排名...")
     report["modules"]["hot_rank"] = {
         "top30": hot[:30]
     }
 
     # 5. 概念摘要
-    print("[5/6] 获取概念摘要...")
+    logger.info("[5/6] 获取概念摘要...")
     summary = THSDataFetcher.get_concept_summary()
     report["modules"]["concept_summary"] = summary[:20]
 
     # 6. eltdx独有数据（可选）
-    print("[6/6] 获取eltdx独有数据...")
+    logger.info("[6/6] 获取eltdx独有数据...")
     if ELTDX_AVAILABLE:
         try:
             with EltdxProvider() as provider:
                 analyzer = EltdxAnalyzer(provider)
-                
+
                 # 开盘前分析（集合竞价）
                 pre_market_codes = ["sz000001", "sh600000", "sz000002"]
                 pre_market = analyzer.analyze_pre_market(pre_market_codes)
                 report["modules"]["pre_market_analysis"] = pre_market
-                
+
                 # 资金流向分析（逐笔成交）
                 money_flow = analyzer.analyze_money_flow("sz000001", datetime.now().strftime("%Y%m%d"))
                 report["modules"]["money_flow_analysis"] = money_flow
-                
+
                 # 个股筛选（F10资料）
                 screening_codes = ["000001", "600000", "000002"]
                 screening = analyzer.screen_stocks(screening_codes)
                 report["modules"]["stock_screening"] = screening
-                
-                print(f"  [OK] 开盘前分析: {pre_market['summary']['with_data']}只股票")
-                print(f"  [OK] 资金流向: {money_flow.get('status', 'unknown')}")
-                print(f"  [OK] 个股筛选: {screening['summary']['high_score_count']}只高评分股票")
+
+                logger.info("  [OK] 开盘前分析: %s只股票", pre_market['summary']['with_data'])
+                logger.info("  [OK] 资金流向: %s", money_flow.get('status', 'unknown'))
+                logger.info("  [OK] 个股筛选: %s只高评分股票", screening['summary']['high_score_count'])
         except Exception as e:
-            print(f"  [WARN] eltdx数据获取失败: {e}")
+            logger.exception("  [WARN] eltdx数据获取失败: %s", e)
             report["modules"]["eltdx_error"] = str(e)
     else:
-        print("  [SKIP] eltdx库未安装")
+        logger.info("  [SKIP] eltdx库未安装")
 
     # 输出
     _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1397,75 +1418,8 @@ def cmd_report():
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2, default=str)
 
-    print(f"\n 报告已保存: {output_path}")
-    print(f" 模块: 新闻({len(headlines)}条) | 板块({len(sectors)}个) | 情绪({clock['phase']}) | 热门({len(hot)}只)")
+    logger.info(" 报告已保存: %s", output_path)
+    logger.info(" 模块: 新闻(%s条) | 板块(%s个) | 情绪(%s) | 热门(%s只)",
+                len(headlines), len(sectors), clock['phase'], len(hot))
     return report
 
-
-# ============================================================
-# 入口
-# ============================================================
-
-if __name__ == "__main__":
-    args = sys.argv[1:] if len(sys.argv) > 1 else ["health"]
-
-    if not args or args[0] in ("health", "status"):
-        cmd_health()
-
-    elif args[0] in ("news", "要闻"):
-        cmd_news()
-
-    elif args[0] in ("sector", "板块", "四象限"):
-        cmd_sector()
-
-    elif args[0] in ("sentiment", "情绪", "时钟"):
-        cmd_sentiment()
-
-    elif args[0] in ("report", "报告"):
-        cmd_report()
-
-    elif args[0] in ("premarket", "开盘前", "竞价"):
-        # 开盘前分析（集合竞价数据）
-        if not ELTDX_AVAILABLE:
-            print("❌ eltdx库未安装，请运行: pip install eltdx")
-            sys.exit(1)
-        codes = args[1:] if len(args) > 1 else ["sz000001", "sh600000", "sz000002"]
-        with EltdxProvider() as provider:
-            analyzer = EltdxAnalyzer(provider)
-            result = analyzer.analyze_pre_market(codes)
-            print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
-
-    elif args[0] in ("flow", "资金", "流向"):
-        # 资金流向分析（逐笔成交数据）
-        if not ELTDX_AVAILABLE:
-            print("❌ eltdx库未安装，请运行: pip install eltdx")
-            sys.exit(1)
-        code = args[1] if len(args) > 1 else "sz000001"
-        date = args[2] if len(args) > 2 else datetime.now().strftime("%Y%m%d")
-        with EltdxProvider() as provider:
-            analyzer = EltdxAnalyzer(provider)
-            result = analyzer.analyze_money_flow(code, date)
-            print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
-
-    elif args[0] in ("screen", "筛选", "选股"):
-        # 个股筛选（F10资料数据）
-        if not ELTDX_AVAILABLE:
-            print("❌ eltdx库未安装，请运行: pip install eltdx")
-            sys.exit(1)
-        codes = args[1:] if len(args) > 1 else ["000001", "600000", "000002"]
-        with EltdxProvider() as provider:
-            analyzer = EltdxAnalyzer(provider)
-            result = analyzer.screen_stocks(codes)
-            print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
-
-    else:
-        print(f"用法: python market_analyzer.py [health|news|sector|sentiment|report|premarket|flow|screen]")
-        print(f"  health   - 全链路健康检测")
-        print(f"  news     - 今日财经要闻")
-        print(f"  sector   - 板块四象限分析")
-        print(f"  sentiment- 情绪时钟")
-        print(f"  report   - 综合分析报告JSON")
-        print(f"  premarket- 开盘前分析（eltdx独有）")
-        print(f"  flow     - 资金流向分析（eltdx独有）")
-        print(f"  screen   - 个股筛选（eltdx独有）")
-        sys.exit(1)

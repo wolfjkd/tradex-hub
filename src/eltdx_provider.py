@@ -35,6 +35,7 @@ eltdx_provider.py - 通达信行情协议数据提供者
 """
 
 import json
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
@@ -44,6 +45,8 @@ try:
     ELTDX_AVAILABLE = True
 except ImportError:
     ELTDX_AVAILABLE = False
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -212,7 +215,7 @@ class EltdxProvider:
     NAME = "eltdx"
     VERSION = "1.0.2"
     
-    def __init__(self, timeout: int = 5):
+    def __init__(self, timeout: int = 5) -> None:
         """
         初始化提供者。
         
@@ -224,12 +227,12 @@ class EltdxProvider:
         
         self.timeout = timeout
         self.client = None
-    
-    def __enter__(self):
+
+    def __enter__(self) -> "EltdxProvider":
         self.client = TdxClient(timeout=self.timeout)
         return self
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         if self.client:
             self.client.close()
     
@@ -286,6 +289,7 @@ class EltdxProvider:
                 total_amount=total_amount
             )
         except Exception as e:
+            logger.exception("获取集合竞价数据失败: code=%s", code)
             return AuctionData(
                 code=code,
                 status="error",
@@ -344,6 +348,7 @@ class EltdxProvider:
                 total_amount=total_amount
             )
         except Exception as e:
+            logger.exception("获取逐笔成交数据失败: code=%s, date=%s", code, date)
             return TickData(
                 code=code,
                 date=date,
@@ -418,6 +423,7 @@ class EltdxProvider:
                 finance=finance_diagnosis
             )
         except Exception as e:
+            logger.exception("获取F10资料数据失败: code=%s", code)
             return F10Data(
                 code=code,
                 status="error",
@@ -465,6 +471,7 @@ class EltdxProvider:
             
             return result
         except Exception as e:
+            logger.exception("获取行情快照失败: codes=%s", codes)
             return {}
     
     def get_minute(self, code: str) -> MinuteData:
@@ -513,6 +520,7 @@ class EltdxProvider:
                 avg_price=avg_price
             )
         except Exception as e:
+            logger.exception("获取分时数据失败: code=%s", code)
             return MinuteData(
                 code=code,
                 status="error",
@@ -560,6 +568,7 @@ class EltdxProvider:
                 bars=kline_bars,
             )
         except Exception as e:
+            logger.exception("获取K线数据失败: code=%s, period=%s", code, period)
             return KlineData(
                 code=code,
                 status="error",
@@ -625,6 +634,7 @@ class EltdxProvider:
                 "tests": tests
             }
         except Exception as e:
+            logger.exception("健康检测失败")
             return {
                 "status": "unhealthy",
                 "latency_ms": round((time.time() - start) * 1000, 1),

@@ -21,10 +21,49 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import time
+import threading
 from typing import Any, Optional
 
 logger = logging.getLogger("cn-financial-mcp.eltdx")
+
+# Hub src path for astock_signals imports (TickStore)
+_HUB_SRC = os.path.normpath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "src")
+)
+if _HUB_SRC not in sys.path:
+    sys.path.insert(0, _HUB_SRC)
+
+# TickStore SQLite DB path: <project_root>/data/tick_store.db
+_PROJECT_ROOT = os.path.normpath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")
+)
+_TICK_DB_PATH = os.path.join(_PROJECT_ROOT, "data", "tick_store.db")
+
+_tick_store_instance: Optional[Any] = None
+_tick_store_lock = threading.Lock()
+
+
+def _get_tick_store():
+    """获取 TickStore 单例（DB 路径: <project_root>/data/tick_store.db）。
+
+    不可用时返回 None（不影响工具主流程）。
+    """
+    global _tick_store_instance
+    if _tick_store_instance is not None:
+        return _tick_store_instance
+    with _tick_store_lock:
+        if _tick_store_instance is None:
+            try:
+                from astock_signals.tick_store import TickStore
+                os.makedirs(os.path.dirname(_TICK_DB_PATH), exist_ok=True)
+                _tick_store_instance = TickStore(_TICK_DB_PATH)
+                logger.info("TickStore initialized at %s", _TICK_DB_PATH)
+            except Exception as e:
+                logger.warning("TickStore init failed: %s", e)
+                return None
+    return _tick_store_instance
 
 
 # ============================================================
@@ -181,6 +220,39 @@ def register(mcp):
             norm_code = _normalize_code(code)
             norm_date = trading_date.replace("-", "").replace("/", "")
 
+            # 6位纯代码用于 TickStore 存储
+            tick_code = norm_code
+            if tick_code.startswith(("sh", "sz", "bj")):
+                tick_code = tick_code[2:]
+
+            # 缓存优先：同一天同一股票从 TickStore 读取
+            store = _get_tick_store()
+            if store is not None:
+                try:
+                    cached_df = store.load_tick(tick_code, norm_date)
+                    if cached_df is not None and not cached_df.empty:
+                        cached = cached_df.tail(count) if len(cached_df) > count else cached_df
+                        ticks_out = [
+                            {
+                                "time": row.get("time"),
+                                "price": row.get("price"),
+                                "volume": row.get("volume"),
+                                "amount": row.get("amount"),
+                                "bs": row.get("direction") if row.get("direction") in ("buy", "sell") else "buy",
+                            }
+                            for _, row in cached.iterrows()
+                        ]
+                        latency_ms = round((time.time() - start) * 1000, 1)
+                        return _ok({
+                            "code": norm_code,
+                            "date": norm_date,
+                            "latency_ms": latency_ms,
+                            "tick_count": len(ticks_out),
+                            "ticks": ticks_out,
+                        })
+                except Exception as cache_err:
+                    logger.debug("TickStore cache read failed: %s", cache_err)
+
             result = client.trades.history(norm_code, norm_date, count=count)
             latency_ms = round((time.time() - start) * 1000, 1)
 
@@ -188,21 +260,47 @@ def register(mcp):
             if not ticks:
                 return _no_data(f"no ticks on {norm_date}")
 
+            ticks_out = [
+                {
+                    "time": getattr(t, "time", None),
+                    "price": getattr(t, "price", None),
+                    "volume": getattr(t, "volume", None),
+                    "amount": getattr(t, "amount", None),
+                    "bs": "buy" if getattr(t, "buy_or_sell", None) in (0, "0", "buy") else "sell",
+                }
+                for t in ticks
+            ]
+
+            # 异步写入 TickStore（不阻塞返回，失败仅记录日志）
+            if store is not None:
+                _rows = [
+                    {
+                        "time": t_obj.get("time", ""),
+                        "price": t_obj.get("price"),
+                        "volume": t_obj.get("volume"),
+                        "amount": t_obj.get("amount"),
+                        "direction": t_obj.get("bs", ""),
+                    }
+                    for t_obj in ticks_out
+                ]
+                _store = store
+                _tc = tick_code
+                _nd = norm_date
+
+                def _save_to_store():
+                    try:
+                        _store.save_tick(_tc, _nd, _rows)
+                    except Exception as save_err:
+                        logger.warning("TickStore async save failed: %s", save_err)
+
+                threading.Thread(target=_save_to_store, daemon=True).start()
+
             return _ok({
                 "code": norm_code,
                 "date": norm_date,
                 "latency_ms": latency_ms,
-                "tick_count": len(ticks),
-                "ticks": [
-                    {
-                        "time": getattr(t, "time", None),
-                        "price": getattr(t, "price", None),
-                        "volume": getattr(t, "volume", None),
-                        "amount": getattr(t, "amount", None),
-                        "bs": "buy" if getattr(t, "buy_or_sell", None) in (0, "0", "buy") else "sell",
-                    }
-                    for t in ticks
-                ],
+                "tick_count": len(ticks_out),
+                "ticks": ticks_out,
             })
         except Exception as e:
             logger.exception("eltdx_get_ticks failed")

@@ -178,7 +178,10 @@ class SmartRouter:
                     "success_rate": round(health.success_rate * 100, 1),
                     "avg_latency_ms": round(health.avg_latency_ms, 0),
                     "total_calls": health.total_calls,
+                    "fail_count": health.fail_count,
                     "consecutive_fails": health.consecutive_fails,
+                    "last_success_ts": health.last_success_ts,
+                    "last_fail_ts": health.last_fail_ts,
                     "is_healthy": health.is_healthy,
                 })
         return sorted(report, key=lambda x: x["score"], reverse=True)

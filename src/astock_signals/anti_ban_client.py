@@ -71,6 +71,9 @@ def em_get(
     串行限流：与上次东财请求间隔 < EM_MIN_INTERVAL 时 sleep 补足 + 0.1~0.5s 随机抖动。
     线程安全：使用锁确保限流计算和时间戳更新是原子操作。
 
+    并发优化：锁内仅计算等待时间并预定时间戳（让后续线程据此排队），
+    sleep 在锁外执行，避免高并发时所有线程在锁内排队退化为串行。
+
     Args:
         url: Full URL to request.
         params: Query parameters dict.
@@ -81,13 +84,22 @@ def em_get(
     Returns:
         requests.Response object.
     """
+    # 第一阶段：锁内计算等待时间并预定时间戳（让后续线程据此排队）
     with _lock:
-        wait = _EM_MIN_INTERVAL - (time.time() - _em_last_call[0])
-        if wait > 0:
-            # 在锁内 sleep 保证串行限流
-            time.sleep(wait + random.uniform(0.1, 0.5))
-        _em_last_call[0] = time.time()
+        now = time.time()
+        wait = _EM_MIN_INTERVAL - (now - _em_last_call[0])
+        if wait < 0:
+            wait = 0
+        jitter = random.uniform(0.1, 0.5)
+        sleep_time = wait + jitter
+        # 预定本次请求时刻，后续线程据此排队
+        _em_last_call[0] = now + sleep_time
 
+    # 第二阶段：锁外 sleep，不阻塞其他线程计算等待时间
+    if sleep_time > 0:
+        time.sleep(sleep_time)
+
+    # 第三阶段：执行请求（不持锁，允许并发请求的等待阶段重叠）
     return _ensure_session().get(
         url, params=params, headers=headers, timeout=timeout, **kwargs
     )
