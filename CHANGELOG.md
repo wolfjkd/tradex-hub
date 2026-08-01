@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
 
+## [3.1.1] - 2026-08-02
+
+### Fixed
+- 注册 pytest `network` marker：消除 tradex/tests 中 4 个 `PytestUnknownMarkWarning`
+- 根因：`tradex/pyproject.toml` 有独立 `[tool.pytest.ini_options]`，pytest 运行 tradex/tests 时 rootdir=tradex/ 读取 tradex/pyproject.toml 而非根配置
+- 修复：在根 `pyproject.toml` 和 `tradex/pyproject.toml` 同时注册 `markers = ["network: ..."]`
+
+### 升级指引
+- 无需手动操作，配置文件随版本更新
+
 ## [3.1.0] - 2026-08-02
 
 ### BREAKING CHANGES
