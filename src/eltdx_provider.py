@@ -170,6 +170,27 @@ class MinuteData:
     error_message: str = ""
 
 
+@dataclass
+class KlineBar:
+    """K线数据点"""
+    date: str
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: int
+    amount: float = 0.0
+
+
+@dataclass
+class KlineData:
+    """K线数据"""
+    code: str
+    status: str  # success/no_data/error
+    bars: list[KlineBar] = field(default_factory=list)
+    error_message: str = ""
+
+
 # ============================================================
 # EltdxProvider 主类
 # ============================================================
@@ -493,6 +514,53 @@ class EltdxProvider:
             )
         except Exception as e:
             return MinuteData(
+                code=code,
+                status="error",
+                error_message=str(e)
+            )
+    
+    def get_kline(self, code: str, period: str = "day", count: int = 500) -> KlineData:
+        """
+        获取 K 线数据（与腾讯/东方财富接口互补）。
+        
+        eltdx 使用通达信 TCP 协议，比 HTTP 接口更稳定。
+        
+        Args:
+            code: 股票代码，如 'sz000001'
+            period: K线周期，"day" / "week" / "month" / "5m" / "15m" / "30m" / "60m"
+            count: 返回 K 线根数（默认 500）
+        
+        Returns:
+            KlineData对象
+        """
+        try:
+            result = self.client.bars.get(code, period=period, count=count)
+            bars = getattr(result, "bars", None) or []
+            
+            if not bars:
+                return KlineData(code=code, status="no_data")
+            
+            # 转换为标准格式
+            kline_bars = [
+                KlineBar(
+                    date=getattr(b, "time", "").strftime("%Y-%m-%d") if getattr(b, "time") else "",
+                    open=float(getattr(b, "open", 0) or 0),
+                    high=float(getattr(b, "high", 0) or 0),
+                    low=float(getattr(b, "low", 0) or 0),
+                    close=float(getattr(b, "close", 0) or 0),
+                    volume=int(getattr(b, "volume_wire_value", 0) or 0),
+                    amount=float(getattr(b, "amount", 0) or 0),
+                )
+                for b in bars
+            ]
+            
+            return KlineData(
+                code=code,
+                status="success",
+                bars=kline_bars,
+            )
+        except Exception as e:
+            return KlineData(
                 code=code,
                 status="error",
                 error_message=str(e)

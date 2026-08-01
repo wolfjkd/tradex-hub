@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/License-Apache--2.0-yellow.svg" alt="License"/>
   <img src="https://img.shields.io/badge/Data-A股-red.svg" alt="Data Scope"/>
   <img src="https://img.shields.io/badge/Tools-80-orange.svg" alt="MCP Tools"/>
-  <img src="https://img.shields.io/badge/Version-2.5.0-blue.svg" alt="Version"/>
+  <img src="https://img.shields.io/badge/Version-2.5.1-blue.svg" alt="Version"/>
 </p>
 
 ---

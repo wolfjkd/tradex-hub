@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
 
+## [2.5.1] - 2026-08-01
+
+### Added
+- eltdx K线数据接口：新增 `KlineBar`/`KlineData` 数据类 + `get_kline()` 方法（通达信TCP协议直连）
+- `.coverage` 加入 `.gitignore`
+
+### Fixed
+- 修复 eltdx_provider.py 缺少 K 线数据获取能力
+
 ## [2.5.0] - 2026-07-26
 
 ### Added - 智能决策中台升级（15个新工具）

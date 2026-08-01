@@ -35,3 +35,7 @@ config/local.json
 
 # Test outputs
 test_output/
+
+# Coverage
+.coverage
+coverage/
