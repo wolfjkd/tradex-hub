@@ -17,6 +17,8 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any
 
+import pandas as pd
+
 logger = logging.getLogger("tradex.akshare")
 
 
@@ -637,3 +639,294 @@ def fetch_profit_forecast(symbol: str = "", **kwargs) -> dict:
         result["valuation_note"] = f"Forward valuation unavailable: {e}"
 
     return result
+
+
+# ============================================================
+# baidu_economic_calendar — 百度经济数据日历
+# ============================================================
+
+def fetch_baidu_economic_calendar(date: str = "", **kwargs) -> pd.DataFrame:
+    """百度股市通经济数据日历。
+
+    调用 ak.news_economic_baidu(date=date) 获取每日经济数据发布日程。
+
+    Args:
+        date: 查询日期，格式 "YYYYMMDD"。默认为当日
+
+    Returns:
+        DataFrame with columns: 日期, 时间, 事件, 重要性, 前值, 预期, 公布值, 地区, 国家, 统计周期
+    """
+    ak = _ak()
+    if not date:
+        date = datetime.now().strftime("%Y%m%d")
+    try:
+        df = ak.news_economic_baidu(date=date)
+        if df is None or df.empty:
+            logger.debug("fetch_baidu_economic_calendar(%s): empty", date)
+            return pd.DataFrame()
+        return df
+    except Exception as e:
+        logger.warning("fetch_baidu_economic_calendar(%s) failed: %s", date, e)
+        return pd.DataFrame()
+
+
+# ============================================================
+# baidu_trade_notify — 百度交易提醒（多 endpoint）
+# ============================================================
+
+def fetch_baidu_trade_notify(endpoint: str = "suspend", date: str = "", **kwargs) -> pd.DataFrame:
+    """百度股市通交易提醒（多 endpoint 分派）。
+
+    endpoint:
+      - suspend:     停复牌提醒（ak.news_trade_notify_suspend_baidu）
+      - dividend:    分红派息提醒（ak.news_trade_notify_dividend_baidu）
+      - report_time: 财报发行时间（ak.news_report_time_baidu）
+
+    Args:
+        endpoint: 提醒类型
+        date: 查询日期，格式 "YYYYMMDD"
+
+    Returns:
+        DataFrame
+    """
+    ak = _ak()
+    if not date:
+        date = datetime.now().strftime("%Y%m%d")
+    try:
+        if endpoint == "suspend":
+            df = ak.news_trade_notify_suspend_baidu(date=date)
+        elif endpoint == "dividend":
+            df = ak.news_trade_notify_dividend_baidu(date=date)
+        elif endpoint == "report_time":
+            df = ak.news_report_time_baidu(date=date)
+        else:
+            raise ValueError(f"Unknown baidu_trade_notify endpoint: {endpoint}")
+        if df is None or df.empty:
+            logger.debug("fetch_baidu_trade_notify(%s, %s): empty", endpoint, date)
+            return pd.DataFrame()
+        return df
+    except Exception as e:
+        logger.warning("fetch_baidu_trade_notify(%s, %s) failed: %s", endpoint, date, e)
+        return pd.DataFrame()
+
+
+# ============================================================
+# index_news_sentiment — 指数新闻情绪
+# ============================================================
+
+def fetch_index_news_sentiment(**kwargs) -> pd.DataFrame:
+    """指数新闻情绪。
+
+    调用 ak.index_news_sentiment_scope() 获取指数新闻情感得分。
+    目标网站 www.chinascope.com.cn 证书可能不受信任，自动绕过 SSL 验证。
+
+    Returns:
+        DataFrame with columns: 指数代码, 情感得分, 相关新闻数量等
+    """
+    ak = _ak()
+    try:
+        # 部分环境下 chinascope.com.cn 证书不受信任，全局绕过 SSL 验证
+        import ssl
+        _original = ssl._create_default_https_context
+        ssl._create_default_https_context = ssl._create_unverified_context
+        try:
+            df = ak.index_news_sentiment_scope()
+        finally:
+            ssl._create_default_https_context = _original
+        if df is None or df.empty:
+            logger.debug("fetch_index_news_sentiment: empty")
+            return pd.DataFrame()
+        return df
+    except Exception as e:
+        logger.warning("fetch_index_news_sentiment failed: %s", e)
+        return pd.DataFrame()
+
+
+# ============================================================
+# futures_news — 期货新闻（上海有色网）
+# ============================================================
+
+def fetch_futures_news(symbol: str = "全部", **kwargs) -> pd.DataFrame:
+    """期货新闻（上海有色网）。
+
+    调用 ak.futures_news_shmet(symbol=symbol) 获取期货/大宗商品相关新闻。
+
+    Args:
+        symbol: 品种，默认 "全部"
+
+    Returns:
+        DataFrame with columns: 标题, 发布时间, 内容
+    """
+    ak = _ak()
+    try:
+        df = ak.futures_news_shmet(symbol=symbol)
+        if df is None or df.empty:
+            logger.debug("fetch_futures_news(%s): empty", symbol)
+            return pd.DataFrame()
+        return df
+    except Exception as e:
+        logger.warning("fetch_futures_news(%s) failed: %s", symbol, e)
+        return pd.DataFrame()
+
+
+# ============================================================
+# hot_search_baidu — 百度热搜股票
+# ============================================================
+
+def fetch_hot_search_baidu(symbol: str = "A股", date: str = "", time: str = "今日", **kwargs) -> pd.DataFrame:
+    """百度股市通热搜股票。
+
+    调用 ak.stock_hot_search_baidu(symbol=symbol, date=date, time=time) 获取热搜排行。
+
+    Args:
+        symbol: {"全部", "A股", "港股", "美股"}
+        date: 日期，格式 "YYYYMMDD"
+        time: {"今日", "1小时"}
+
+    Returns:
+        DataFrame with columns: 股票代码, 股票名称, 热搜排名, 热度值等
+    """
+    ak = _ak()
+    if not date:
+        date = datetime.now().strftime("%Y%m%d")
+    try:
+        df = ak.stock_hot_search_baidu(symbol=symbol, date=date, time=time)
+        if df is None or df.empty:
+            logger.debug("fetch_hot_search_baidu(%s): empty", symbol)
+            return pd.DataFrame()
+        return df
+    except Exception as e:
+        logger.warning("fetch_hot_search_baidu(%s) failed: %s", symbol, e)
+        return pd.DataFrame()
+
+
+# ============================================================
+# hot_rank_data — 东方财富人气榜（多 endpoint）
+# ============================================================
+
+def fetch_hot_rank_data(endpoint: str = "rank", symbol: str = "", **kwargs) -> pd.DataFrame:
+    """东方财富个股人气榜（多 endpoint 分派）。
+
+    endpoint:
+      - rank:     全市场人气榜（ak.stock_hot_rank_em）
+      - up:       飙升榜（ak.stock_hot_up_em）
+      - detail:   个股历史趋势及粉丝特征（ak.stock_hot_rank_detail_em）
+      - realtime: 个股实时变动（ak.stock_hot_rank_detail_realtime_em）
+      - keyword:  个股热门关键词（ak.stock_hot_keyword_em）
+      - latest:   个股最新排名（ak.stock_hot_rank_latest_em）
+      - relate:   相关股票（ak.stock_hot_rank_relate_em）
+
+    Args:
+        endpoint: 榜单类型
+        symbol: 带市场表示的证券代码，如 "SZ000665"
+
+    Returns:
+        DataFrame
+    """
+    ak = _ak()
+    try:
+        if endpoint == "rank":
+            df = ak.stock_hot_rank_em()
+        elif endpoint == "up":
+            df = ak.stock_hot_up_em()
+        elif endpoint == "detail":
+            df = ak.stock_hot_rank_detail_em(symbol=symbol)
+        elif endpoint == "realtime":
+            df = ak.stock_hot_rank_detail_realtime_em(symbol=symbol)
+        elif endpoint == "keyword":
+            df = ak.stock_hot_keyword_em(symbol=symbol)
+        elif endpoint == "latest":
+            df = ak.stock_hot_rank_latest_em(symbol=symbol)
+        elif endpoint == "relate":
+            df = ak.stock_hot_rank_relate_em(symbol=symbol)
+        else:
+            raise ValueError(f"Unknown hot_rank_data endpoint: {endpoint}")
+        if df is None or df.empty:
+            logger.debug("fetch_hot_rank_data(%s): empty", endpoint)
+            return pd.DataFrame()
+        return df
+    except Exception as e:
+        logger.warning("fetch_hot_rank_data(%s) failed: %s", endpoint, e)
+        return pd.DataFrame()
+
+
+# ============================================================
+# xueqiu_hot — 雪球热度（多 endpoint）
+# ============================================================
+
+def fetch_xueqiu_hot(endpoint: str = "follow", symbol: str = "最热门", **kwargs) -> pd.DataFrame:
+    """雪球沪深股市热度排行榜（多 endpoint 分派）。
+
+    endpoint:
+      - follow: 关注排行榜（ak.stock_hot_follow_xq）
+      - tweet:  讨论排行榜（ak.stock_hot_tweet_xq）
+      - deal:   交易排行榜（ak.stock_hot_deal_xq）
+
+    Args:
+        endpoint: 排行榜类型
+        symbol: {"最热门", "沪深股市", "创业板", "科创板"}
+
+    Returns:
+        DataFrame
+    """
+    ak = _ak()
+    try:
+        if endpoint == "follow":
+            df = ak.stock_hot_follow_xq(symbol=symbol)
+        elif endpoint == "tweet":
+            df = ak.stock_hot_tweet_xq(symbol=symbol)
+        elif endpoint == "deal":
+            df = ak.stock_hot_deal_xq(symbol=symbol)
+        else:
+            raise ValueError(f"Unknown xueqiu_hot endpoint: {endpoint}")
+        if df is None or df.empty:
+            logger.debug("fetch_xueqiu_hot(%s): empty", endpoint)
+            return pd.DataFrame()
+        return df
+    except Exception as e:
+        logger.warning("fetch_xueqiu_hot(%s) failed: %s", endpoint, e)
+        return pd.DataFrame()
+
+
+# ============================================================
+# fund_hold_data — 机构持仓（多 endpoint）
+# ============================================================
+
+def fetch_fund_hold_data(endpoint: str = "hold", symbol: str = "基金持仓", date: str = "", **kwargs) -> pd.DataFrame:
+    """机构持仓数据（多 endpoint 分派）。
+
+    endpoint:
+      - hold:   基金/QFII/社保等持仓汇总（ak.stock_report_fund_hold）
+      - detail: 单只基金持仓明细（ak.stock_report_fund_hold_detail）
+
+    Args:
+        endpoint: 数据类型
+        symbol: "hold" 时取 {"基金持仓", "QFII持仓", "社保持仓", "券商持仓", "保险持仓", "信托持仓"}；
+                "detail" 时为基金代码
+        date: 财报日期，格式 "YYYYMMDD"（如 "20260331"）
+
+    Returns:
+        DataFrame
+    """
+    ak = _ak()
+    if not date:
+        # 默认上一季度末
+        now = datetime.now()
+        q = (now.month - 1) // 3
+        year = now.year - (1 if q == 0 else 0)
+        q = q if q > 0 else 4
+        date = f"{year}{q*3:02d}31"
+    try:
+        if endpoint == "hold":
+            df = ak.stock_report_fund_hold(symbol=symbol, date=date)
+        elif endpoint == "detail":
+            df = ak.stock_report_fund_hold_detail(symbol=symbol, date=date)
+        else:
+            raise ValueError(f"Unknown fund_hold_data endpoint: {endpoint}")
+        if df is None or df.empty:
+            logger.debug("fetch_fund_hold_data(%s, %s): empty", endpoint, symbol)
+            return pd.DataFrame()
+        return df
+    except Exception as e:
+        logger.warning("fetch_fund_hold_data(%s, %s) failed: %s", endpoint, symbol, e)
+        return pd.DataFrame()

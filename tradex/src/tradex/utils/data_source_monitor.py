@@ -48,9 +48,9 @@ def _has_update(current: str, latest: str) -> bool:
 
 
 def check_eltdx_version() -> dict:
-    """检查 eltdx GitHub 最新版本。
+    """检查 eltdx PyPI 最新版本。
 
-    查询 https://api.github.com/repos/electkismet/eltdx/releases/latest
+    查询 https://pypi.org/pypi/eltdx/json（与 akshare 一致，避免 GitHub API 速率限制）。
     对比本地版本（import eltdx; eltdx.__version__）。
 
     Returns:
@@ -58,18 +58,15 @@ def check_eltdx_version() -> dict:
         失败: {"name": "eltdx", "error": "...", "has_update": False}
     """
     try:
-        data = _fetch_json(
-            "https://api.github.com/repos/electkismet/eltdx/releases/latest"
-        )
-        latest = (data.get("tag_name") or "").lstrip("v") or "unknown"
-        url = data.get("html_url") or "https://github.com/electkismet/eltdx/releases"
+        data = _fetch_json("https://pypi.org/pypi/eltdx/json")
+        latest = (data.get("info") or {}).get("version") or "unknown"
         current = _get_local_version("eltdx")
         return {
             "name": "eltdx",
             "current": current,
             "latest": latest,
             "has_update": _has_update(current, latest),
-            "url": url,
+            "url": "https://pypi.org/project/eltdx/",
         }
     except Exception as e:
         return {"name": "eltdx", "error": str(e), "has_update": False}

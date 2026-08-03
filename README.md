@@ -2,7 +2,7 @@
 
 <p align="center">
   <strong>AI金融智能决策中台</strong><br/>
-  AKShare 封装 · eltdx 通达信协议 · astock_signals 信号模块 · 量化计算引擎 · SmartRouter 全量路由 · 本地 MCP Server · 89 个工具
+  AKShare 封装 · eltdx 通达信协议 · astock_signals 信号模块 · 量化计算引擎 · SmartRouter 全量路由 · 本地 MCP Server · 99 个工具
 </p>
 
 <p align="center">
@@ -10,8 +10,8 @@
   <img src="https://img.shields.io/badge/MCP-1.0-green.svg" alt="MCP"/>
   <img src="https://img.shields.io/badge/License-Apache--2.0-yellow.svg" alt="License"/>
   <img src="https://img.shields.io/badge/Data-A股-red.svg" alt="Data Scope"/>
-  <img src="https://img.shields.io/badge/Tools-89-orange.svg" alt="MCP Tools"/>
-  <img src="https://img.shields.io/badge/Version-3.1.4-blue.svg" alt="Version"/>
+  <img src="https://img.shields.io/badge/Tools-99-orange.svg" alt="MCP Tools"/>
+  <img src="https://img.shields.io/badge/Version-3.3.0-blue.svg" alt="Version"/>
 </p>
 
 ---
@@ -25,14 +25,15 @@
 - **L2 计算引擎层**（8个工具）：技术指标计算6个、绩效指标计算2个
 - **L3 决策支持层**（16个工具）：交易信号生成3个、多因子分析2个、条件选股2个、系统诊断5个、综合分析3个、技术分析引擎1个
 
-**数据源架构（v3.1.0）**：
-- **data_sources 数据源层**：25 个数据类型，34 个数据源注册到 SmartRouter
+**数据源架构（v3.3.0）**：
+- **data_sources 数据源层**：38 个数据类型，48 个数据源注册到 SmartRouter
 - **SmartRouter 全量覆盖**：L1 工具通过 `SmartRouter.route()` 统一获取数据，自动健康评分/降级/故障隔离
 - **独占源标记**：集合竞价/逐笔/F10（eltdx 独有）、涨停归因（同花顺独有）、解禁日历（东财独有）等标记为 `exclusive`
 - **eltdx 1.2.0**：行情类第一主源（郑州节点，TCP 3.5ms），独有集合竞价/逐笔/F10
+- **新闻资讯数据源**：东财个股新闻直连、财联社实时电报、巨潮公告直连、新浪财经直连、百度经济日历/交易提醒/热搜、期货新闻、东财人气榜、雪球热度、机构持仓、同花顺问财等
 - **数据源看板**：`python -m tradex.dashboard`（端口 8765），可视化查看数据源健康/路由/工具分布；MCP 工具 `get_data_source_dashboard` 可在 Agent 对话中查询
 
-**v3.1.0 更新**：项目改名 tradex-hub（包名 tradex），astock_signals 独立成包 v1.1.0，SmartRouter 全量覆盖 25 数据类型 34 源，新增数据源看板（MCP 工具 `get_data_source_dashboard` + HTML 可视化），工具数 88→89。详见 `docs/architecture.md`。
+**v3.3.0 更新**：新增 9 个 akshare 新闻资讯数据源（百度/东财人气/雪球/期货/基金持仓等）+ 同花顺问财可选集成，新增 9 个 MCP 工具（工具数 90→99），数据类型从 27 扩展到 38。详见 `docs/architecture.md`。
 
 ---
 
@@ -67,7 +68,7 @@ AI Agent (WorkBuddy / Claude Code / Cursor)
                     └─ 数据源：通达信私有协议 (TCP 7709)
 ```
 
-## MCP 工具清单（89 个）
+## MCP 工具清单（99 个）
 
 ### 1. 公司信息（4 个）— `company_info`
 
@@ -344,6 +345,7 @@ AI 会调用 `mcp__tradex__eltdx_get_kline`，返回 100 根日 K 线。
 
 | 版本 | 日期 | 内容 |
 |------|------|------|
+| v3.3.0 | 2026-08-03 | 新增 9 个新闻资讯数据源（百度经济日历/交易提醒/热搜、期货新闻、新浪财经、东财人气榜、雪球热度、机构持仓、指数情绪）+ 同花顺问财可选集成，新增 9 个 MCP 工具（get_market_sentiment/get_futures_news/get_hot_rank/get_hot_keywords/get_xueqiu_hot/get_fund_hold/get_hot_search/get_wencai_query/get_wencai_news），工具数 90→99，数据类型 27→38 |
 | v3.1.4 | 2026-08-02 | 修复 P1/P2 遗留：eltdx realtime_quote 改用 get_quote()（QuoteSnapshot 完整字段含涨跌幅/内外盘）；装饰器死代码修复（list_all_tools/health_check 改用 mcp 实例，不再误报 degraded）；源名标识修正（etf_data/cb_data akshare→astock_signals）；_client_lock 改用 threading.Lock；architecture.md 文档修正；ETF 列名重复 warning 修复 |
 | v3.1.3 | 2026-08-02 | 修复 P0 bug：SmartRouter 参数名不匹配导致 eltdx 主源永远失败降级 akshare（行情类 fetcher 统一兼容 symbol/code）；修复 eltdx KlineBar 字段映射（date→time, volume→volume_lots），新增 17 个参数归一化回归测试 |
 | v3.1.2 | 2026-08-02 | 删除 v2.x 遗留 `src/` 目录（data_manager/market_analyzer，依赖已删的 eltdx_provider），清理 diagnostics.py 的 `src.astock_signals` fallback 死代码 |

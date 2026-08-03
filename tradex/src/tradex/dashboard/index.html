@@ -63,22 +63,41 @@
   }
   .refresh-btn:hover { background: #1565c0; }
   .refresh-btn:disabled { background: #90caf9; cursor: not-allowed; }
-  /* ── 版本提醒条幅 ── */
+  /* ── 版本信息条幅 ── */
   .version-banner {
-    background: #fff3cd;
-    border: 1px solid #ffc107;
-    color: #856404;
-    padding: 12px 24px;
+    background: #e8f5e9;
+    border: 1px solid #4caf50;
+    color: #2e7d32;
+    padding: 10px 24px;
     margin: 0;
   }
+  .version-banner.has-update {
+    background: #fff3cd;
+    border-color: #ffc107;
+    color: #856404;
+  }
+  .version-banner.has-error {
+    background: #ffebee;
+    border-color: #f44336;
+    color: #c62828;
+  }
   .version-banner.hidden { display: none; }
-  .version-item { margin: 4px 0; }
+  .version-item { margin: 4px 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .version-item a {
     color: #1976d2;
     text-decoration: none;
     font-weight: 500;
   }
   .version-item a:hover { text-decoration: underline; }
+  .version-tag {
+    font-size: 11px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    font-weight: 500;
+  }
+  .version-tag.latest { background: #c8e6c9; color: #2e7d32; }
+  .version-tag.update { background: #fff9c4; color: #f57f17; }
+  .version-tag.error { background: #ffcdd2; color: #c62828; }
   /* ── 主体内容 ── */
   .container {
     max-width: 1400px;
@@ -256,30 +275,52 @@
     document.getElementById("stat-tools").textContent = s.total_tools;
   }
 
-  // 渲染版本提醒条幅
+  // 渲染版本信息条幅（始终展示）
   function renderVersions(versions) {
     var banner = document.getElementById("version-banner");
-    var updates = [];
-    if (versions && versions.length) {
-      for (var i = 0; i < versions.length; i++) {
-        var v = versions[i];
-        if (v.has_update && !v.error) {
-          updates.push(
-            '<div class="version-item">' +
-            '<strong>' + v.name + '</strong> 有新版 <strong>' + v.latest + '</strong>，' +
-            '当前 ' + v.current + '，建议手动升级 ' +
-            '<a href="' + v.url + '" target="_blank">查看</a>' +
-            '</div>'
-          );
-        }
+    if (!versions || !versions.length) {
+      banner.classList.add("hidden");
+      return;
+    }
+    var items = [];
+    var hasUpdate = false;
+    var hasError = false;
+    for (var i = 0; i < versions.length; i++) {
+      var v = versions[i];
+      if (v.error) {
+        hasError = true;
+        items.push(
+          '<div class="version-item">' +
+          '<strong>' + v.name + '</strong>' +
+          '<span class="version-tag error">检查失败</span>' +
+          '<span>' + v.error + '</span>' +
+          '</div>'
+        );
+      } else if (v.has_update) {
+        hasUpdate = true;
+        items.push(
+          '<div class="version-item">' +
+          '<strong>' + v.name + '</strong>' +
+          '<span class="version-tag update">有新版</span>' +
+          '当前 ' + v.current + ' → 最新 <strong>' + v.latest + '</strong>' +
+          '<a href="' + v.url + '" target="_blank">升级</a>' +
+          '</div>'
+        );
+      } else {
+        items.push(
+          '<div class="version-item">' +
+          '<strong>' + v.name + '</strong>' +
+          '<span class="version-tag latest">最新</span>' +
+          'v' + v.current +
+          '<a href="' + v.url + '" target="_blank">查看</a>' +
+          '</div>'
+        );
       }
     }
-    if (updates.length) {
-      banner.innerHTML = updates.join("");
-      banner.classList.remove("hidden");
-    } else {
-      banner.classList.add("hidden");
-    }
+    banner.innerHTML = items.join("");
+    banner.classList.remove("hidden", "has-update", "has-error");
+    if (hasUpdate) banner.classList.add("has-update");
+    else if (hasError) banner.classList.add("has-error");
   }
 
   // 渲染单张卡片

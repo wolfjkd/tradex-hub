@@ -8,8 +8,10 @@
   - akshare_fetchers:           AKShare 数据源 fetch_fn 包装器
   - eltdx_fetchers:             eltdx 通达信协议 fetch_fn 包装器
   - http_fetchers:              HTTP 直连数据源（腾讯行情等）
+  - news_fetchers:              新闻资讯类直连数据源（东财个股新闻/财联社快讯/巨潮公告/新浪财经）
+  - wencai_fetchers:            同花顺问财数据源（pywencai/iwenci OpenAPI，可选依赖）
   - astock_signals_fetchers:    astock_signals 函数 fetch_fn 包装器
-  - registry:                   register_all_sources() — 注册 25 个数据类型到 SmartRouter
+  - registry:                   register_all_sources() — 注册 38 个数据类型到 SmartRouter
 
 Usage:
     from ..data_sources import register_all_sources, get_router

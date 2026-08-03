@@ -4,6 +4,80 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
 
+## [3.3.0] - 2026-08-03
+
+### Added
+- **新闻资讯数据源扩充：9 个新增数据源**
+  - `baidu_economic_calendar`：百度经济数据日历（akshare）
+  - `baidu_trade_notify`：百度交易提醒（停复牌/分红派息/财报发行时间，akshare）
+  - `index_news_sentiment`：指数新闻情绪评分（akshare）
+  - `futures_news`：期货/大宗商品新闻（上海有色网，akshare）
+  - `sina_finance_news`：新浪财经新闻直连（HTTP API）
+  - `hot_search`：百度股市通热搜股票排行（akshare）
+  - `hot_rank`：东方财富人气榜/飙升榜/热门关键词（akshare，7 合 1 多 endpoint）
+  - `xueqiu_hot`：雪球关注/讨论/交易热度排行榜（akshare，3 合 1 多 endpoint）
+  - `fund_hold`：机构持仓数据（基金/QFII/社保/券商/保险/信托，akshare，2 合 1 多 endpoint）
+- **同花顺问财数据源（可选依赖）**：
+  - `wencai_query`：同花顺问财自然语言查询（pywencai 可选依赖 + Node.js）
+  - `wencai_news`：同花顺问财新闻/公告/研报搜索（iwencai OpenAPI，需 IWENCAI_API_KEY）
+- **新增 9 个 MCP 工具（工具数 90 → 99）：**
+  - `get_market_sentiment`（第91个）— 指数新闻情绪
+  - `get_futures_news`（第92个）— 期货/大宗商品新闻
+  - `get_hot_rank`（第93个）— 东财人气榜/飙升榜
+  - `get_hot_keywords`（第94个）— 个股热门关键词
+  - `get_xueqiu_hot`（第95个）— 雪球关注/讨论/交易热度
+  - `get_fund_hold`（第96个）— 机构持仓数据
+  - `get_hot_search`（第97个）— 百度热搜股票排行
+  - `get_wencai_query`（第98个）— 同花顺问财自然语言查询
+  - `get_wencai_news`（第99个）— 同花顺问财新闻/公告/研报搜索
+- **新增数据类型**：数据类型从 27 个增加到 38 个（+11 个）
+
+### Changed
+- **get_financial_calendar**：新增百度经济数据日历作为补充源（财报披露 + 经济数据合并）
+- **search_news**：全市场搜索新增百度交易提醒 + 期货新闻 + 新浪财经 + 百度热搜
+  - 搜索源顺序：财联社快讯 → 巨潮公告 → 百度交易提醒 → 期货新闻 → 新浪财经 → 百度热搜 → 财新网 → CCTV
+- **data_sources/__init__.py**：新增 wencai_fetchers 子模块说明
+- **data_sources/registry.py**：注册表从 27 个数据类型扩展到 38 个
+
+### 验证
+- `python -m tradex` 启动：99 个工具注册
+- 9 个 akshare 数据源实战验证均可返回非空数据
+- 同花顺问财数据源在 pywencai/API Key 未配置时友好降级（返回空）
+- 现有 350+ 测试用例全部通过，无回归
+
+### 升级指引
+- `pip install -e . --force-reinstall --no-deps` 重新安装 tradex 包
+- 如需使用同花顺问财查询工具：`pip install pywencai`（需 Node.js v16+）
+- 如需使用同花顺问财新闻搜索：设置环境变量 `IWENCAI_API_KEY`
+- 新工具均在 MCP 客户端重启后自动加载
+
+## [3.2.0] - 2026-08-03
+
+### Added
+- **新闻资讯数据源增强：3 个直连数据源**
+  - `em_news_direct`：东财 search-api-web JSONP 直连个股新闻，替代 akshare 间接调用
+  - `cls_telegraph`：财联社 cls.cn 实时电报，获取全市场 7×24 小时财经快讯
+  - `cninfo_direct`：巨潮 cninfo.com.cn 官方全量公告，证监会指定信息披露平台
+- **新增 MCP 工具**：`get_telegraph_news`（第 90 个工具）— 全市场实时财经快讯
+- **新增数据类型**：`telegraph_news`（实时电报）、`cninfo_announcement`（全量公告）
+- **数据源矩阵扩展**：从 25 个数据类型增加到 27 个
+
+### Changed
+- **get_stock_news**：数据源从 akshare 间接调用改为 em_news_direct 直连，akshare 降为备源
+- **get_company_announcements**：数据源从 akshare 间接调用改为 cninfo_direct 直连
+- **search_news**：全市场搜索新增财联社快讯和巨潮公告作为搜索源，搜索源顺序：财联社快讯 → 巨潮公告 → 财新网 → CCTV
+
+### 验证
+- `python -m tradex` 启动：90 个工具注册
+- `get_stock_news("600519")`：返回东财直连个股新闻
+- `get_telegraph_news()`：返回财联社实时快讯
+- `get_company_announcements("600519")`：返回巨潮公告
+- `search_news("业绩预增")`：多源合并结果
+
+### 升级指引
+- `pip install -e . --force-reinstall --no-deps` 重新安装 tradex 包
+- 新工具 `get_telegraph_news` 在 MCP 客户端重启后自动加载
+
 ## [3.1.4] - 2026-08-02
 
 ### Fixed
