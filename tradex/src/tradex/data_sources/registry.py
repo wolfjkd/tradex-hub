@@ -3,7 +3,7 @@
 
 注册全部 38 个数据类型到 SmartRouter，按数据源矩阵定义优先级与独占标记。
 
-数据源矩阵（38 个数据类型，v3.3.0 新增新闻/资讯类）：
+数据源矩阵（39 个数据类型，v3.3.1 新增 global_market_quote）：
   | data_type            | priority=1        | priority=100  | priority=200  | exclusive |
   |----------------------|-------------------|---------------|---------------|-----------|
   | realtime_quote       | eltdx             | akshare       | tencent_http  |           |
@@ -91,12 +91,13 @@ def register_all_sources() -> None:
     router.register("tick_data", "eltdx", ef.fetch_tick_data, priority=1, exclusive=True)
     router.register("f10_profile", "eltdx", ef.fetch_f10_profile, priority=1, exclusive=True)
 
-    # ── akshare 单源 ──
+    # ── akshare 单源（备 tencent_http） ──
     router.register("company_info", "akshare", akf.fetch_company_info, priority=1)
     router.register("financial_stmt", "akshare", akf.fetch_financial_stmt, priority=1)
     router.register("valuation", "akshare", akf.fetch_valuation, priority=1)
     router.register("industry_data", "akshare", akf.fetch_industry_data, priority=1)
     router.register("market_overview", "akshare", akf.fetch_market_overview, priority=1)
+    router.register("market_overview", "tencent_http", hf.fetch_market_overview_tencent, priority=100)
     router.register("news_data", "em_news_direct", nf.fetch_em_news_direct, priority=1)
     router.register("news_data", "akshare", akf.fetch_news_data, priority=100)
     router.register("telegraph_news", "cls_telegraph", nf.fetch_cls_telegraph, priority=1)
@@ -131,6 +132,9 @@ def register_all_sources() -> None:
 
     # ── 单源 ──
     router.register("concept_attribution", "em_push2delay", asf.fetch_concept_attribution, priority=1)
+
+    # ── v3.3.1 新增：全局行情（腾讯直连，美股/大宗/亚太/外汇） ──
+    router.register("global_market_quote", "tencent_http", hf.fetch_global_quote_tencent, priority=1)
 
     # ── v3.3.0 新增：新闻/资讯类数据源 ──
     router.register("baidu_economic_calendar", "akshare_baidu_economic", akf.fetch_baidu_economic_calendar, priority=1)

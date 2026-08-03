@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/License-Apache--2.0-yellow.svg" alt="License"/>
   <img src="https://img.shields.io/badge/Data-A股-red.svg" alt="Data Scope"/>
   <img src="https://img.shields.io/badge/Tools-99-orange.svg" alt="MCP Tools"/>
-  <img src="https://img.shields.io/badge/Version-3.3.0-blue.svg" alt="Version"/>
+  <img src="https://img.shields.io/badge/Version-3.3.1-blue.svg" alt="Version"/>
 </p>
 
 ---
@@ -345,6 +345,7 @@ AI 会调用 `mcp__tradex__eltdx_get_kline`，返回 100 根日 K 线。
 
 | 版本 | 日期 | 内容 |
 |------|------|------|
+| v3.3.1 | 2026-08-03 | 修复 4 个问题：get_money_flow 代理问题（4只股票全通）、get_financial_calendar date过滤失效（各源独立过滤）、search_news 稳定性增强（个股新闻降级全市场源）、get_sector_fund_flow 字段解析（新浪备源7字段）；P0修复：get_realtime_quote 外围行情代理失败、get_company_announcements 公告过滤 |
 | v3.3.0 | 2026-08-03 | 新增 9 个新闻资讯数据源（百度经济日历/交易提醒/热搜、期货新闻、新浪财经、东财人气榜、雪球热度、机构持仓、指数情绪）+ 同花顺问财可选集成，新增 9 个 MCP 工具（get_market_sentiment/get_futures_news/get_hot_rank/get_hot_keywords/get_xueqiu_hot/get_fund_hold/get_hot_search/get_wencai_query/get_wencai_news），工具数 90→99，数据类型 27→38 |
 | v3.1.4 | 2026-08-02 | 修复 P1/P2 遗留：eltdx realtime_quote 改用 get_quote()（QuoteSnapshot 完整字段含涨跌幅/内外盘）；装饰器死代码修复（list_all_tools/health_check 改用 mcp 实例，不再误报 degraded）；源名标识修正（etf_data/cb_data akshare→astock_signals）；_client_lock 改用 threading.Lock；architecture.md 文档修正；ETF 列名重复 warning 修复 |
 | v3.1.3 | 2026-08-02 | 修复 P0 bug：SmartRouter 参数名不匹配导致 eltdx 主源永远失败降级 akshare（行情类 fetcher 统一兼容 symbol/code）；修复 eltdx KlineBar 字段映射（date→time, volume→volume_lots），新增 17 个参数归一化回归测试 |

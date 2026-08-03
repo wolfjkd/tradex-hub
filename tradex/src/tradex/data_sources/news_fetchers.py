@@ -303,9 +303,9 @@ def fetch_cninfo_direct(
 
         df = pd.DataFrame(items)
 
-        # 在 Python 端按 symbol 过滤（巨潮 API 的 stock 参数过滤不稳定）
+        # 在 Python 端按 symbol 二次过滤（巨潮 API 的 stock 参数过滤不稳定）
         if sym:
-            df = df[df["股票代码"] == sym]
+            df = df[df["股票代码"].astype(str).str.strip().str.endswith(sym)]
 
         if df.empty:
             return pd.DataFrame()
@@ -348,8 +348,11 @@ def _resolve_org_id(symbol: str) -> str:
             stock_list = result.get("stockList") or []
 
         for stock in stock_list:
-            if isinstance(stock, dict) and stock.get("code") == symbol:
-                return stock.get("orgId") or ""
+            if isinstance(stock, dict):
+                code = stock.get("code") or ""
+                # 兼容 "600519" 和 "SH600519" 两种格式
+                if code == symbol or code.endswith(symbol):
+                    return stock.get("orgId") or ""
         if stock_list and isinstance(stock_list[0], dict):
             return stock_list[0].get("orgId") or ""
         return ""

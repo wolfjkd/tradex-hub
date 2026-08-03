@@ -155,27 +155,31 @@ def register(mcp: FastMCP):
             except Exception:
                 pass
 
-            # Fallback: 同花顺板块列表（无资金流数据，仅板块名称）
-            if (df is None or df.empty) and sector_type == "行业资金流":
+            if df is None or df.empty:
+                # Fallback: 新浪板块行情（不含资金流明细，但提供板块涨跌/成交额/涨跌停数）
                 try:
-                    df, _src = _router.route(
-                        "industry_data", endpoint="board_industry_name_ths"
-                    )
-                except Exception:
-                    pass
-            elif (df is None or df.empty) and sector_type == "概念资金流":
-                try:
-                    df, _src = _router.route(
-                        "industry_data", endpoint="board_concept_name_ths"
-                    )
+                    import akshare as ak
+                    sina_df = ak.stock_sector_spot()
+                    if sina_df is not None and not sina_df.empty:
+                        # 保留所有可用字段，映射中文名
+                        _col_map = {
+                            "板块": "板块", "涨跌幅": "涨跌幅", "涨跌额": "涨跌额",
+                            "总成交额": "总成交额", "总成交量": "总成交量",
+                            "公司家数": "公司家数", "平均价格": "平均价格",
+                        }
+                        keep = [c for c in _col_map if c in sina_df.columns]
+                        df = sina_df[keep].rename(columns={k: v for k, v in _col_map.items() if k in keep})
+                        df["数据源"] = "新浪财经（备源-无资金流明细）"
+                        df["说明"] = "主源东方财富资金流向排名不可用，新浪备源仅提供板块涨跌和成交额"
                 except Exception:
                     pass
 
             if df is None or df.empty:
-                return error_response(
-                    f"板块资金流向数据为空 ({sector_type})", "get_sector_fund_flow"
-                )
-            df = slim_df(df)
+                return df_to_json(pd.DataFrame([{
+                    "提示": f"板块资金流向暂不可用 ({sector_type})",
+                    "说明": "东方财富数据源连接失败，新浪备源不可用",
+                }]))
+            # 直接返回原始数据，保留所有字段
             result = df_to_json(df, max_rows=30)
             cache.set(cache_key, result, TTL_DAILY)
             return result

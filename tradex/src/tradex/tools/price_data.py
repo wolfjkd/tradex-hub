@@ -2,14 +2,15 @@
 Category 2: Price & Quote Data (V0.1)
 
 Tools:
-  5. get_realtime_quote       - Real-time A-share quote
+  5. get_realtime_quote       - Real-time quote (A-share + global codes, v3.3.1)
   6. get_historical_price     - Historical OHLCV (daily/weekly/monthly)
   7. get_intraday_data        - Intraday minute data (today)
   8. get_market_capitalization - Total & free-float market cap
   9. get_stock_list            - Full A-share list with basic data
 
 Data source routing (via SmartRouter):
-  实时行情: eltdx(priority=1) → akshare(priority=100) → tencent_http(priority=200)
+  实时行情(A股): eltdx(priority=1) → akshare(priority=100) → tencent_http(priority=200)
+  实时行情(全球): tencent_http(priority=1)  [global_market_quote]
   历史K线:  eltdx(priority=1) → akshare(priority=100)
   分时数据: eltdx(priority=1) → akshare(priority=100)
   股票列表: akshare(全量行情快照)
@@ -37,15 +38,51 @@ def register(mcp: FastMCP):
     @mcp.tool()
     async def get_realtime_quote(symbol: str) -> str:
         """
-        获取A股股票实时行情数据。
+        获取实时行情数据。支持A股6位代码和全球行情代码。
+
+        **A股代码**：6位数字，如 "600519"（贵州茅台）、"000001"（平安银行）。
+
+        **全球行情代码**：
+        - 美股指数：usDJI（道琼斯）、usIXIC（纳斯达克）、usINX（标普500）
+        - 热门美股：usNVDA（英伟达）、usTSLA（特斯拉）、usAAPL（苹果）、usMSFT（微软）、usAMZN（亚马逊）、usGOOGL（谷歌）、usMETA（Meta）、usMU（美光科技）、usAMAT（应用材料）
+        - 亚太指数：hkHSI（恒生指数）、hkHSTECH（恒生科技）
+        - 韩股：kr005930（三星电子）、kr000660（SK海力士）
+        - 外汇：whDINIW（美元指数）
 
         Args:
-            symbol: 6位股票代码，如 "000001"（平安银行）、"600519"（贵州茅台）
+            symbol: 股票代码，A股为6位数字，全球行情使用前缀代码
 
         Returns:
             实时行情数据 (JSON)，包含最新价、涨跌幅、成交量、成交额、
             最高价、最低价、开盘价、昨收价、换手率、市盈率、市净率等。
         """
+        # 检测是否为全球行情代码
+        if _is_global_code(symbol):
+            cache_key = f"global_quote:{symbol}"
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return cached
+
+            try:
+                df, _src = _router.route("global_market_quote")
+                if df is None or df.empty:
+                    return error_response(
+                        f"获取全球行情失败 ({symbol}): 数据源返回空数据", "get_realtime_quote"
+                    )
+                row = df[df["代码"] == symbol]
+                if row.empty:
+                    return error_response(
+                        f"未找到代码 {symbol} 的全球行情", "get_realtime_quote"
+                    )
+                result = df_to_json(row)
+                cache.set(cache_key, result, TTL_REALTIME)
+                return result
+            except Exception as e:
+                return error_response(
+                    f"获取全球行情失败 ({symbol}): {e}", "get_realtime_quote"
+                )
+
+        # A股代码处理
         symbol = normalize_symbol(symbol)
         cache_key = f"realtime_quote:{symbol}"
         cached = cache.get(cache_key)
@@ -307,6 +344,11 @@ def register(mcp: FastMCP):
             return result
         except Exception as e:
             return error_response(f"获取股票列表失败: {e}", "get_stock_list")
+
+
+def _is_global_code(symbol: str) -> bool:
+    """检测是否为全球行情代码（非A股6位数字代码）。"""
+    return symbol.startswith(("us", "hk", "kr", "wh", "int_", "hf_"))
 
 
 def _find_code_col(df) -> str:

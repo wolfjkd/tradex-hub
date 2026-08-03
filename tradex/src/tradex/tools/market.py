@@ -2,14 +2,16 @@
 Category 6: Market Overview & Capital Flows (V0.3)
 
 Tools:
-  26. get_market_overview  - Major index snapshots
-  27. get_money_flow       - Individual stock fund flow
+  26. get_market_overview  - Major index snapshots (v3.3.1: tencent_http fallback)
+  27. get_money_flow       - Individual stock fund flow (v3.3.1: retry+fallback)
   28. get_north_bound_flow - Northbound (HK->A) capital flow
   29. get_limit_up_down    - Daily limit-up/limit-down pool
   30. get_dragon_tiger     - Dragon & Tiger Board (institutional activity)
+  31. get_global_market_quote - Global market snapshot (v3.3.1 新增)
 
 Data source routing (via SmartRouter):
-  市场概览: akshare market_overview
+  市场概览: akshare(priority=1) → tencent_http(priority=100)
+  全局行情: tencent_http(priority=1)  [global_market_quote]
   资金流向: em_push2(priority=1) → akshare(priority=100)  [fund_flow]
   北向资金: ths_hsgt(priority=1) → akshare(priority=100)  [northbound]
   涨跌停池: akshare hot_stocks
@@ -78,13 +80,13 @@ def register(mcp: FastMCP):
             return cached
 
         try:
+            # SmartRouter 自动处理 fallback：em_push2(priority=1) → akshare(priority=100)
             result, _src = _router.route(
                 "fund_flow", code=symbol, include_history=True
             )
             # fund_flow fetch_fn 返回 dict（含 realtime/history 列表）
             rows = []
             if isinstance(result, dict):
-                # 优先使用实时分钟级数据，其次历史日线
                 realtime = result.get("realtime") or []
                 history = result.get("history") or []
                 for item in realtime:
@@ -107,17 +109,19 @@ def register(mcp: FastMCP):
                             "超大单净流入": float(item.get("super_large", 0) or 0),
                         })
             if not rows:
-                return error_response(
-                    f"资金流向数据为空 ({symbol})", "get_money_flow"
-                )
+                return df_to_json(pd.DataFrame([{
+                    "代码": symbol,
+                    "提示": "该股票暂无资金流向数据",
+                }]))
             df = pd.DataFrame(rows)
             result_json = df_to_json(df, max_rows=30)
             cache.set(cache_key, result_json, TTL_DAILY)
             return result_json
         except Exception as e:
-            return error_response(
-                f"获取资金流向失败 ({symbol}): {e}", "get_money_flow"
-            )
+            return df_to_json(pd.DataFrame([{
+                "代码": symbol,
+                "提示": f"资金流向暂时不可用: {e}",
+            }]))
 
     @mcp.tool()
     async def get_north_bound_flow() -> str:
@@ -239,4 +243,40 @@ def register(mcp: FastMCP):
         except Exception as e:
             return error_response(
                 f"获取龙虎榜失败: {e}", "get_dragon_tiger"
+            )
+
+    @mcp.tool()
+    async def get_global_market_quote(category: str = "") -> str:
+        """
+        获取全球市场行情快照。v3.3.1 新增，通过腾讯接口批量获取。
+
+        包含美股三大指数、热门美股（英伟达/特斯拉/苹果/微软/亚马逊/谷歌/Meta/美光/应用材料）、
+        亚太指数（恒生/恒生科技）、韩股龙头（三星/SK海力士）、美元指数。
+
+        Args:
+            category: 可选分类过滤，如 "美股指数"、"热门美股"、"亚太指数"、"韩股"、"外汇"。
+                为空时返回全部。
+
+        Returns:
+            全球市场行情 (JSON)，包含代码、名称、类别、最新价、涨跌额、涨跌幅等。
+        """
+        cache_key = f"global_market_quote:{category}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        try:
+            df, _src = _router.route("global_market_quote")
+            if df is None or df.empty:
+                return df_to_json(pd.DataFrame())
+
+            if category:
+                df = df[df["类别"] == category]
+
+            result = df_to_json(df, max_rows=50)
+            cache.set(cache_key, result, TTL_REALTIME)
+            return result
+        except Exception as e:
+            return error_response(
+                f"获取全球行情失败: {e}", "get_global_market_quote"
             )

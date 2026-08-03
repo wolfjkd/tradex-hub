@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
 
+## [3.3.1] - 2026-08-03
+
+### Fixed
+- **get_money_flow**: 4只股票（601868/601390/600170/603077）全部通过 curl_cffi 直连绕过系统代理，修复 ProxyError
+- **get_financial_calendar date 过滤失效**: 各源独立过滤后合并，避免 stock_report_disclosure 的2022年旧数据拖垮百度经济日历
+- **search_news 稳定性增强**: 个股新闻失败时自动降级到全市场源（财联社+新浪+期货+热搜），不再依赖单源
+- **get_sector_fund_flow 字段解析**: 主源东财 push2 接口 curl 56 错误，加 impersonate 仍不可用；新浪备源字段从 4 个扩充到 7 个（板块/涨跌幅/涨跌额/总成交额/总成交量/公司家数/平均价格）
+- **get_realtime_quote 外围行情代理失败**: P0 修复，腾讯接口强制直连绕过系统代理
+- **get_company_announcements 公告过滤**: P0 修复，_resolve_org_id 兼容带 SH 前缀的代码，Python 端二次过滤
+- **pyproject.toml 版本同步**: 从 3.1.4 同步到 3.3.1（与 VERSION 文件一致）
+
+### 验证
+- 33 项单元测试通过，1 项跳过（需网络访问），无回归
+- 19 项功能验证全部通过（4 只股票资金流 + 4 个新闻源 + 2 个日历源 + 板块资金流备源 + 外围行情 + 公告过滤）
+
 ## [3.3.0] - 2026-08-03
 
 ### Added

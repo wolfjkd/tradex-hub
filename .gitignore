@@ -49,3 +49,6 @@ data/
 
 # Temp verification scripts
 _verify_*.py
+_test_*.py
+diagnose_*.py
+verify_*.py

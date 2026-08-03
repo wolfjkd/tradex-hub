@@ -32,17 +32,103 @@ def _as():
 # ============================================================
 
 def fetch_fund_flow_em(code: str = "", symbol: str = "", curr_date: str = "", include_history: bool = True, **kwargs) -> dict:
-    """个股资金流向（东财 push2，via astock_signals.get_fund_flow_json）。
+    """个股资金流向（东财 push2，curl_cffi 直连绕过系统代理）。
 
+    使用 curl_cffi.requests 替代 requests，避免系统代理导致的 ProxyError /
+    RemoteDisconnected 以及 TLS 指纹识别问题。
     空数据/异常时抛 RuntimeError 触发 SmartRouter 降级到 akshare。
     兼容 symbol/code 两种参数名（SmartRouter 路由归一化）。
     """
-    asig = _as()
+    from datetime import datetime
+    from curl_cffi import requests as _rq
+
     code = code or symbol
-    result = asig.get_fund_flow_json(code, curr_date, include_history)
-    if result.get("error") or (not result.get("realtime") and not result.get("history")):
-        err = result.get("error", "东财返回空数据")
-        raise RuntimeError(err)
+    if not curr_date:
+        curr_date = datetime.now().strftime("%Y-%m-%d")
+
+    _session = _rq.Session()
+    _session.headers.update({
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Referer": "https://data.eastmoney.com/",
+    })
+
+    secid = f"1.{code}" if code.startswith("6") else f"0.{code}"
+    result: dict = {
+        "symbol": code,
+        "source": "东财 push2 (直连)",
+        "date": curr_date,
+        "realtime": [],
+        "history": [],
+        "signal": "neutral",
+    }
+
+    # Realtime minute-level fund flow
+    url1 = "https://push2.eastmoney.com/api/qt/stock/fflow/kline/get"
+    params1 = {
+        "secid": secid,
+        "klt": 1,
+        "fields1": "f1,f2,f3,f7",
+        "fields2": "f51,f52,f53,f54,f55,f56,f57",
+    }
+    try:
+        resp = _session.get(url1, params=params1, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        klines = data.get("data", {}).get("klines", [])
+        for line in klines:
+            parts = line.split(",")
+            if len(parts) >= 6:
+                result["realtime"].append({
+                    "time": parts[0],
+                    "main_net": float(parts[1]),
+                    "small": float(parts[2]),
+                    "mid": float(parts[3]),
+                    "large": float(parts[4]),
+                    "super_large": float(parts[5]),
+                })
+        if result["realtime"]:
+            last = result["realtime"][-1]
+            if last["main_net"] > 0:
+                result["signal"] = "bullish_inflow"
+            elif last["main_net"] < 0:
+                result["signal"] = "bearish_outflow"
+    except Exception as e:
+        logger.debug("fetch_fund_flow_em realtime failed: %s", e)
+
+    # Historical daily fund flow
+    if include_history:
+        url2 = "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get"
+        params2 = {
+            "secid": secid,
+            "lmt": 20,
+            "klt": 101,
+            "fields1": "f1,f2,f3,f7",
+            "fields2": "f51,f52,f53,f54,f55,f56,f57",
+        }
+        try:
+            resp = _session.get(url2, params=params2, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+            hist_klines = data.get("data", {}).get("klines", [])
+            for line in hist_klines:
+                parts = line.split(",")
+                if len(parts) >= 6:
+                    result["history"].append({
+                        "date": parts[0],
+                        "main_net": float(parts[1]),
+                        "small": float(parts[2]),
+                        "mid": float(parts[3]),
+                        "large": float(parts[4]),
+                        "super_large": float(parts[5]),
+                    })
+        except Exception as e:
+            logger.debug("fetch_fund_flow_em history failed: %s", e)
+
+    if not result["realtime"] and not result["history"]:
+        raise RuntimeError("东财 push2 资金流数据为空")
     return result
 
 

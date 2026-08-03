@@ -232,7 +232,60 @@ def fetch_industry_data(
     if endpoint == "board_concept_name_ths":
         return ak.stock_board_concept_name_ths()
     if endpoint == "sector_fund_flow_rank":
-        return ak.stock_sector_fund_flow_rank(indicator=indicator, sector_type=sector_type)
+        # 使用 curl_cffi 绕过系统代理（东财 push2 接口）
+        from curl_cffi import requests as _rq
+        _session = _rq.Session()
+        _session.headers.update({
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            ),
+            "Referer": "https://data.eastmoney.com/",
+        })
+        _st_map = {"行业资金流": "2", "概念资金流": "3", "地域资金流": "1"}
+        _ind_map = {"今日": "0", "5日": "5", "10日": "10"}
+        _fs = f"m:90+t:{_st_map.get(sector_type, '2')}"
+        _url = "https://push2.eastmoney.com/api/qt/clist/get"
+        _params = {
+            "pn": "1", "pz": "100", "po": "1", "np": "1",
+            "ut": "b2884a393a59ad64002292a3e90d46a5",
+            "fltt": "2", "invt": "2",
+            "fid0": "f62",
+            "fs": _fs,
+            "stat": "1",
+            "fields": (
+                "f12,f14,f2,f3,f62,f184,f66,f69,f72,f75,f78,f81,f84,f87,"
+                "f204,f205,f124"
+            ),
+            "rt": "52975239",
+        }
+        resp = _session.get(_url, params=_params, timeout=15, impersonate="chrome120")
+        resp.raise_for_status()
+        _data = resp.json()
+        _items = _data.get("data", {}).get("diff", [])
+        _rows = []
+        for item in _items:
+            _rows.append({
+                "板块": item.get("f14", ""),
+                "代码": item.get("f12", ""),
+                "最新价": item.get("f2", 0),
+                "涨跌幅": item.get("f3", 0),
+                "主力净流入": item.get("f62", 0),
+                "主力净流入-占比": item.get("f184", 0),
+                "超大单净流入": item.get("f66", 0),
+                "超大单净流入-占比": item.get("f69", 0),
+                "大单净流入": item.get("f72", 0),
+                "大单净流入-占比": item.get("f75", 0),
+                "中单净流入": item.get("f78", 0),
+                "中单净流入-占比": item.get("f81", 0),
+                "小单净流入": item.get("f84", 0),
+                "小单净流入-占比": item.get("f87", 0),
+                "主力净流入排名": item.get("f204", 0),
+                "涨跌股数比": item.get("f205", 0),
+            })
+        if not _rows:
+            return pd.DataFrame()
+        return pd.DataFrame(_rows)
     if endpoint == "board_industry_hist_em":
         kw: dict = {"symbol": industry, "period": period}
         if start_date:
@@ -287,10 +340,10 @@ def fetch_news_data(
     if endpoint == "stock_news_em":
         return ak.stock_news_em(symbol=symbol)
     if endpoint == "stock_report_disclosure":
-        kw: dict = {}
+        # 尝试传递 period 参数（akshare 可能按报告期过滤）
         if date:
-            kw["date"] = date
-        return ak.stock_report_disclosure(**kw)
+            return ak.stock_report_disclosure(period=date)
+        return ak.stock_report_disclosure()
     if endpoint == "stock_notice_report":
         kw = {}
         if symbol:
@@ -359,12 +412,13 @@ def fetch_macro_data(
 # ============================================================
 
 def fetch_fund_flow(code: str = "", curr_date: str = "", include_history: bool = True, **kwargs) -> dict:
-    """个股资金流向（akshare stock_individual_fund_flow）。
+    """个股资金流向（直连东财 push2his API，curl_cffi 绕过系统代理）。
 
     返回与 em_push2 源相同的 dict 结构（realtime/history/signal）。
+    使用 curl_cffi 替代 requests，避免系统代理导致的 RemoteDisconnected。
     """
-    from ..utils.symbol import get_exchange
-    ak = _ak()
+    from curl_cffi import requests as _rq
+
     if not curr_date:
         curr_date = datetime.now().strftime("%Y-%m-%d")
     result: dict = {
@@ -375,27 +429,54 @@ def fetch_fund_flow(code: str = "", curr_date: str = "", include_history: bool =
         "history": [],
         "signal": "neutral",
     }
-    market = get_exchange(code)
-    df = ak.stock_individual_fund_flow(stock=code, market=market)
-    if df is None or df.empty:
-        raise RuntimeError("AKShare 资金流数据为空")
-    for _, row in df.iterrows():
-        entry = {
-            "date": str(row.get("日期", "")),
-            "main_net": float(row.get("主力净流入-净额", 0) or 0),
-            "small": float(row.get("小单净流入-净额", 0) or 0),
-            "mid": float(row.get("中单净流入-净额", 0) or 0),
-            "large": float(row.get("大单净流入-净额", 0) or 0),
-            "super_large": float(row.get("超大单净流入-净额", 0) or 0),
-        }
-        result["history"].append(entry)
-    if result["history"]:
-        last = result["history"][-1]
-        if last["main_net"] > 0:
-            result["signal"] = "bullish_inflow"
-        elif last["main_net"] < 0:
-            result["signal"] = "bearish_outflow"
-    return result
+
+    _session = _rq.Session()
+    _session.headers.update({
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Referer": "https://data.eastmoney.com/",
+    })
+
+    secid = f"1.{code}" if code.startswith("6") else f"0.{code}"
+    url = "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get"
+    params = {
+        "secid": secid,
+        "lmt": 20,
+        "klt": 101,
+        "fields1": "f1,f2,f3,f7",
+        "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65",
+        "ut": "b2884a393a59ad64002292a3e90d46a5",
+    }
+
+    try:
+        resp = _session.get(url, params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        klines = data.get("data", {}).get("klines", [])
+        if not klines:
+            raise RuntimeError("资金流数据为空")
+        for line in klines:
+            parts = line.split(",")
+            if len(parts) >= 6:
+                result["history"].append({
+                    "date": parts[0],
+                    "main_net": float(parts[1]),
+                    "small": float(parts[2]),
+                    "mid": float(parts[3]),
+                    "large": float(parts[4]),
+                    "super_large": float(parts[5]),
+                })
+        if result["history"]:
+            last = result["history"][-1]
+            if last["main_net"] > 0:
+                result["signal"] = "bullish_inflow"
+            elif last["main_net"] < 0:
+                result["signal"] = "bearish_outflow"
+        return result
+    except Exception as e:
+        raise RuntimeError(f"AKShare 资金流数据获取失败: {e}")
 
 
 # ============================================================

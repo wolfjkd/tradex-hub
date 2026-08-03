@@ -95,12 +95,13 @@ def register(mcp: FastMCP):
 
         try:
             all_dfs = []
-            # Source 1: 财报披露时间
+            # Source 1: 财报披露时间（akshare 不传 period，避免格式错误）
             try:
-                df1, _src1 = _router.route("news_data", endpoint="stock_report_disclosure", date=date)
+                df1, _src1 = _router.route("news_data", endpoint="stock_report_disclosure")
                 if df1 is not None and not df1.empty:
                     all_dfs.append(df1)
             except Exception:
+                # em_news_direct 无 symbol 时会失败，自动降级到 akshare
                 pass
             # Source 2: 百度经济数据日历（v3.3.0 新增）
             try:
@@ -113,8 +114,43 @@ def register(mcp: FastMCP):
             if not all_dfs:
                 return df_to_json(pd.DataFrame())
 
-            combined = pd.concat(all_dfs, ignore_index=True)
-            combined = slim_df(combined)
+            # 日期后过滤：各源独立过滤后合并（避免2022年旧数据拖垮百度经济日历）
+            if date:
+                date_fmt = f"{date[:4]}-{date[4:6]}-{date[6:8]}"
+                filtered_dfs = []
+                for df in all_dfs:
+                    date_cols = [c for c in df.columns if any(k in c for k in ["日期", "date", "Date", "时间", "披露", "预约", "变更", "首次", "实际"])]
+                    matched = False
+                    for col in date_cols:
+                        try:
+                            mask = df[col].astype(str).str.contains(date_fmt, na=False)
+                            if not mask.any():
+                                mask = df[col].astype(str).str.contains(date, na=False)
+                            if mask.any():
+                                filtered_dfs.append(df[mask])
+                                matched = True
+                                break
+                        except Exception:
+                            continue
+                    # 如果该源没有匹配数据的列，全量保留（如百度经济日历的日期列不在 date_cols 里）
+                    if not matched:
+                        # 尝试正则匹配所有列
+                        for col in df.columns:
+                            try:
+                                mask = df[col].astype(str).str.contains(date_fmt, na=False)
+                                if mask.any():
+                                    filtered_dfs.append(df[mask])
+                                    matched = True
+                                    break
+                            except Exception:
+                                continue
+                        if not matched:
+                            pass  # 无匹配，丢弃该源
+                combined = pd.concat(filtered_dfs, ignore_index=True) if filtered_dfs else pd.DataFrame()
+            else:
+                combined = pd.concat(all_dfs, ignore_index=True)
+                combined = slim_df(combined)
+
             result = df_to_json(combined, max_rows=50)
             cache.set(cache_key, result, TTL_DAILY)
             return result
@@ -192,7 +228,9 @@ def register(mcp: FastMCP):
         num_results: int = 20,
     ) -> str:
         """
-        按关键词搜索股票新闻资讯。v3.2.0 多源增强：财联社快讯 + 巨潮公告 + 财新网 + CCTV。
+        按关键词搜索财经新闻资讯。
+
+        纯新闻搜索，不包含公司公告。数据源：财联社快讯 + 新浪财经 + 百度交易提醒 + 期货新闻 + 百度热搜。
 
         如果提供了股票代码，则在该股票的新闻中搜索关键词；
         否则在全市场新闻中搜索。
@@ -222,8 +260,10 @@ def register(mcp: FastMCP):
                         all_dfs.append(df)
                 except Exception:
                     pass
-            else:
-                # Source 1: 财联社实时快讯（v3.2.0 新增）
+            # 如果个股新闻无数据或未指定symbol，尝试全市场源
+            if not all_dfs:
+                # 全市场源：财联社快讯 + 新浪财经 + 百度交易提醒 + 期货新闻 + 百度热搜
+                # Source 1: 财联社实时快讯（纯新闻，v3.2.0）
                 try:
                     df, _src = _router.route("telegraph_news", num_results=num_results)
                     if df is not None and not df.empty:
@@ -231,31 +271,15 @@ def register(mcp: FastMCP):
                 except Exception:
                     pass
 
-                # Source 2: 巨潮公告（v3.2.0 新增）
+                # Source 2: 新浪财经新闻（纯新闻，v3.3.0）
                 try:
-                    df, _src = _router.route("cninfo_announcement", keyword=keyword)
+                    df, _src = _router.route("sina_finance_news", num_results=20)
                     if df is not None and not df.empty:
                         all_dfs.append(df)
                 except Exception:
                     pass
 
-                # Source 3: 财新网 general financial news
-                try:
-                    df, _src = _router.route("news_data", endpoint="stock_news_main_cx")
-                    if df is not None and not df.empty:
-                        all_dfs.append(df)
-                except Exception:
-                    pass
-
-                # Source 4: CCTV financial news
-                try:
-                    df, _src = _router.route("news_data", endpoint="news_cctv", date="")
-                    if df is not None and not df.empty:
-                        all_dfs.append(df)
-                except Exception:
-                    pass
-
-                # Source 5: 百度交易提醒（v3.3.0 新增）
+                # Source 3: 百度交易提醒（v3.3.0）
                 try:
                     for ep in ["suspend", "dividend", "report_time"]:
                         df, _src = _router.route("baidu_trade_notify", endpoint=ep, date="")
@@ -264,7 +288,7 @@ def register(mcp: FastMCP):
                 except Exception:
                     pass
 
-                # Source 6: 期货新闻（v3.3.0 新增）
+                # Source 4: 期货新闻（v3.3.0）
                 try:
                     df, _src = _router.route("futures_news", symbol="全部")
                     if df is not None and not df.empty:
@@ -272,15 +296,7 @@ def register(mcp: FastMCP):
                 except Exception:
                     pass
 
-                # Source 7: 新浪财经新闻（v3.3.0 新增）
-                try:
-                    df, _src = _router.route("sina_finance_news", num_results=20)
-                    if df is not None and not df.empty:
-                        all_dfs.append(df)
-                except Exception:
-                    pass
-
-                # Source 8: 百度热搜（v3.3.0 新增）
+                # Source 5: 百度热搜（v3.3.0）
                 try:
                     df, _src = _router.route("hot_search", symbol="A股")
                     if df is not None and not df.empty:
@@ -293,18 +309,34 @@ def register(mcp: FastMCP):
 
             combined = pd.concat(all_dfs, ignore_index=True)
 
-            # Filter by keyword (分词搜索，任一关键词匹配即可)
+            # Filter by keyword — 仅在文本列中搜索，兼容不同数据源列名
+            _TEXT_COLS = {"标题", "内容", "新闻标题", "文章来源", "新闻内容", "名称", "说明", "摘要"}
+            _text_cols = [c for c in combined.columns if c in _TEXT_COLS or "标题" in c or "内容" in c or "名称" in c]
             keywords = [kw.strip() for kw in keyword.replace(",", " ").replace("，", " ").split() if kw.strip()]
-            text_cols = [
-                c for c in combined.columns
-                if any(k in c for k in ["标题", "内容", "title", "content", "摘要"])
-            ]
-            if text_cols and keywords:
+            if keywords and _text_cols:
                 mask = pd.Series(False, index=combined.index)
-                for kw in keywords:
-                    for col in text_cols:
-                        mask = mask | combined[col].str.contains(kw, case=False, na=False)
+                for col in _text_cols:
+                    for kw in keywords:
+                        try:
+                            mask = mask | combined[col].astype(str).str.contains(kw, case=False, na=False)
+                        except Exception:
+                            continue
                 combined = combined[mask]
+
+            # 如果文本列搜索无结果，回退到全量搜索（所有列）
+            if combined.empty and keywords:
+                mask = pd.Series(False, index=combined.index)
+                for col in combined.columns:
+                    for kw in keywords:
+                        try:
+                            mask = mask | combined[col].astype(str).str.contains(kw, case=False, na=False)
+                        except Exception:
+                            continue
+                combined = combined[mask]
+
+            # 如果关键词过滤后仍为空，返回未过滤的数据（避免返回空）
+            if combined.empty:
+                combined = pd.concat(all_dfs, ignore_index=True).head(num_results)
 
             combined = combined.head(num_results)
             result = df_to_json(combined)
