@@ -51,11 +51,11 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/tradex"]
+packages = ["src/tradex", "src/astock_signals"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
-    "network: marks tests that require network access (deselect with '-m \"not network\"')",
+    'network: marks tests that require network access (deselect with -m "not network")',
 ]

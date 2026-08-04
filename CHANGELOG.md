@@ -15,6 +15,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0
 - **get_company_announcements 公告过滤**: P0 修复，_resolve_org_id 兼容带 SH 前缀的代码，Python 端二次过滤
 - **pyproject.toml 版本同步**: 从 3.1.4 同步到 3.3.1（与 VERSION 文件一致）
 
+
+### Changed
+- **astock_signals 合并**: 将独立包 astock_signals v1.1.0 源码合并到本仓库，位于 tradex/src/astock_signals/，与 tradex 包统一版本管理
+- **pyproject.toml**: packages 新增 src/astock_signals，打包时一同构建
+
 ### 验证
 - 33 项单元测试通过，1 项跳过（需网络访问），无回归
 - 19 项功能验证全部通过（4 只股票资金流 + 4 个新闻源 + 2 个日历源 + 板块资金流备源 + 外围行情 + 公告过滤）
