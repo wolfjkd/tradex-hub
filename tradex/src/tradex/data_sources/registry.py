@@ -112,7 +112,8 @@ def register_all_sources() -> None:
     router.register("stock_topics", "eltdx", ef.fetch_stock_topics, priority=1, exclusive=True)
     router.register("topic_stocks", "eltdx", ef.fetch_topic_stocks, priority=1, exclusive=True)
     router.register("auction_data", "eltdx", ef.fetch_auction_data, priority=1, exclusive=True)
-    router.register("category_quotes", "eltdx", ef.fetch_category_quotes, priority=1, exclusive=True)
+    router.register("category_quotes", "eltdx", ef.fetch_category_quotes, priority=1)
+    router.register("category_quotes", "tencent", hf.fetch_category_quotes_tencent, priority=100)  # eltdx 榜失败降级全市场排序
     router.register("trading_day", "eltdx", ef.fetch_trading_day, priority=1, exclusive=True)
     router.register("opening_match_history", "eltdx", ef.fetch_opening_match_history, priority=1, exclusive=True)
     router.register("capital_changes", "eltdx", ef.fetch_capital_changes, priority=1, exclusive=True)
@@ -177,6 +178,10 @@ def register_all_sources() -> None:
     router.register("ths_hot_reason", "ths", ths.fetch_ths_hot_reason, priority=1)
     router.register("ths_limit_up_pool", "ths", ths.fetch_ths_limit_up_pool, priority=1)
     router.register("ths_hot_list", "ths", ths.fetch_ths_hot_list, priority=1)
+    router.register("ths_up_down_distribution", "ths", ths.fetch_ths_up_down_distribution, priority=1)
+    router.register("ths_limit_up_minute", "ths", ths.fetch_ths_limit_up_minute, priority=1)
+    router.register("ths_turnover_minute", "ths", ths.fetch_ths_turnover_minute, priority=1)
+    router.register("ths_market_breadth", "ths", ths.fetch_ths_market_breadth, priority=1)
     router.register("local_kline", "tdx_local", tdx.fetch_local_kline, priority=1)
     router.register("local_minute", "tdx_local", tdx.fetch_local_minute, priority=1)
 

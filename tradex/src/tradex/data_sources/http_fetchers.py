@@ -97,6 +97,145 @@ def fetch_profit_forecast_tencent(symbol: str = "", code: str = "", **kwargs) ->
 
 
 # ============================================================
+# 分类行情列表（腾讯全市场批量备源）— category_quotes 降级
+# ============================================================
+
+_TENCENT_BATCH = 80   # 腾讯单次批量请求的代码数（控制 URL 长度）
+_A_SHARE_PREFIX = {"6": "sh", "5": "sh", "9": "sh"}  # 其余默认 sz
+
+
+def _a_share_prefix(code: str) -> str:
+    """6 位 A 股代码 → 腾讯前缀（sh/sz）。688/600/601/603/605/5/9 → sh，其余 sz。"""
+    if code.startswith(("6", "5", "9", "900")):
+        return "sh"
+    return "sz"
+
+
+def _is_a_share_code(code: str) -> bool:
+    """6 位代码是否为 A 股（排除指数 399/899/880、ETF 15x/51x 等）。"""
+    return (
+        len(code) == 6
+        and (
+            code.startswith(("600", "601", "603", "605", "688", "689"))
+            or code.startswith(("000", "001", "002", "003", "300", "301"))
+            or code.startswith(("430", "830", "831", "832", "833", "835", "836", "837", "838", "839", "870", "871", "872", "873", "889", "920"))
+        )
+    )
+
+
+_codes_cache: dict = {"ts": 0.0, "data": []}
+
+
+def _a_share_codes_for_tencent() -> list[str]:
+    """返回全市场 A 股 6 位代码（备源拉全市场实时行情用）。
+
+    优先从 eltdx 证券代码表拿（稀缺），失败时用内置常见前缀兜底（不保证全)，
+    最后降级为空。惰性 import 避免与 eltdx_fetchers 循环依赖。
+    代码表 60 分钟缓存（A 股代码增减低频）。
+    """
+    import time as _t
+    now = _t.time()
+    if _codes_cache["data"] and now - _codes_cache["ts"] < 3600:
+        return _codes_cache["data"]
+    codes: list[str] = []
+    try:
+        from .eltdx_fetchers import fetch_security_codes
+        df = fetch_security_codes(market="all")
+        for _, r in df.iterrows():
+            full = str(r.get("代码", "")).lower().strip()
+            code = full[2:] if len(full) == 8 and full[:2] in ("sh", "sz", "bj") else full
+            if _is_a_share_code(code):
+                codes.append(code)
+    except Exception:  # noqa: BLE001
+        codes = []
+    if not codes:
+        codes = ["600000", "600519", "601318", "000858", "300750", "002594"]
+    _codes_cache["data"] = codes
+    _codes_cache["ts"] = now
+    return codes
+
+
+def _tencent_batch_quotes(codes: list[str]) -> list[list]:
+    """分批发拉腾讯实时行情，返回每只的 ~ 分隔字段列表（含代码/名称）。
+
+    批量请求：q=sh600000,sz000001,... 一次最多 _TENCENT_BATCH 只。
+    失败批次跳过，返回成功解析的行。
+    """
+    rows: list[list[str]] = []
+    for i in range(0, len(codes), _TENCENT_BATCH):
+        batch = codes[i:i + _TENCENT_BATCH]
+        query = ",".join(_a_share_prefix(c) + c for c in batch)
+        try:
+            resp = _urlopen_no_proxy(f"https://qt.gtimg.cn/q={query}", timeout=8)
+            raw = resp.read().decode("gbk")
+            for line in raw.strip().split(";"):
+                line = line.strip()
+                if "=" not in line:
+                    continue
+                payload = line.split("=", 1)[1].strip().strip('"')
+                if not payload or "~" not in payload:
+                    continue
+                fields = payload.split("~")
+                # 丢弃停牌/无效（现价<=0）
+                try:
+                    px = float(fields[3]) if len(fields) > 3 and fields[3] else 0.0
+                except (TypeError, ValueError):
+                    px = 0.0
+                if px <= 0:
+                    continue
+                rows.append(fields)
+        except Exception:  # noqa: BLE001
+            continue
+    return rows
+
+
+def fetch_category_quotes_tencent(category: str = "沪深a股", sort_by: str = "涨幅", count: int = 80, **kwargs):
+    """分类行情列表（腾讯 qt.gtimg.cn 备源）。
+
+    作为 category_quotes 的 priority=100 备源（eltdx 分类榜失败时降级）。
+    无东财分类榜，改为「拉全市场实时行情 → 本地按 sort_by 排序」模拟榜单。
+    返回与 eltdx fetch_category_quotes 相同 schema：
+      代码 / 现价 / 涨跌幅(%) / 涨跌额 / 成交额(元) / 买一 / 卖一 / 涨速 / 短换手(%)
+    """
+    import pandas as pd
+    codes = _a_share_codes_for_tencent()
+    if not codes:
+        raise RuntimeError("tencent category_quotes: no a-share codes")
+    rows = _tencent_batch_quotes(codes)
+    result = []
+    for fields in rows:
+        if len(fields) < 45:
+            continue
+        code = fields[2].split(".")[0] if "." in fields[2] else fields[2]
+        px = float(fields[3]) if fields[3] else 0.0
+        change_pct = float(fields[32]) if len(fields) > 32 and fields[32] else 0.0
+        change = float(fields[31]) if len(fields) > 31 and fields[31] else 0.0
+        amount_wan = float(fields[37]) if len(fields) > 37 and fields[37] else 0.0
+        turnover = float(fields[38]) if len(fields) > 38 and fields[38] else 0.0
+        bid1 = float(fields[9]) if len(fields) > 9 and fields[9] else 0.0
+        ask1 = float(fields[19]) if len(fields) > 19 and fields[19] else 0.0
+        result.append({
+            "代码": code,
+            "现价": px,
+            "涨跌幅": change_pct,
+            "涨跌额": change,
+            "成交额": amount_wan * 1e4,  # 万元 → 元（与 eltdx 一致/排序可比）
+            "买一": bid1,
+            "卖一": ask1,
+            "涨速": 0.0,   # 腾讯下标不稳定，置 0
+            "短换手": turnover,
+        })
+    if not result:
+        raise RuntimeError("tencent category_quotes: empty")
+    df = pd.DataFrame(result)
+    # 本地排序模拟榜单：sort_by=成交额/涨幅 → 升/降
+    key = "成交额" if sort_by in ("成交额", "成交") else "涨跌幅"
+    ascending = False
+    df = df.sort_values(key, ascending=ascending).head(count).reset_index(drop=True)
+    return df
+
+
+# ============================================================
 # 全局行情批量获取 — global_market_quote
 # ============================================================
 

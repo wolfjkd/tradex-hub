@@ -90,6 +90,51 @@ def fetch_local_kline(code: str, tdxdir: Path | None = None, **kwargs) -> pd.Dat
     return pd.DataFrame(rows)
 
 
+def get_last_trade_date(code: str, tdxdir: Path | None = None) -> str | None:
+    """快速读取日线最后一条记录的日期（只读最后 32 字节，不读全量）。
+
+    用于判断股票是否仍在正常交易：退市股/停牌股/已换代码股的最后交易日
+    会明显早于市场最新交易日，据此可过滤掉本地残留的脏数据。
+    """
+    path = _find_day_file(code, tdxdir)
+    if path is None:
+        return None
+    try:
+        data = path.read_bytes()
+        if len(data) < 32:
+            return None
+        rec = struct.unpack("<IIIIIfII", data[-32:])
+        return str(rec[0])
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _is_a_share(code: str) -> bool:
+    """判断是否为正常 A 股（排除 B股/基金/债券/逆回购/可转债/通达信板块指数）。"""
+    return (
+        code.startswith(("600", "601", "603", "605", "688"))      # 沪主板 + 科创
+        or code.startswith(("000", "001", "002", "003", "300", "301"))  # 深主板 + 创业
+        or code.startswith(("43", "83", "87", "920"))  # 北交所（88 开头是通达信板块指数，排除）
+    )
+
+
+def list_local_codes(tdxdir: Path | None = None, markets: tuple = ("sh", "sz")) -> list[str]:
+    """列出本地 vipdoc 日线目录下所有正常 A 股代码（纯 6 位）。"""
+    tdxdir = tdxdir or detect_tdx_dir()
+    if tdxdir is None:
+        return []
+    codes: list[str] = []
+    for m in markets:
+        lday = tdxdir / "vipdoc" / m / "lday"
+        if not lday.is_dir():
+            continue
+        for f in lday.glob(f"{m}*.day"):
+            code = f.stem[len(m):]  # 去掉 sh/sz 前缀
+            if code.isdigit() and len(code) == 6 and _is_a_share(code):
+                codes.append(code)
+    return sorted(set(codes))
+
+
 def fetch_local_minute(code: str, period: int = 5, tdxdir: Path | None = None, **kwargs) -> pd.DataFrame:
     """读通达信本地分钟线（.lc5=5分钟 / .lc1=1分钟，离线）。
 
