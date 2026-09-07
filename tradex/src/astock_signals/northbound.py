@@ -234,6 +234,22 @@ def get_northbound_flow_json(
 
             _save_snapshot(curr_date, hgt_close, sgt_close)
 
+            # ── 停更检测（v3.3.2 新增）──
+            # 沪深港通自 2024-08-19 起已停止披露北向实时净买入。
+            # 若本地缓存中最近多日 total 完全一致（冻结），判定数据疑似失效。
+            _hist = _load_history(10)
+            _totals = [round(h + s, 2) for _, h, s in _hist]
+            if len(_totals) >= 3 and all(
+                abs(t - _totals[-1]) < 0.01 for t in _totals[-3:]
+            ):
+                result["discontinued"] = True
+                result["note"] = (
+                    "北向资金数值连续多日完全一致，疑似已停更/冻结。"
+                    "沪深港通自 2024-08-19 起停止披露北向实时净买入，"
+                    "该数值仅供参考，不应作为交易依据。"
+                )
+                logger.warning("northbound: 检测到数值冻结，疑似停更")
+
         if include_history:
             history = _load_history(20)
             result["history"] = [

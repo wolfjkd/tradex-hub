@@ -1,5 +1,5 @@
 """
-astock_signals — A-stock signal data modules (独立包 v1.1.0).
+astock_signals — A-stock signal data modules (独立包 v1.1.1).
 
 TradingAgents-astock 移植层。提供以下核心能力:
   - anti_ban_client:  东财防封客户端（节流+Session复用）
@@ -159,4 +159,4 @@ def __getattr__(name):
     raise AttributeError(f"module 'astock_signals' has no attribute '{name}'")
 
 # astock_signals 独立包,版本号独立维护
-__version__ = "1.1.0"
+__version__ = "1.1.1"

@@ -59,15 +59,16 @@ class TestEltdxFetcherParamCompat:
         fake_quote.current_hand = 677
 
         with patch.object(eltdx_fetchers, "_get_client") as mock_client:
-            mock_client.return_value.get_quote.return_value = [fake_quote]
+            # v3.3.6+: eltdx 2.0 移除 get_quote(), 迁移至 helpers.full_quotes()
+            mock_client.return_value.helpers.full_quotes.return_value = [fake_quote]
             # 用 symbol= 调用（工具层 price_data.py 的调用方式）
             df = eltdx_fetchers.fetch_realtime_quote(symbol="600519")
             assert len(df) == 1
             assert df.iloc[0]["代码"] == "600519"
             assert df.iloc[0]["成交量"] == 55127  # total_hand
             assert df.iloc[0]["涨跌幅"] == -0.82  # change_pct（v3.1.4 新增字段）
-            # 验证 get_quote 收到的代码非空
-            call_args = mock_client.return_value.get_quote.call_args
+            # 验证 full_quotes 收到的代码非空
+            call_args = mock_client.return_value.helpers.full_quotes.call_args
             assert call_args[0][0]  # norm_code 非空
 
     def test_fetch_realtime_quote_accepts_code(self):
@@ -90,7 +91,8 @@ class TestEltdxFetcherParamCompat:
         fake_quote.current_hand = 10
 
         with patch.object(eltdx_fetchers, "_get_client") as mock_client:
-            mock_client.return_value.get_quote.return_value = [fake_quote]
+            # v3.3.6+: eltdx 2.0 用 helpers.full_quotes()
+            mock_client.return_value.helpers.full_quotes.return_value = [fake_quote]
             df = eltdx_fetchers.fetch_realtime_quote(code="600519")
             assert df.iloc[0]["代码"] == "600519"
 
@@ -182,23 +184,12 @@ class TestHttpFetcherParamCompat:
 
 
 class TestAstockSignalsFetcherParamCompat:
-    """astock_signals_fetchers 参数归一化测试。"""
+    """astock_signals_fetchers 参数归一化测试。
 
-    def test_fetch_fund_flow_em_accepts_symbol(self):
-        """关键回归：route('fund_flow', symbol=...) 必须能路由到 em 主源。"""
-        from tradex.data_sources import astock_signals_fetchers
-
-        with patch.object(astock_signals_fetchers, "_as") as mock_as:
-            mock_as.return_value.get_fund_flow_json.return_value = {
-                "realtime": {"data": 1},
-                "history": [],
-            }
-            # 用 symbol= 调用
-            astock_signals_fetchers.fetch_fund_flow_em(symbol="600519")
-            # 验证 get_fund_flow_json 收到的 code 是 600519
-            call_args = mock_as.return_value.get_fund_flow_json.call_args[0]
-            assert call_args[0] == "600519"
-
+    注: fetch_fund_flow_em 于 v3.3.x 重构为 curl_cffi 直连(不再经 _as()/
+    get_fund_flow_json), 原对应回归测试已随实现移除; dragon_tiger / etf /
+    hot_money 仍走 _as(), 由以下用例覆盖参数归一化。
+    """
     def test_fetch_dragon_tiger_em_accepts_symbol(self):
         from tradex.data_sources import astock_signals_fetchers
 

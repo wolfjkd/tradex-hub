@@ -200,6 +200,10 @@ def register(mcp: FastMCP):
 
         try:
             df, _src = _router.route("valuation", endpoint="rank_forecast")
+            if df is None or df.empty:
+                return error_response(
+                    f"分析师评级数据为空 ({symbol or '全部'})", "get_analyst_rating"
+                )
             if symbol:
                 symbol = normalize_symbol(symbol)
                 # Filter for the specific stock

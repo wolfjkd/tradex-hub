@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
 
+## [3.3.10] - 2026-09-07
+
+### Changed（双源合一 + 深度体检修复）
+
+- **astock_signals 双源合一**：独立仓 `Claw/astock_signals/` 退役，`tradex/src/astock_signals/` 成为唯一主源（补齐 v3.3.2 超时保护/停更检测等落后内容，版本 1.1.1），所有调用统一走框架内主源。
+- **P0 计算修复**：`_downside_volatility` 改用标准下行偏差算法（原对负收益以自身均值为中心，Sortino 分母系统性算错）；全正收益策略 Sortino 返回 inf。
+- **P1 修复**：
+  - `symbol.get_exchange`：可转债 11x(沪)/12x(深)、ETF、沪B(900)、北交所(920) 交易所判定修正；
+  - `get_segments_revenue`：symbol 补 `format_em_symbol` 前缀（东财 F10 需带市场标识）+ None 守卫；
+  - 逐笔方向：eltdx 真实字段 `side`(buy/sell/neutral) 替代不存在的 `buy_or_sell`（原实时路径 100% 误标 sell），统一归一化 unknown；
+  - SmartRouter 故障源半开探测自愈（冷却期后自动复活，防永久拉黑+防雪崩）；
+  - 东财限流 `em_client` 加锁（防多线程穿透封 IP）；SSL 全局替换加锁；`register_all_sources`/`register_all_tools` 幂等加固。
+- **仓库卫生**：删根 `src/` 空壳目录与 `cn-financial-mcp/` 僵尸目录；删串仓测试 `test_data_router_syntax.py`（测的是另一项目代码）；修复 pytest 合跑 ImportPathMismatchError（移除根 tests/__init__.py）；`config/mcp-servers.json` 3.1.4→3.3.9 同步。
+- **测试**：全量 357 passed / 0 failed（此前 6 个失败均修复/清理）；工具数断言 127→129。
+
 ## [3.3.9] - 2026-08-18
 
 ### Added（数据源扩充 + 本地数据 + 全局直连）

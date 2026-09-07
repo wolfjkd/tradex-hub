@@ -121,6 +121,15 @@ def get_exchange(code: str) -> str:
     """
     Determine the exchange for a given A-share stock code.
 
+    Exchange rules (v3.3.9+ 修正债券/可转债误判):
+      - 6xxxxx (60/68/90)            -> sh (沪主板/科创/B股)
+      - 5xxxxx (50/51/58)            -> sh (沪 ETF/基金/REITs)
+      - 11xxxx (110/111/113)         -> sh (沪市可转债/可交换债)
+      - 0/2/3xxxxx (00/20/30)        -> sz (深主板/深B/创业板)
+      - 12xxxx (123/128)             -> sz (深市可转债)
+      - 15xxxx (15/16/18)            -> sz (深 ETF/基金/REITs)
+      - 4/8xxxxx (43/83/87/88/920)   -> bj (北交所)
+
     Args:
         code: 6-digit stock code.
 
@@ -134,9 +143,14 @@ def get_exchange(code: str) -> str:
 
     code = normalize_symbol(code)
 
-    if code.startswith(("6",)):
+    if code.startswith(("6", "5", "9")) and not code.startswith("920"):
         return "sh"
-    elif code.startswith(("0", "1", "2", "3")):
+    elif code.startswith("920"):
+        return "bj"
+    elif code.startswith(("11", "12")):
+        # 债券类：11x 沪市可转债/EB；12x 深市可转债
+        return "sh" if code.startswith("11") else "sz"
+    elif code.startswith(("0", "1", "2", "3", "15", "16", "18")):
         return "sz"
     elif code.startswith(("4", "8")):
         return "bj"
@@ -167,9 +181,15 @@ def get_market_name(code: str) -> str:
         return "上交所主板"
     elif code.startswith("300") or code.startswith("301"):
         return "深交所创业板"
-    elif code.startswith(("0", "1")):
+    elif code.startswith(("0", "2", "3")):
         return "深交所主板"
-    elif code.startswith(("4", "8")):
+    elif code.startswith("11"):
+        return "上交所可转债/EB"
+    elif code.startswith("12"):
+        return "深交所可转债"
+    elif code.startswith("1"):
+        return "深交所基金"
+    elif code.startswith(("4", "8", "920")):
         return "北交所"
     else:
         return "未知市场"

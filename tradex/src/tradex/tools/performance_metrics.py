@@ -61,6 +61,12 @@ def _volatility(equity_curve: list[float], trading_days: int = 252) -> float:
 
 
 def _downside_volatility(equity_curve: list[float], trading_days: int = 252) -> float:
+    """下行波动率（downside deviation，Sortino 分母）。
+
+    标准定义：相对目标收益（默认 0）的单侧离差，
+    dd = sqrt(mean(min(r - MAR, 0)^2))，MAR=0 时仅负收益贡献。
+    注意：分母用全部收益样本数 N（非仅负收益数），否则会系统性高估。
+    """
     if len(equity_curve) < 2:
         return 0.0
     returns = [
@@ -68,12 +74,10 @@ def _downside_volatility(equity_curve: list[float], trading_days: int = 252) -> 
         for i in range(1, len(equity_curve))
         if equity_curve[i - 1] != 0
     ]
-    downside = [r for r in returns if r < 0]
-    if len(downside) < 2:
+    if not returns:
         return 0.0
-    mean = sum(downside) / len(downside)
-    variance = sum((r - mean) ** 2 for r in downside) / (len(downside) - 1)
-    return math.sqrt(variance) * math.sqrt(trading_days)
+    downside_sq_mean = sum(min(r, 0.0) ** 2 for r in returns) / len(returns)
+    return math.sqrt(downside_sq_mean) * math.sqrt(trading_days)
 
 
 def _max_drawdown(equity_curve: list[float]) -> tuple[float, int, int]:
@@ -110,7 +114,8 @@ def _sortino_ratio(equity_curve: list[float], risk_free_rate: float = 0.03) -> f
     ann_return = _annualized_return(equity_curve)
     downside_vol = _downside_volatility(equity_curve)
     if downside_vol == 0:
-        return 0.0
+        # 无下行波动:正超额收益策略 Sortino 趋于 +∞,否则视为无风险调整收益
+        return float('inf') if ann_return > risk_free_rate else 0.0
     return (ann_return - risk_free_rate) / downside_vol
 
 
@@ -189,7 +194,7 @@ PERFORMANCE_METRICS_CATALOG = [
 
     # 风险类
     {"name": "volatility", "category": "risk", "desc": "年化波动率", "formula": "std(日收益)*sqrt(252)"},
-    {"name": "downside_volatility", "category": "risk", "desc": "下行波动率", "formula": "std(负收益)*sqrt(252)"},
+    {"name": "downside_volatility", "category": "risk", "desc": "下行波动率", "formula": "sqrt(mean(min(r,0)^2))*sqrt(252)"},
     {"name": "max_drawdown", "category": "risk", "desc": "最大回撤率", "formula": "max((峰值-谷值)/峰值)"},
     {"name": "var_95", "category": "risk", "desc": "VaR(95%)", "formula": "历史模拟法95%分位数"},
     {"name": "cvar_95", "category": "risk", "desc": "CVaR(95%)", "formula": "尾部5%收益均值"},

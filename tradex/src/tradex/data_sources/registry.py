@@ -49,6 +49,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 
 from astock_signals.smart_router import get_router
 
@@ -64,7 +65,10 @@ from . import tdx_local as tdx
 
 logger = logging.getLogger("tradex.data_sources")
 
+# v3.3.9+：注册过程加锁，避免多线程并发进入时重复注册。
+# SmartRouter.register 自身也已做同 key 幂等，此处锁用于兜底"注册中途异常重试"场景。
 _registered = False
+_register_lock = threading.Lock()
 
 
 def register_all_sources() -> None:
@@ -76,6 +80,15 @@ def register_all_sources() -> None:
     if _registered:
         logger.debug("register_all_sources: already registered, skip")
         return
+    with _register_lock:
+        if _registered:  # 双检锁：等待锁期间可能已被其他线程注册
+            return
+        _do_register()
+        _registered = True
+
+
+def _do_register() -> None:
+    """实际注册逻辑（调用方须持有 _register_lock）。"""
     router = get_router()
 
     # ── 行情类 ──
@@ -200,7 +213,6 @@ def register_all_sources() -> None:
     router.register("wencai_query", "pywencai", wf.fetch_wencai_query, priority=1)
     router.register("wencai_news", "iwencai_openapi", wf.fetch_wencai_news, priority=1)
 
-    _registered = True
     report = router.get_registry_report()
     data_types = sorted({x["data_type"] for x in report})
     logger.info(

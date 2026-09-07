@@ -7,8 +7,9 @@ import sys
 import pytest
 from unittest.mock import patch, MagicMock
 
-# 确保 src 在 Python path 中
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+# 确保 tradex/src 在 Python path 中（v3.3.9+：原指向根 src/ 空目录，已修正）。
+# 根 src/astock_signals 已并入 tradex/src/，运行包经 editable 安装或此处注入均可。
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tradex", "src"))
 
 
 @pytest.fixture

@@ -48,6 +48,18 @@ _tick_store_instance: Optional[Any] = None
 _tick_store_lock = threading.Lock()
 
 
+def _normalize_tick_side(side: Any) -> str:
+    """归一 eltdx 逐笔方向到统一口径。
+
+    eltdx TradeTick.side 取值: "buy"/"sell"/"neutral"(另 status_N 兜底)。
+    统一透传合法值, 其余(缺失/未知/status_N)标 "unknown",
+    不再默认 buy/sell 以免污染买卖统计。
+    """
+    if side in ("buy", "sell", "neutral"):
+        return side
+    return "unknown"
+
+
 def _get_tick_store():
     """获取 TickStore 单例（DB 路径: <project_root>/data/tick_store.db）。
 
@@ -179,7 +191,9 @@ def register(mcp: FastMCP):
                                 "price": row.get("price"),
                                 "volume": row.get("volume"),
                                 "amount": row.get("amount"),
-                                "bs": row.get("direction") if row.get("direction") in ("buy", "sell") else "buy",
+                                # v3.3.9+: 未知/缺失方向不再默认 "buy"(避免卖单误标),
+                                # 显式标 "unknown";与实时路径 _normalize_tick_side 口径一致
+                                "bs": _normalize_tick_side(row.get("direction")),
                             }
                             for _, row in cached.iterrows()
                         ]
@@ -210,7 +224,10 @@ def register(mcp: FastMCP):
                     "price": getattr(t, "price", None),
                     "volume": getattr(t, "volume", None),
                     "amount": getattr(t, "amount", None),
-                    "bs": "buy" if getattr(t, "buy_or_sell", None) in (0, "0", "buy") else "sell",
+                    # v3.3.9+ 修复: 此前读不存在的 buy_or_sell 字段(getattr 恒 None)
+                    # → 所有逐笔被误标 "sell"。eltdx TradeTick 真实字段是 side:
+                    #   "buy" / "sell" / "neutral", 兜底 status_N。此处透传并标 unknown。
+                    "bs": _normalize_tick_side(getattr(t, "side", None)),
                 }
                 for t in ticks
             ]

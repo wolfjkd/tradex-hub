@@ -14,12 +14,18 @@ AKShare 数据源 fetch_fn 包装器。
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import datetime, timedelta
 from typing import Any
 
 import pandas as pd
 
 logger = logging.getLogger("tradex.akshare")
+
+# v3.3.9+：SSL 全局替换的互斥锁。fetch_index_news_sentiment 因 akshare 接口
+# 不暴露 verify/session 参数，被迫临时替换进程级 ssl 默认上下文；加锁串行化
+# 该窗口，避免并发线程在窗口期发起 HTTPS 请求时被静默跳过证书校验。
+_ssl_patch_lock = threading.Lock()
 
 
 def _ak():
@@ -948,14 +954,17 @@ def fetch_index_news_sentiment(**kwargs) -> pd.DataFrame:
     """
     ak = _ak()
     try:
-        # 部分环境下 chinascope.com.cn 证书不受信任，全局绕过 SSL 验证
+        # 部分环境下 chinascope.com.cn 证书不受信任，需临时绕过 SSL 验证。
+        # akshare 此接口不暴露 verify 参数，只能全局替换 ssl 上下文；
+        # 加锁串行化替换窗口，最小化对进程内其他 HTTPS 请求的影响。
         import ssl
-        _original = ssl._create_default_https_context
-        ssl._create_default_https_context = ssl._create_unverified_context
-        try:
-            df = ak.index_news_sentiment_scope()
-        finally:
-            ssl._create_default_https_context = _original
+        with _ssl_patch_lock:
+            _original = ssl._create_default_https_context
+            ssl._create_default_https_context = ssl._create_unverified_context
+            try:
+                df = ak.index_news_sentiment_scope()
+            finally:
+                ssl._create_default_https_context = _original
         if df is None or df.empty:
             logger.debug("fetch_index_news_sentiment: empty")
             return pd.DataFrame()

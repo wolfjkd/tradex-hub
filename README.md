@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/License-Apache--2.0-yellow.svg" alt="License"/>
   <img src="https://img.shields.io/badge/Data-A股-red.svg" alt="Data Scope"/>
   <img src="https://img.shields.io/badge/Tools-129-orange.svg" alt="MCP Tools"/>
-  <img src="https://img.shields.io/badge/Version-3.3.9-blue.svg" alt="Version"/>
+  <img src="https://img.shields.io/badge/Version-3.3.10-blue.svg" alt="Version"/>
 </p>
 
 ---
@@ -378,6 +378,7 @@ AI 会调用 `mcp__tradex__eltdx_get_kline`，返回 100 根日 K 线。
 
 | 版本 | 日期 | 内容 |
 |------|------|------|
+| v3.3.10 | 2026-09-07 | 双源合一(astock_signals 并入本仓 src/ 为主源,独立仓退役) + P0/P1 修复：Sortino 下行波动率算法修正、可转债/沪市债券交易所判定修正、金融主营构成 symbol 前缀修正、逐笔方向字段修正(eltdx side, 原误读 buy_or_sell 全标 sell)、SmartRouter 故障源半开探测自愈、东财限流加锁、SSL 替换加锁、注册幂等加固 + 仓库卫生(删根 src 空壳/cn-financial-mcp 僵尸/串仓测试, pytest 合跑修复) |
 | v3.3.9 | 2026-08-18 | 全局直连(import去代理) + 同花顺4接口/东财slist板块归属/东财限流防封/实时涨跌家数/行业涨幅/通达信本地数据 + 本地数据MCP工具2个(get_local_kline/get_local_minute)，工具数 127→129 |
 | v3.3.8 | 2026-08-14 | eltdx 2.0 第二梯队 B 级接入：分类行情(涨幅榜/成交额榜)、交易日判定、历史开盘撮合、股本变动、特殊涨跌停扫描、F10通用入口(估值/题材/总评/盈利预测/排名/治理/增减持/主营/公告/新闻)，工具数 121→127 |
 | v3.3.7 | 2026-08-14 | eltdx 2.0 第一梯队 S+A 级接入：常驻连接管理器(eltdx_stream.py，游标增量轮询实现准实时五档盘口)+五档盘口+证券代码表+历史分时+买卖强度+逐笔+开盘撮合+全量K线+复权K线+全景档案+21项短线指标+批量财务+特殊涨跌停+F10财报分红资讯北向+个股题材+题材成分股+竞价汇总，工具数 101→121，数据类型 40→64 |

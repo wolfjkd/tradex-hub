@@ -3,28 +3,20 @@
 
 设计原则：
   1. 自动发现：扫描 tools/ 目录下所有模块，无需手动导入
-  2. 双轨制：装饰器注册和 register(mcp) 函数注册共存
+  2. 注册函数：每个工具模块导出 register(mcp) 函数，在其中用 @mcp.tool() 注册
   3. 元数据管理：每个工具有分类、描述等元信息，支持按分类查询
 
-Usage:
-    # 方式一：装饰器注册（新工具推荐）
-    from .registry import register_tool, ToolRegistry
+⚠️ v3.3.9 勘误：此前文档推荐 @register_tool 装饰器轨，但装饰器只把元数据
+写入 ToolRegistry._tools，discover_and_register 不会将其挂到 FastMCP——
+按装饰器轨写的新工具会静默消失。新增工具请一律使用 register(mcp) 函数轨：
 
-    @register_tool("L1-数据获取", "搜索A股股票")
-    async def search_stock(keyword: str) -> str:
-        ...
-
-    # 方式二：register函数注册（现有工具兼容）
+    # 正确姿势（register 函数轨）
     def register(mcp):
         @mcp.tool()
         async def search_stock(keyword: str) -> str:
             ...
 
-    # 自动发现所有工具模块
-    ToolRegistry.auto_discover(importlib.import_module("tradex.tools"))
-
-    # 按分类查询工具
-    tools = ToolRegistry.get_by_category("L1-数据获取")
+装饰器 @register_tool 仅用于登记分类元数据，勿用于注册新工具。
 """
 
 from __future__ import annotations

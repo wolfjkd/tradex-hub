@@ -725,7 +725,7 @@ def fetch_topic_stocks(code: str = "", symbol: str = "", topic_name: str = "", *
     norm_code = _normalize_symbol_code(symbol, code)
     result = client.helpers.topic_stocks(norm_code, topic_name=topic_name or None)
     rows = []
-    for r in result.rows:
+    for r in (getattr(result, "rows", None) or ()):
         rows.append({
             "代码": getattr(r, "full_code", None),
             "名称": getattr(r, "name", None),

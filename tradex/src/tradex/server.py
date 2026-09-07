@@ -24,6 +24,10 @@ mcp = FastMCP(
     ),
 )
 
+# v3.3.9+：工具注册幂等守卫——importlib.reload(server) 或重复 import 时
+# 避免向同一 mcp 实例重复注册 129 个工具。
+_tools_registered = False
+
 
 def register_all_tools():
     """Register all tool modules with the MCP server.
@@ -32,10 +36,15 @@ def register_all_tools():
     调用每个模块的 register(mcp) 函数完成注册。
     新增工具只需在 tools/ 下创建文件，无需修改本函数。
     """
+    global _tools_registered
+    if _tools_registered:
+        logger.debug("register_all_tools: already registered, skip")
+        return
     from .tools.registry import ToolRegistry
 
     tools_package = importlib.import_module("tradex.tools")
     registered = ToolRegistry.discover_and_register(tools_package, mcp)
+    _tools_registered = True
     logger.info("已注册 %d 个工具模块: %s", len(registered), ", ".join(registered))
 
 

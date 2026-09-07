@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import random
+import threading
 import time
 
 import pandas as pd
@@ -21,7 +22,9 @@ logger = __import__("logging").getLogger("tradex.em")
 # 东财风控：最小请求间隔（秒）
 EM_MIN_INTERVAL = 1.0
 
+# v3.3.9+：限流时间戳加锁保护——多线程同时穿透间隔会导致并发请求数超风控阈值封 IP。
 _em_last_call = [0.0]
+_em_throttle_lock = threading.Lock()
 _EM_SESSION = _rq.Session()
 
 _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -31,18 +34,25 @@ _REFERER = "https://quote.eastmoney.com/"
 
 def em_get(url: str, params: dict | None = None, headers: dict | None = None,
            timeout: int = 15, **kwargs):
-    """东财统一请求入口：自动节流 + 复用 session + 默认 UA。"""
-    wait = EM_MIN_INTERVAL - (time.time() - _em_last_call[0])
-    if wait > 0:
-        time.sleep(wait + random.uniform(0.1, 0.5))
-    h = {"User-Agent": _UA, "Referer": _REFERER}
-    if headers:
-        h.update(headers)
-    try:
-        return _EM_SESSION.get(url, params=params, headers=h, timeout=timeout,
-                               impersonate="chrome120", **kwargs)
-    finally:
-        _em_last_call[0] = time.time()
+    """东财统一请求入口：自动节流 + 复用 session + 默认 UA。
+
+    节流检查与时间戳更新在同一把锁内完成（含 sleep），
+    保证任意时刻只有一个请求在"检查-等待-发出"临界区，
+    多线程并发调用时严格维持 ≥EM_MIN_INTERVAL 的实际间隔。
+    """
+    with _em_throttle_lock:
+        wait = EM_MIN_INTERVAL - (time.time() - _em_last_call[0])
+        if wait > 0:
+            time.sleep(wait + random.uniform(0.1, 0.5))
+        h = {"User-Agent": _UA, "Referer": _REFERER}
+        if headers:
+            h.update(headers)
+        try:
+            resp = _EM_SESSION.get(url, params=params, headers=h, timeout=timeout,
+                                   impersonate="chrome120", **kwargs)
+        finally:
+            _em_last_call[0] = time.time()
+    return resp
 
 
 def fetch_stock_boards(code: str, **kwargs) -> pd.DataFrame:

@@ -384,13 +384,18 @@ def register(mcp: FastMCP):
             主营构成数据 (JSON)，包含各业务板块的营收、占比、毛利率等。
         """
         symbol = normalize_symbol(symbol)
+        em_symbol = format_em_symbol(symbol)  # 东财 F10 主营构成需带市场前缀 SH600519
         cache_key = f"segments:{symbol}"
         cached = cache.get(cache_key)
         if cached is not None:
             return cached
 
         try:
-            df, _src = _router.route("financial_stmt", endpoint="segments", symbol=symbol)
+            df, _src = _router.route("financial_stmt", endpoint="segments", symbol=em_symbol)
+            if df is None or df.empty:
+                return error_response(
+                    f"主营构成数据为空 ({symbol})", "get_segments_revenue"
+                )
             df = slim_df(df)
             result = df_to_json(df)
             cache.set(cache_key, result, TTL_FINANCIAL)
