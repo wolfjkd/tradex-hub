@@ -9,7 +9,7 @@ tradex-hub 是为 AI Agent（Trae / Claude Code / Cursor）提供 A 股金融数
 - **MCP 工具总数**：89 个（v3.1.4 口径；v3.3.9 已扩至 129 个，见 README）
 - **数据源**：data_sources 数据源层（25 类型 34 源）→ SmartRouter 全量路由（eltdx 主 + AKShare/东财/同花顺备）
 - **传输方式**：stdio（本地 MCP Server）
-- **包名**：tradex（v3.3.10），astock_signals 已并入本仓 tradex/src/astock_signals 作为唯一主源（v3.3.10，独立仓已退役）
+- **包名**：tradex（v3.3.11），astock_signals 已并入本仓 tradex/src/astock_signals 作为唯一主源（v3.3.11，独立仓已退役）
 
 ## 2. 核心组件
 

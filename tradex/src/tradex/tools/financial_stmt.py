@@ -309,13 +309,18 @@ def register(mcp: FastMCP):
                 return error_response(
                     f"增长指标数据为空 ({symbol})", "get_growth_rates"
                 )
-            # Filter growth-related columns
+            # Filter growth-related columns（落空时明确报错，不静默返全表）
             growth_cols = [
                 c for c in df.columns
                 if "增长" in c or "同比" in c or "环比" in c or "日期" in c or "报告" in c
             ]
-            if growth_cols:
-                df = df[growth_cols]
+            if not growth_cols:
+                return error_response(
+                    f"未在返回数据中找到增长指标列 (实际列: {list(df.columns)[:10]}...)，"
+                    "数据源表结构可能已变化",
+                    "get_growth_rates",
+                )
+            df = df[growth_cols]
             if num_periods > 0:
                 df = df.head(num_periods)
             df = slim_df(df)
@@ -354,13 +359,18 @@ def register(mcp: FastMCP):
                 return error_response(
                     f"每股指标数据为空 ({symbol})", "get_per_share_data"
                 )
-            # Filter per-share columns
+            # Filter per-share columns（落空时明确报错，不静默返全表）
             share_cols = [
                 c for c in df.columns
                 if "每股" in c or "日期" in c or "报告" in c
             ]
-            if share_cols:
-                df = df[share_cols]
+            if not share_cols:
+                return error_response(
+                    f"未在返回数据中找到每股指标列 (实际列: {list(df.columns)[:10]}...)，"
+                    "数据源表结构可能已变化",
+                    "get_per_share_data",
+                )
+            df = df[share_cols]
             if num_periods > 0:
                 df = df.head(num_periods)
             df = slim_df(df)

@@ -22,90 +22,15 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from ..utils.formatter import dict_to_json, error_response
-from .technical_indicators import _sma, _ema, _stddev
+from .technical_indicators import _sma, _macd_values, _kdj_values, _rsi_values, _boll_values
 
 
 # ──────────────────────────────────────────────────────────────────
 # 信号生成核心算法
 # ──────────────────────────────────────────────────────────────────
-
-def _macd_calc(closes: list[float], fast: int = 12, slow: int = 26, signal: int = 9) -> dict:
-    """计算 MACD（内部使用，返回对齐后的数组）。"""
-    fast_ema = _ema(closes, fast)
-    slow_ema = _ema(closes, slow)
-    n = len(closes)
-    dif: list[float | None] = [None] * (slow - 1)
-    for i in range(slow - 1, n):
-        f = fast_ema[i]
-        s = slow_ema[i]
-        dif.append(round(f - s, 4) if (f is not None and s is not None) else None)
-
-    dif_valid = [v for v in dif[slow - 1:] if v is not None]
-    dea_valid = _ema(dif_valid, signal)
-    dea: list[float | None] = [None] * (slow - 1 + signal - 1)
-    dea.extend(dea_valid[signal - 1:] if len(dea_valid) >= signal else [])
-    return {"dif": dif, "dea": dea}
-
-
-def _kdj_calc(highs, lows, closes, n=9, m1=3, m2=3) -> dict:
-    """计算 KDJ。"""
-    k_arr, d_arr, j_arr = [], [], []
-    prev_k, prev_d = 50.0, 50.0
-    for i in range(len(closes)):
-        start = max(0, i - n + 1)
-        ll = min(lows[start:i + 1])
-        hh = max(highs[start:i + 1])
-        den = hh - ll
-        rsv = 50.0 if den == 0.0 else ((closes[i] - ll) / den * 100.0)
-        prev_k = (2.0 / m1) * prev_k + (1.0 / m1) * rsv
-        prev_d = (2.0 / m2) * prev_d + (1.0 / m2) * prev_k
-        j_val = 3 * prev_k - 2 * prev_d
-        k_arr.append(prev_k)
-        d_arr.append(prev_d)
-        j_arr.append(j_val)
-    return {"k": k_arr, "d": d_arr, "j": j_arr}
-
-
-def _rsi_calc(closes: list[float], period: int = 14) -> list[float | None]:
-    """计算 RSI（Wilder）。"""
-    if len(closes) < period + 1:
-        return [None] * len(closes)
-    deltas = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
-    gains = [max(d, 0) for d in deltas]
-    losses = [abs(min(d, 0)) for d in deltas]
-    avg_gain = sum(gains[:period]) / period
-    avg_loss = sum(losses[:period]) / period
-    rsi_arr: list[float | None] = [None] * period
-    if avg_loss == 0:
-        rsi_arr[period - 1] = 100.0
-    else:
-        rs = avg_gain / avg_loss
-        rsi_arr[period - 1] = round(100 - 100 / (1 + rs), 4)
-    for i in range(period, len(deltas)):
-        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
-        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
-        if avg_loss == 0:
-            rsi_arr.append(100.0)
-        else:
-            rs = avg_gain / avg_loss
-            rsi_arr.append(round(100 - 100 / (1 + rs), 4))
-    return rsi_arr
-
-
-def _boll_calc(closes: list[float], period: int = 20, k: float = 2.0) -> dict:
-    """计算布林带。"""
-    n = len(closes)
-    upper: list[float | None] = [None] * (period - 1)
-    middle: list[float | None] = [None] * (period - 1)
-    lower: list[float | None] = [None] * (period - 1)
-    for i in range(period - 1, n):
-        window = closes[i - period + 1:i + 1]
-        mean = sum(window) / period
-        std = _stddev(window, mean)
-        upper.append(mean + k * std)
-        middle.append(mean)
-        lower.append(mean - k * std)
-    return {"upper": upper, "middle": middle, "lower": lower}
+# 注：MACD/KDJ/RSI/BOLL 计算统一复用 technical_indicators.py 的单一实现
+# （_macd_values/_kdj_values/_rsi_values/_boll_values），本文件不再重复实现，
+# 消除双文件算法漂移（B20）。
 
 
 def _generate_signal_for_stock(
@@ -159,7 +84,7 @@ def _generate_signal_for_stock(
             reasons.append("价格在MA20下方(空头排列)")
 
     # === 2. 动量维度（MACD）===
-    macd_data = _macd_calc(closes)
+    macd_data = _macd_values(closes)
     dif = macd_data["dif"]
     dea = macd_data["dea"]
     if len(dif) >= 2 and len(dea) >= 2:
@@ -182,7 +107,7 @@ def _generate_signal_for_stock(
                 reasons.append("DIF在零轴下方")
 
     # === 3. 超买超卖（KDJ + RSI）===
-    kdj_data = _kdj_calc(highs, lows, closes)
+    kdj_data = _kdj_values(highs, lows, closes)
     last_k = kdj_data["k"][-1]
     last_d = kdj_data["d"][-1]
     last_j = kdj_data["j"][-1]
@@ -193,7 +118,7 @@ def _generate_signal_for_stock(
         score -= 8
         reasons.append(f"KDJ超买(J={last_j:.1f})")
 
-    rsi_arr = _rsi_calc(closes)
+    rsi_arr = _rsi_values(closes)
     last_rsi = rsi_arr[-1] if rsi_arr else None
     if last_rsi is not None:
         if last_rsi < 30:
@@ -217,7 +142,7 @@ def _generate_signal_for_stock(
                 reasons.append(f"缩量(量比{vol_ratio:.2f})")
 
     # === 5. 风险维度（布林带位置）===
-    boll = _boll_calc(closes)
+    boll = _boll_values(closes)
     last_upper = boll["upper"][-1]
     last_lower = boll["lower"][-1]
     last_mid = boll["middle"][-1]

@@ -32,9 +32,18 @@ def _urlopen_no_proxy(url: str, timeout: int = 10) -> object:
 
 
 def _tencent_quote_vals(code: str) -> list:
-    """从腾讯 qt.gtimg.cn 获取个股行情，返回 ~ 分隔的值列表。"""
-    prefix = "sh" if code.startswith("6") else "sz"
-    url = f"https://qt.gtimg.cn/q={prefix}{code}"
+    """从腾讯 qt.gtimg.cn 获取个股行情，返回 ~ 分隔的值列表。
+
+    入参兼容 6 位代码与已带前缀的代码（sh600000/sz000001），
+    已带前缀时不重复拼接（防 szsh600000 之类错误 URL）。
+    """
+    sym = code.strip().lower()
+    if sym[:2] in ("sh", "sz", "bj"):
+        query = sym
+    else:
+        prefix = "sh" if sym.startswith("6") else "sz"
+        query = prefix + sym
+    url = f"https://qt.gtimg.cn/q={query}"
     resp = _urlopen_no_proxy(url, timeout=5)
     raw = resp.read().decode("gbk")
     if '"' not in raw:

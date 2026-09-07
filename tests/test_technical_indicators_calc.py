@@ -134,29 +134,28 @@ class TestSma:
 # ════════════════════════════════════════════════════════════════
 
 class TestEma:
-    def test_ema_first_value_equals_sma(self):
-        """任务要求: 首值用 SMA 初始化。"""
-        closes = _SIMPLE_CLOSES
+    def test_ema_first_value_equals_first_close(self):
+        """通达信口径 (B17): 首值 = X[0]，不用 SMA 初始化。"""
+        closes = _SIMPLE_CLOSES  # [10,11,12,13,14]
         ema_result = ti._ema(closes, 3)
-        sma_result = ti._sma(closes, 3)
-        # EMA 的第一个非空值应等于 SMA 的第一个非空值
-        assert ema_result[2] == sma_result[2] == 11.0
+        assert ema_result[0] == 10.0
+        assert ema_result[1] == 10.5
 
-    def test_ema_follows_formula(self):
-        """任务要求: 后续按 EMA 公式 (multiplier = 2/(period+1))。"""
+    def test_ema_follows_tdx_formula(self):
+        """通达信递归 EMA[i] = 2/(N+1)*X[i] + (1-2/(N+1))*EMA[i-1]，首值 X[0]。"""
         closes = _SIMPLE_CLOSES
         period = 3
-        multiplier = 2.0 / (period + 1)
-        # 手算预期值
-        prev_ema = sum(closes[:period]) / period  # 11.0
-        expected = [None, None, round(prev_ema, 4)]
-        for i in range(period, len(closes)):
-            prev_ema = closes[i] * multiplier + prev_ema * (1 - multiplier)
+        multiplier = 2.0 / (period + 1)  # 0.5
+        prev_ema = closes[0]  # 10.0
+        expected = [round(prev_ema, 4)]
+        for x in closes[1:]:
+            prev_ema = x * multiplier + prev_ema * (1 - multiplier)
             expected.append(round(prev_ema, 4))
+        # [10.0, 10.5, 11.25, 12.125, 13.0625]
         assert ti._ema(closes, period) == expected
 
     def test_ema_period_1_equals_input(self):
-        """period=1 时 EMA 等于输入序列（首值=SMA=自身，后续 multiplier=1）。"""
+        """period=1 时 EMA 等于输入序列（multiplier=1，全随输入）。"""
         closes = [10.0, 11.0, 12.0, 13.0]
         result = ti._ema(closes, 1)
         assert result == [10.0, 11.0, 12.0, 13.0]
@@ -164,12 +163,13 @@ class TestEma:
     def test_ema_empty_array(self):
         assert ti._ema([], 3) == []
 
-    def test_ema_insufficient_data(self):
-        assert ti._ema([10.0], 3) == [None]
+    def test_ema_single_point_returns_itself(self):
+        """单点输入：EMA 即该点（X[0] 种子，不因长度<period 而变 None）。"""
+        assert ti._ema([10.0], 3) == [10.0]
 
     def test_ema_invalid_period(self):
-        assert ti._ema([10.0, 11.0, 12.0], 0) == [None, None, None]
-        assert ti._ema([10.0, 11.0, 12.0], -2) == [None, None, None]
+        assert ti._ema([10.0, 11.0, 12.0], 0) == []
+        assert ti._ema([10.0, 11.0, 12.0], -2) == []
 
 
 # ════════════════════════════════════════════════════════════════
@@ -189,13 +189,13 @@ class TestCalculateMaEma:
         assert out["data_points"] == 5
 
     def test_type_ema_returns_only_ema(self):
-        """type=ema 仅返回 ema 字段。"""
+        """type=ema 仅返回 ema 字段（通达信口径，自首根有效）。"""
         out = _call(_TOOLS["calculate_ma_ema"], _SIMPLE_CLOSES, 3, "ema")
         assert out["success"] is True
         assert out["type"] == "ema"
-        assert "ema" in out and out["ema"][2] == 11.0
+        assert "ema" in out and out["ema"][0] == 10.0
         assert "ma" not in out
-        assert out["ema_valid_points"] == 3
+        assert out["ema_valid_points"] == 5
 
     def test_type_both_returns_both(self):
         """type=both 同时返回 ma 和 ema 字段。"""
@@ -203,8 +203,9 @@ class TestCalculateMaEma:
         assert out["success"] is True
         assert out["type"] == "both"
         assert "ma" in out and "ema" in out
-        # 首值应相等（均用 SMA 初始化）
-        assert out["ma"][2] == out["ema"][2] == 11.0
+        # MA 用 SMA（前 period-1 为 None）；EMA 用通达信 X[0] 种子（自首根有效）
+        assert out["ma"][2] == 11.0
+        assert out["ema"][0] == 10.0
 
     def test_invalid_type_returns_error(self):
         """type 不在 sma/ema/both 中应返回 error。"""
@@ -261,12 +262,12 @@ class TestCalculateMacd:
         assert len(out["dea"]) == 60
         assert len(out["macd"]) == 60
 
-    def test_dif_leading_none_count(self):
-        """前 slow_period-1=25 个 DIF 应为 None。"""
+    def test_dif_no_leading_none(self):
+        """通达信口径：EMA 自首根起算，DIF 全数组有效（无前导 None）。"""
         closes = _gen_closes(60)
         out = _call(_TOOLS["calculate_macd"], closes)
-        assert all(v is None for v in out["dif"][:25])
-        assert out["dif"][25] is not None  # 第 26 个开始有值
+        assert all(v is not None for v in out["dif"])
+        assert len(out["dif"]) == 60
 
     def test_macd_hist_formula(self):
         """验证 MACD 柱 = 2 * (DIF - DEA)。"""
@@ -295,9 +296,9 @@ class TestCalculateMacd:
         assert out["fast_period"] == 5
         assert out["slow_period"] == 15
         assert out["signal_period"] == 4
-        # 前 14 个 DIF 为 None
-        assert all(v is None for v in out["dif"][:14])
-        assert out["dif"][14] is not None
+        # 全数组有效（通达信 EMA 无前导 None）
+        assert len(out["dif"]) == 40
+        assert all(v is not None for v in out["dif"])
 
 
 # ════════════════════════════════════════════════════════════════
@@ -536,12 +537,11 @@ class TestCalculateAtr:
             assert out["tr"][i] == expected
 
     def test_atr_leading_none_count(self):
-        """前 period 个 ATR 应为 None（1 个 TR None + period-1 个 EMA warmup）。"""
+        """通达信口径：仅首根 ATR 为 None（无前收盘 TR），自第二根起有效。"""
         highs, lows, closes = _gen_hlc(20)
         out = _call(_TOOLS["calculate_atr"], highs, lows, closes, period=14)
-        # ATR 前 14 个为 None
-        assert all(v is None for v in out["atr"][:14])
-        assert out["atr"][14] is not None
+        assert out["atr"][0] is None
+        assert out["atr"][1] is not None
 
     def test_length_mismatch_returns_error(self):
         """长度不一致返回 error。"""
@@ -557,10 +557,10 @@ class TestCalculateAtr:
         assert "数据不足" in out.get("message", "")
 
     def test_valid_points_count(self):
-        """20 日数据，period=14，ATR 有效点 = 20-14 = 6。"""
+        """20 日数据：ATR 仅首根为 None，有效点 = 19。"""
         highs, lows, closes = _gen_hlc(20)
         out = _call(_TOOLS["calculate_atr"], highs, lows, closes, period=14)
-        assert out["valid_points"] == 6
+        assert out["valid_points"] == 19
 
 
 # ════════════════════════════════════════════════════════════════

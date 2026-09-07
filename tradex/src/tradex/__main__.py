@@ -92,8 +92,10 @@ def main():
         _start_ws_server(config)
 
     if args.http:
-        mcp._host = args.host
-        mcp._port = args.port
+        # 使用 FastMCP 公共 settings 字段（_host/_port 为私有且当前 SDK 不读取,
+        # 直写会导致 --port/--host 实际不生效）
+        mcp.settings.host = args.host
+        mcp.settings.port = args.port
         mcp.run(transport="sse")
     else:
         mcp.run(transport="stdio")

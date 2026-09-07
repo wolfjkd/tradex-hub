@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
 
+## [3.3.11] - 2026-09-07
+
+### Changed（P2 技术债全清）
+
+- **B20 指标算法单一实现收敛**：MACD/KDJ/RSI/BOLL/ATR/MA/EMA 计算收敛到 `technical_indicators.py` 模块级函数（`_macd_values/_kdj_values/_rsi_values/_boll_values/_atr_values/_sma/_ema`），`signal_generation.py` 删除 4 组重复实现改复用同一实现，消除双文件漂移。
+- **B17 EMA 种子对齐通达信**：EMA 递归首值改为 X[0]（原 SMA 种子早期值偏移），输出自首根起全有效；MACD DIF/DEA/MACD 柱、ATR 随之无前导空值（ATR 仅首根无前收为 null），数值与 pandas ewm 对照误差 0。
+- **B15 K 线缓冲真正保留**：`_load_ohlcv` 与 `get_technical_indicator` 不再截断预热缓冲（look_back_days+60），MA60/BOLL 长周期指标可正常计算；对外 data_points 口径仍只报回溯窗口。
+- **B16 eltdx period 归一化**：`_normalize_period`（daily/weekly/monthly → day/week/month），消除命名不符导致主源静默降级 akshare 的绕路；非法周期直接抛错可见。
+- **B5 eltdx_stream 代理清理改连接级**：代理环境变量仅连接窗口临时移除、`finally` 恢复，不再永久污染进程级代理（同进程 GitHub 调用不受影响）。
+- **B4 腾讯行情前缀防重**：`_tencent_quote_vals` 兼容已带前缀代码，杜绝 `szsh600000` 错误 URL。
+- **B22 版本比较语义化**：`_has_update` 改数字元组比较（`1.10 > 1.9` 不再词法误判）。
+- **B24 市场代码识别鲁棒**：`_market_cn/_pure_code` 按前缀+号段分类（含北交所 920），无法识别返回空串不静默 NaN。
+- **B18 财务模糊列落空明确报错**：`get_growth_rates/get_per_share_data` 过滤列落空时返回 error（原静默返全表语义不符）。
+- **B23 server 生命周期 + 公共配置**：FastMCP 加 lifespan 关闭钩子（退出清理 eltdx 常驻推送连接）；`__main__ --host/--port` 改公共 `settings.host/port`（原直写私有 `_host/_port`，当前 SDK 根本不读取导致 --port 不生效）。
+- **B21 删死代码**：`utils/fallback.py`（call_with_fallback 全库零调用者）删除，备份至 `Claw/_archive-2026-09-07/`。
+- **测试**：指标/信号测试断言同步至通达信口径；新增 `tests/test_p2_cleanup_regression.py`（B4/B5/B16/B17/B20/B22/B24 回归），全量 **390 passed / 0 failed**（+33）。
+
 ## [3.3.10] - 2026-09-07
 
 ### Changed（双源合一 + 深度体检修复）

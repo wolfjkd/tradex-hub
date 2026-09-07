@@ -28,10 +28,26 @@ from typing import Any, Optional
 logger = logging.getLogger("tradex.eltdx_stream")
 
 
-def _strip_proxy_env() -> None:
-    """国内通达信行情必须直连，清空代理环境变量。"""
-    for key in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
-        os.environ.pop(key, None)
+_PROXY_KEYS = ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")
+
+
+def _without_proxy_env() -> dict:
+    """临时移除代理环境变量，返回 {key: 原值或 None} 供 _restore_env 恢复。
+
+    仅用于连接建立窗口期（国内通达信行情必须直连）；连接完成后立即恢复，
+    避免永久污染进程级代理配置（同进程其他走代理的源不受影响）。
+    """
+    saved: dict = {}
+    for key in _PROXY_KEYS:
+        saved[key] = os.environ.pop(key, None)
+    return saved
+
+
+def _restore_env(saved: dict) -> None:
+    """恢复 _without_proxy_env 暂存的环境变量原值。"""
+    for key, value in saved.items():
+        if value is not None:
+            os.environ[key] = value
 
 
 class EltdxStreamManager:
@@ -57,11 +73,15 @@ class EltdxStreamManager:
     # 生命周期
     # ------------------------------------------------------------------
     def start(self) -> bool:
-        """创建并连接常驻 TdxClient。幂等：已启动则直接返回 True。"""
+        """创建并连接常驻 TdxClient。幂等：已启动则直接返回 True。
+
+        连接期间临时清空代理环境变量（行情必须直连），
+        连接完成后恢复原值——不永久污染进程级代理配置。
+        """
         with self._lock:
             if self._started and self._client is not None:
                 return True
-            _strip_proxy_env()
+            saved_proxy = _without_proxy_env()
             try:
                 from eltdx import TdxClient
                 self._client = TdxClient.from_hosts(
@@ -78,6 +98,8 @@ class EltdxStreamManager:
                 self._client = None
                 self._started = False
                 return False
+            finally:
+                _restore_env(saved_proxy)
 
     def stop(self) -> None:
         """关闭常驻连接并清空游标。"""

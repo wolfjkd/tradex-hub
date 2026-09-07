@@ -40,11 +40,27 @@ def _fetch_json(url: str) -> Any:
         return json.loads(resp.read().decode("utf-8"))
 
 
+def _version_key(version: str) -> tuple:
+    """把版本号转成可比较的数字元组，如 "1.10.2" → (1, 10, 2)。"""
+    parts = []
+    for seg in str(version).strip().lstrip("vV").replace("-", ".").split("."):
+        num = ""
+        for ch in seg:
+            if ch.isdigit():
+                num += ch
+            else:
+                break
+        parts.append(int(num) if num else 0)
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts[:3])
+
+
 def _has_update(current: str, latest: str) -> bool:
-    """简单比较版本号，unknown 不提醒。"""
+    """语义化比较版本号（tuple 数值比较，避免 "1.10" < "1.9" 词法误判）。unknown 不提醒。"""
     if not current or current == "unknown" or not latest or latest == "unknown":
         return False
-    return current != latest
+    return _version_key(latest) > _version_key(current)
 
 
 def check_eltdx_version() -> dict:

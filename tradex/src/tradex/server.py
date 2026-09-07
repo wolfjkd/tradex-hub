@@ -7,10 +7,32 @@ Supports stdio (dev) and HTTP/SSE (production) transport modes.
 
 import importlib
 import logging
+from contextlib import asynccontextmanager
 
 from mcp.server.fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def _server_lifespan(app):
+    """MCP server 生命周期钩子（v3.3.11 起）。
+
+    启动:无额外动作（数据源/工具在 import 时已注册）。
+    关闭:清理常驻资源（eltdx 常驻推送连接等），避免进程退出悬挂。
+    """
+    logger.info("tradex MCP server starting")
+    try:
+        yield {}
+    finally:
+        logger.info("tradex MCP server stopping: cleaning up resources")
+        try:
+            from .data_sources.eltdx_stream import _shutdown_stream
+
+            _shutdown_stream()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("cleanup eltdx stream failed: %s", exc)
+
 
 # Create the MCP server instance
 mcp = FastMCP(
@@ -22,6 +44,7 @@ mcp = FastMCP(
         "and macroeconomic indicators. All stock codes should be 6-digit A-share codes "
         "(e.g., '000001' for Ping An Bank, '600519' for Kweichow Moutai)."
     ),
+    lifespan=_server_lifespan,
 )
 
 # v3.3.9+：工具注册幂等守卫——importlib.reload(server) 或重复 import 时

@@ -266,9 +266,8 @@ def register(mcp: FastMCP):
                     df[col] = pd.to_numeric(df[col], errors="coerce")
             if "Date" in df.columns:
                 df = df.sort_values("Date").reset_index(drop=True)
-            if len(df) > look_back_days:
-                df = df.iloc[-look_back_days:]
-
+            # 保留缓冲数据:calculate_indicators 内部自带 tail(look_back_days),
+            # 若在此提前截断,MA60/BOLL 等长周期指标失去预热数据会全 NaN。
             result_df = calculate_indicators(df, indicator, look_back_days)
 
             if result_df.empty:

@@ -13,6 +13,11 @@ Category 10: Technical Indicators Calculation — 纯函数技术指标计算 (V
   4. 统一精度：保留4位小数
   5. 无外部依赖：纯 Python 实现，不依赖 TA-Lib / stockstats / pandas
 
+单一实现收敛（B20）：MACD/KDJ/RSI/BOLL/ATR/MA/EMA 计算逻辑只在本文件
+模块级函数中实现一份（_macd_values/_kdj_values/_rsi_values/_boll_values/
+_atr_values/_sma/_ema），MCP 工具与 signal_generation.py 全部调用同一实现，
+消除双文件漂移。
+
 Tools (共 6 个):
   62. calculate_ma_ema   - MA/EMA 均线计算
   63. calculate_macd      - MACD 指标计算
@@ -33,7 +38,7 @@ from ..utils.formatter import dict_to_json, error_response
 
 
 # ──────────────────────────────────────────────────────────────────
-# 纯函数算法实现（与 quantcore/indicators.py 保持一致）
+# 纯函数算法实现（单一实现源，signal_generation.py 复用同一套）
 # ──────────────────────────────────────────────────────────────────
 
 def _sma(closes: list[float], period: int) -> list[float | None]:
@@ -50,18 +55,25 @@ def _sma(closes: list[float], period: int) -> list[float | None]:
     return result
 
 
-def _ema(closes: list[float], period: int) -> list[float | None]:
-    """指数移动平均，首值用 SMA 初始化。"""
+def _ema(closes: list[float], period: int) -> list[float]:
+    """指数移动平均（通达信口径，B17 修复）。
+
+    通达信 EMA(X,N) 递归：EMA[i] = (2*X[i] + (N-1)*EMA[i-1]) / (N+1)，
+    首值取 X[0] 作种子（原实现用前 period 根 SMA 作种子，早期值与通达信有偏移）。
+    输出与输入等长、自首根起全部有效（无前导 None）。
+    """
     n = len(closes)
-    if n < period or period <= 0:
-        return [None] * n
-    result: list[float | None] = [None] * (period - 1)
+    if n == 0 or period <= 0:
+        return []
     multiplier = 2.0 / (period + 1)
-    prev_ema = sum(closes[:period]) / period
-    result.append(round(prev_ema, 4))
-    for i in range(period, n):
-        prev_ema = closes[i] * multiplier + prev_ema * (1 - multiplier)
-        result.append(round(prev_ema, 4))
+    result: list[float] = []
+    prev = 0.0
+    for i, x in enumerate(closes):
+        if i == 0:
+            prev = float(x)
+        else:
+            prev = x * multiplier + prev * (1 - multiplier)
+        result.append(round(prev, 4))
     return result
 
 
@@ -71,6 +83,154 @@ def _stddev(values: list[float], mean: float) -> float:
         return 0.0
     variance = sum((v - mean) ** 2 for v in values) / len(values)
     return math.sqrt(variance)
+
+
+def _macd_values(
+    closes: list[float],
+    fast_period: int = 12,
+    slow_period: int = 26,
+    signal_period: int = 9,
+) -> dict[str, list[float]]:
+    """MACD 计算（通达信口径）：DIF/DEA/MACD 柱自首根起算、三数组等长。
+
+    - DIF = EMA(close, fast) - EMA(close, slow)
+    - DEA = EMA(DIF, signal)
+    - MACD柱 = 2 * (DIF - DEA)
+
+    前提：len(closes) >= slow_period（调用方先校验，否则结果前段为预热值）。
+    """
+    fast_ema = _ema(closes, fast_period)
+    slow_ema = _ema(closes, slow_period)
+    dif = [round(f - s, 4) for f, s in zip(fast_ema, slow_ema)]
+    dea = _ema(dif, signal_period)
+    macd = [round(2.0 * (d - e), 4) for d, e in zip(dif, dea)]
+    return {"dif": dif, "dea": dea, "macd": macd}
+
+
+def _kdj_values(
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+    period: int = 9,
+    k_period: int = 3,
+    d_period: int = 3,
+) -> dict[str, list[float]]:
+    """KDJ 随机指标（K/D/J 三数组等长输出，全数据点有效）。
+
+    - RSV = (close - lowest_low) / (highest_high - lowest_low) * 100
+    - 初始 K = 50, 初始 D = 50
+    - K = (2/3) * 前K + (1/3) * RSV
+    - D = (2/3) * 前D + (1/3) * K
+    - J = 3 * K - 2 * D
+    """
+    k_arr: list[float] = []
+    d_arr: list[float] = []
+    j_arr: list[float] = []
+    prev_k = 50.0
+    prev_d = 50.0
+    for i in range(len(closes)):
+        start = max(0, i - period + 1)
+        ll = min(lows[start:i + 1])
+        hh = max(highs[start:i + 1])
+        den = hh - ll
+        rsv = 50.0 if den == 0.0 else ((closes[i] - ll) / den * 100.0)
+        prev_k = (2.0 / k_period) * prev_k + (1.0 / k_period) * rsv
+        prev_d = (2.0 / d_period) * prev_d + (1.0 / d_period) * prev_k
+        j_val = 3 * prev_k - 2 * prev_d
+        k_arr.append(round(prev_k, 4))
+        d_arr.append(round(prev_d, 4))
+        j_arr.append(round(j_val, 4))
+    return {"k": k_arr, "d": d_arr, "j": j_arr}
+
+
+def _rsi_values(closes: list[float], period: int = 14) -> list[float | None]:
+    """RSI 相对强弱指数（Wilder 平滑法），前 period 个为 None。
+
+    - 计算每日涨跌幅，分离上涨/下跌幅度
+    - Wilder 平滑平均：avg = (prev_avg * (period-1) + current) / period
+    - RSI = 100 - 100 / (1 + avg_gain / avg_loss)
+    """
+    n = len(closes)
+    if n < period + 1:
+        return [None] * n
+    deltas = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
+    gains = [max(d, 0) for d in deltas]
+    losses = [abs(min(d, 0)) for d in deltas]
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    rsi_arr: list[float | None] = [None] * period
+    if avg_loss == 0:
+        rsi_arr[period - 1] = 100.0
+    else:
+        rs = avg_gain / avg_loss
+        rsi_arr[period - 1] = round(100 - 100 / (1 + rs), 4)
+    for i in range(period, len(deltas)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+        if avg_loss == 0:
+            rsi_arr.append(100.0)
+        else:
+            rs = avg_gain / avg_loss
+            rsi_arr.append(round(100 - 100 / (1 + rs), 4))
+    return rsi_arr
+
+
+def _boll_values(
+    closes: list[float],
+    period: int = 20,
+    k: float = 2.0,
+) -> dict[str, list[float | None]]:
+    """布林带（BOLL）：中轨 SMA + k 倍总体标准差，前 period-1 个为 None。
+
+    另含 bandwidth = (上轨-下轨)/中轨 与 percent_b = (收盘-下轨)/(上轨-下轨)。
+    """
+    n = len(closes)
+    upper: list[float | None] = [None] * (period - 1)
+    middle: list[float | None] = [None] * (period - 1)
+    lower: list[float | None] = [None] * (period - 1)
+    bandwidth: list[float | None] = [None] * (period - 1)
+    percent_b: list[float | None] = [None] * (period - 1)
+    for i in range(period - 1, n):
+        window = closes[i - period + 1:i + 1]
+        mean = sum(window) / period
+        std = _stddev(window, mean)
+        mid = round(mean, 4)
+        up = round(mean + k * std, 4)
+        lo = round(mean - k * std, 4)
+        upper.append(up)
+        middle.append(mid)
+        lower.append(lo)
+        bandwidth.append(round((up - lo) / mid, 4) if mid != 0 else None)
+        percent_b.append(
+            round((closes[i] - lo) / (up - lo), 4) if (up - lo) != 0 else None
+        )
+    return {"upper": upper, "middle": middle, "lower": lower,
+            "bandwidth": bandwidth, "percent_b": percent_b}
+
+
+def _atr_values(
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+    period: int = 14,
+) -> dict[str, list[float | None]]:
+    """ATR 平均真实波幅（通达信口径）。
+
+    - TR = max(high-low, |high-pre_close|, |low-pre_close|)，首根为 None（无前收）
+    - ATR = EMA(TR, period)（首根 TR 作种子），自第二根起全有效
+    """
+    n = len(closes)
+    tr_arr: list[float | None] = [None]
+    for i in range(1, n):
+        tr1 = highs[i] - lows[i]
+        tr2 = abs(highs[i] - closes[i - 1])
+        tr3 = abs(lows[i] - closes[i - 1])
+        tr_arr.append(round(max(tr1, tr2, tr3), 4))
+    if n < 2:
+        return {"atr": [None] * n, "tr": tr_arr}
+    atr_valid = _ema([v for v in tr_arr[1:] if v is not None], period)  # type: ignore[arg-type]
+    atr_arr: list[float | None] = [None] + atr_valid
+    return {"atr": atr_arr, "tr": tr_arr}
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -89,7 +249,8 @@ def register(mcp: FastMCP):
         """
         计算 MA(简单移动平均) / EMA(指数移动平均) 均线。
 
-        与 Excel/通达信计算结果一致。前 period-1 个数据点返回 null。
+        与 Excel/通达信计算结果一致。MA 前 period-1 个数据点返回 null；
+        EMA 按通达信口径自首根（X[0] 种子）起算，全数组有效。
 
         Args:
             closes: 收盘价数组，如 [10.5, 10.8, 11.2, ...]
@@ -129,7 +290,7 @@ def register(mcp: FastMCP):
             if type in ("ema", "both"):
                 ema_arr = _ema(closes, period)
                 result["ema"] = ema_arr
-                result["ema_valid_points"] = sum(1 for x in ema_arr if x is not None)
+                result["ema_valid_points"] = len(ema_arr)
 
             return dict_to_json(result)
         except Exception as e:
@@ -145,12 +306,12 @@ def register(mcp: FastMCP):
         """
         计算 MACD 指标（DIF、DEA、MACD柱）。
 
-        算法：
+        算法（通达信口径，EMA 首值 X[0] 种子）：
         - DIF = EMA(close, fast) - EMA(close, slow)
         - DEA = EMA(DIF, signal)
         - MACD柱 = 2 * (DIF - DEA)
 
-        与通达信 MACD 计算结果一致。前 slow_period-1 个 DIF 为 null。
+        与通达信 MACD 计算结果一致，DIF/DEA/MACD 自首根起算、三数组等长。
 
         Args:
             closes: 收盘价数组
@@ -172,43 +333,12 @@ def register(mcp: FastMCP):
                     "calculate_macd",
                 )
 
-            fast_ema = _ema(closes, fast_period)
-            slow_ema = _ema(closes, slow_period)
-
-            # 对齐两个 EMA 数组（slow_ema 比 fast_ema 多 slow_period-fast_period 个前导 null）
-            offset = slow_period - fast_period
-            dif: list[float | None] = [None] * (slow_period - 1)
-            for i in range(slow_period - 1, len(closes)):
-                f = fast_ema[i]
-                s = slow_ema[i]
-                if f is None or s is None:
-                    dif.append(None)
-                else:
-                    dif.append(round(f - s, 4))
-
-            # DEA = EMA(DIF, signal_period)，跳过前导 None
-            dif_valid_start = slow_period - 1
-            dif_valid = [v for v in dif[dif_valid_start:] if v is not None]
-            dea_valid = _ema(dif_valid, signal_period)
-
-            dea: list[float | None] = [None] * (dif_valid_start + signal_period - 1)
-            dea.extend(dea_valid[signal_period - 1:] if len(dea_valid) >= signal_period else [])
-
-            # MACD 柱 = 2 * (DIF - DEA)
-            macd_bar: list[float | None] = []
-            for i in range(len(dif)):
-                d = dif[i]
-                e = dea[i] if i < len(dea) else None
-                if d is None or e is None:
-                    macd_bar.append(None)
-                else:
-                    macd_bar.append(round(2 * (d - e), 4))
-
+            vals = _macd_values(closes, fast_period, slow_period, signal_period)
             return dict_to_json({
                 "success": True,
-                "dif": dif,
-                "dea": dea,
-                "macd": macd_bar,
+                "dif": vals["dif"],
+                "dea": vals["dea"],
+                "macd": vals["macd"],
                 "fast_period": fast_period,
                 "slow_period": slow_period,
                 "signal_period": signal_period,
@@ -265,32 +395,12 @@ def register(mcp: FastMCP):
                     "calculate_kdj",
                 )
 
-            k_arr: list[float] = []
-            d_arr: list[float] = []
-            j_arr: list[float] = []
-            prev_k = 50.0
-            prev_d = 50.0
-
-            for i in range(len(closes)):
-                start = max(0, i - period + 1)
-                ll = min(lows[start:i + 1])
-                hh = max(highs[start:i + 1])
-                den = hh - ll
-                rsv = 50.0 if den == 0.0 else ((closes[i] - ll) / den * 100.0)
-
-                prev_k = (2.0 / k_period) * prev_k + (1.0 / k_period) * rsv
-                prev_d = (2.0 / d_period) * prev_d + (1.0 / d_period) * prev_k
-                j_val = 3 * prev_k - 2 * prev_d
-
-                k_arr.append(round(prev_k, 4))
-                d_arr.append(round(prev_d, 4))
-                j_arr.append(round(j_val, 4))
-
+            vals = _kdj_values(highs, lows, closes, period, k_period, d_period)
             return dict_to_json({
                 "success": True,
-                "k": k_arr,
-                "d": d_arr,
-                "j": j_arr,
+                "k": vals["k"],
+                "d": vals["d"],
+                "j": vals["j"],
                 "period": period,
                 "k_period": k_period,
                 "d_period": d_period,
@@ -332,32 +442,7 @@ def register(mcp: FastMCP):
                     "calculate_rsi",
                 )
 
-            deltas = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
-            gains = [max(d, 0) for d in deltas]
-            losses = [abs(min(d, 0)) for d in deltas]
-
-            # 初始平均（简单平均）
-            avg_gain = sum(gains[:period]) / period
-            avg_loss = sum(losses[:period]) / period
-
-            rsi_arr: list[float | None] = [None] * period
-            # 第一个 RSI 值
-            if avg_loss == 0:
-                rsi_arr[period - 1] = 100.0
-            else:
-                rs = avg_gain / avg_loss
-                rsi_arr[period - 1] = round(100 - 100 / (1 + rs), 4)
-
-            # Wilder 平滑
-            for i in range(period, len(deltas)):
-                avg_gain = (avg_gain * (period - 1) + gains[i]) / period
-                avg_loss = (avg_loss * (period - 1) + losses[i]) / period
-                if avg_loss == 0:
-                    rsi_arr.append(100.0)
-                else:
-                    rs = avg_gain / avg_loss
-                    rsi_arr.append(round(100 - 100 / (1 + rs), 4))
-
+            rsi_arr = _rsi_values(closes, period)
             return dict_to_json({
                 "success": True,
                 "rsi": rsi_arr,
@@ -407,38 +492,17 @@ def register(mcp: FastMCP):
                     "calculate_boll",
                 )
 
-            n = len(closes)
-            upper: list[float | None] = [None] * (period - 1)
-            middle: list[float | None] = [None] * (period - 1)
-            lower: list[float | None] = [None] * (period - 1)
-            bandwidth: list[float | None] = [None] * (period - 1)
-            percent_b: list[float | None] = [None] * (period - 1)
-
-            for i in range(period - 1, n):
-                window = closes[i - period + 1:i + 1]
-                mean = sum(window) / period
-                std = _stddev(window, mean)
-                mid = round(mean, 4)
-                up = round(mean + k * std, 4)
-                lo = round(mean - k * std, 4)
-                upper.append(up)
-                middle.append(mid)
-                lower.append(lo)
-                bandwidth.append(round((up - lo) / mid, 4) if mid != 0 else None)
-                percent_b.append(
-                    round((closes[i] - lo) / (up - lo), 4) if (up - lo) != 0 else None
-                )
-
+            vals = _boll_values(closes, period, k)
             return dict_to_json({
                 "success": True,
-                "upper": upper,
-                "middle": middle,
-                "lower": lower,
-                "bandwidth": bandwidth,
-                "percent_b": percent_b,
+                "upper": vals["upper"],
+                "middle": vals["middle"],
+                "lower": vals["lower"],
+                "bandwidth": vals["bandwidth"],
+                "percent_b": vals["percent_b"],
                 "period": period,
                 "k": k,
-                "data_points": n,
+                "data_points": len(closes),
             })
         except Exception as e:
             return error_response(f"BOLL 计算失败: {e}", "calculate_boll")
@@ -457,7 +521,8 @@ def register(mcp: FastMCP):
         - TR = max(high-low, |high-pre_close|, |low-pre_close|)
         - ATR = EMA(TR, period)
 
-        与通达信 ATR 计算结果一致。前 period 个为 null。
+        与通达信 ATR 计算结果一致。首根 TR 为 null（无前收盘），
+        ATR 自第二根起有效（EMA 首值 = 首根 TR，通达信口径）。
 
         Args:
             highs: 最高价数组
@@ -484,30 +549,14 @@ def register(mcp: FastMCP):
                     "calculate_atr",
                 )
 
-            n = len(closes)
-            # 第一个 TR 为 None（无前收盘）
-            tr_arr: list[float | None] = [None]
-            for i in range(1, n):
-                tr1 = highs[i] - lows[i]
-                tr2 = abs(highs[i] - closes[i - 1])
-                tr3 = abs(lows[i] - closes[i - 1])
-                tr_arr.append(round(max(tr1, tr2, tr3), 4))
-
-            # ATR = EMA(TR, period)，从第1个TR开始计算（跳过None）
-            tr_valid = [tr_arr[i] for i in range(1, n)]
-            atr_valid = _ema(tr_valid, period)
-
-            # ATR 前 period 个为 None（加上首个TR的None）
-            atr_arr: list[float | None] = [None] * (period)  # 1 (TR None) + (period-1) (EMA warmup)
-            atr_arr.extend(atr_valid[period - 1:] if len(atr_valid) >= period else [])
-
+            vals = _atr_values(highs, lows, closes, period)
             return dict_to_json({
                 "success": True,
-                "atr": atr_arr,
-                "tr": tr_arr,
+                "atr": vals["atr"],
+                "tr": vals["tr"],
                 "period": period,
-                "data_points": n,
-                "valid_points": sum(1 for x in atr_arr if x is not None),
+                "data_points": len(closes),
+                "valid_points": sum(1 for x in vals["atr"] if x is not None),
             })
         except Exception as e:
             return error_response(f"ATR 计算失败: {e}", "calculate_atr")

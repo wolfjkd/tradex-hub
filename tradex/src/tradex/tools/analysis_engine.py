@@ -727,10 +727,8 @@ def _load_ohlcv(code: str, look_back_days: int) -> pd.DataFrame:
     if "Date" in df.columns:
         df = df.sort_values("Date").reset_index(drop=True)
 
-    # 截取最近 look_back_days 个交易日（保留缓冲数据用于指标预热）
-    if len(df) > look_back_days:
-        df = df.iloc[-look_back_days:]
-
+    # 保留完整缓冲（look_back_days + 60 预热）返回:AnalysisEngine 各维度
+    # 依赖 MA60/筹码等长周期计算,提前截断会让长均线全 NaN。
     return df
 
 
@@ -787,6 +785,9 @@ def register(mcp: FastMCP) -> None:
 
             engine = AnalysisEngine(df, symbol=symbol)
             result = engine.analyze_all()
+            # df 含 +60 预热缓冲(供 MA60/筹码计算),对外 data_points 口径只报回溯窗口
+            if isinstance(result.get("data_points"), int):
+                result["data_points"] = min(result["data_points"], look_back_days)
             output = dict_to_json(result)
             cache.set(cache_key, output, TTL_DAILY)
             return output

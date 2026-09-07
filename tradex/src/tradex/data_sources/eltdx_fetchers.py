@@ -209,6 +209,29 @@ def fetch_realtime_quote(code: str = "", symbol: str = "", **kwargs):
     }])
 
 
+_PERIOD_ALIASES = {
+    "day": "day", "daily": "day", "d": "day", "1d": "day",
+    "week": "week", "weekly": "week", "w": "week", "1w": "week",
+    "month": "month", "monthly": "month", "m": "month", "1m": "month",
+}
+
+
+def _normalize_period(period: str) -> str:
+    """归一化 K 线周期命名（eltdx 只认 day/week/month）。
+
+    SmartRouter 上层调用方习惯传 akshare 风格命名（daily/weekly/monthly），
+    若不归一化会抛错→静默降级 akshare,绕过主源。非法周期直接抛错让上层可见。
+    """
+    key = str(period or "").strip().lower()
+    normalized = _PERIOD_ALIASES.get(key)
+    if normalized is None:
+        raise ValueError(
+            f"unsupported period: {period!r} "
+            "(supported: day/daily/d/1d, week/weekly/w/1w, month/monthly/m/1m)"
+        )
+    return normalized
+
+
 def fetch_historical_kline(code: str = "", symbol: str = "", period: str = "day", count: int = 100, **kwargs):
     """历史 K 线（eltdx 源）。返回中文列名 DataFrame（与 akshare 口径对齐）。
 
@@ -220,6 +243,7 @@ def fetch_historical_kline(code: str = "", symbol: str = "", period: str = "day"
     if client is None:
         raise RuntimeError("eltdx client not available")
     norm_code = _normalize_symbol_code(symbol, code)
+    period = _normalize_period(period)
     result = client.bars.get(norm_code, period=period, count=count)
     bars = getattr(result, "bars", None) or []
     if not bars:
@@ -297,6 +321,30 @@ def fetch_security_codes(market: str = "all", **kwargs):
     return pd.DataFrame(rows)
 
 
+def _market_cn(code) -> str:
+    """把证券代码（sh600000/sz000001/bj430001 或 6 位纯数字）映射为市场中文名。
+
+    返回 沪/深/京；无法识别时返回空串（而非静默 NaN），供调用方显式处理。
+    """
+    s = (str(code) if code is not None else "").strip().lower()
+    prefix = s[:2]
+    if prefix in ("sh", "sz", "bj"):
+        return {"sh": "沪", "sz": "深", "bj": "京"}[prefix]
+    if s.startswith(("600", "601", "603", "605", "688", "689", "900", "901")):
+        return "沪"
+    if s.startswith(("000", "001", "002", "003", "300", "301")):
+        return "深"
+    if s.startswith(("43", "83", "87", "88", "920")) or s.startswith("8"):
+        return "京"
+    return ""
+
+
+def _pure_code(code) -> str:
+    """剥离证券代码的交易所前缀（sh600000 → 600000）；纯数字原样返回。"""
+    s = (str(code) if code is not None else "").strip().lower()
+    return s[2:] if s[:2] in ("sh", "sz", "bj") else s
+
+
 def fetch_all_a_shares(**kwargs):
     """全市场 A 股代码列表（eltdx 源，v3.3.7 新增）。
 
@@ -310,8 +358,8 @@ def fetch_all_a_shares(**kwargs):
     if not codes:
         raise RuntimeError("no a-share codes")
     df = pd.DataFrame({"代码": codes})
-    df["市场"] = df["代码"].str[:2].map({"sh": "沪", "sz": "深", "bj": "京"})
-    df["纯代码"] = df["代码"].str[2:]
+    df["市场"] = df["代码"].map(_market_cn)
+    df["纯代码"] = df["代码"].map(_pure_code)
     return df
 
 
@@ -462,6 +510,7 @@ def fetch_adjusted_kline(code: str = "", symbol: str = "", period: str = "day", 
     if client is None:
         raise RuntimeError("eltdx client not available")
     norm_code = _normalize_symbol_code(symbol, code)
+    period = _normalize_period(period)
     result = client.helpers.adjusted_kline(norm_code, period=period, adjust=adjust, count=count)
     bars = getattr(result, "bars", None) or []
     if not bars:
