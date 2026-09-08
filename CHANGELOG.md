@@ -4,6 +4,32 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
 
+## [3.3.12] - 2026-09-08
+
+### Added（HTTP 网关原生支持，免 supergateway）
+
+- **`python -m tradex --http` 统一 HTTP 网关**：新增 `tradex/http_server.py`，单端口（默认 8000）同时提供三种端点：
+  - `POST /mcp` — **Streamable HTTP** 主端点（MCP 2025 新标准传输，新版 Dify / LangChain / Claude 远程客户端首选），基于 mcp SDK 原生 `streamable_http_app()`，无需 supergateway 等外部转发进程；
+  - `GET /sse` + `POST /messages/` — legacy SSE 兼容端点（`sse_app()`，旧客户端过渡）；
+  - `GET /health` — 轻量健康检查 `{"status":"ok","service":"tradex-mcp","version":...,"tools":129}`，不触发数据源网络探测（呼应 SmartRouter 健康检测 300s 缓存经验）。
+- 原 `--http`（仅 `transport="sse"`）升级为网关；stdio 默认不变（本地 connector 不受影响）。
+- **Host 校验可配（DNS rebinding 防护）**：新增 `http_server.apply_transport_security()` + CLI `--allowed-hosts` / env `MCP_ALLOWED_HOSTS`。默认沿用 SDK 仅 localhost 防护（伪造 Host 返回 421）；绑 `0.0.0.0` 对外部署传白名单（自动补 localhost 三件套 + `host:*` 端口通配 + http Origin）；`*` 关闭防护全放行（仅限可信内网，启动打 warning）。`--host/--port` 未显式给出时回退读 `MCP_HOST/MCP_PORT`，env 配置真正生效。
+- 双 transport 共用同一 FastMCP 实例无冲突：子 app 路由天然分离（/mcp vs /sse,/messages），父 app lifespan 嵌套执行各自 `session_manager.run()` 初始化 anyio task group。
+
+### Fixed
+
+- **docker-compose healthcheck 失效 bug**：原探测 `http://localhost:8000/mcp`，在 SSE transport 下 `/mcp` 必 404（urllib 对 404 抛 HTTPError）→ 容器恒 unhealthy；改为探测 `/health`。
+
+### Docs
+
+- README 新增「HTTP 远程模式」章节（端点表 + Dify/LangChain 配置 + `pip install "tradex[http]"`）；architecture.md 传输方式同步 stdio + HTTP 双模式。
+- 版本 3.3.11 → 3.3.12（VERSION / pyproject / README badge+版本历史 / CHANGELOG 六处同步）。
+
+### 验证
+
+- 手工 E2E：uvicorn 起服后官方 mcp Python client 完整会话（initialize → list_tools=129 → 真实调用 health_check 返回 90 数据源健康）+ curl 验证 /mcp、/sse、/health 三端点。
+- 新增 `tests/test_http_server.py`：网关路由注册（/health,/mcp,/sse,/messages 并存）+ /health 字段断言；全量 398 passed / 0 failed（root 365 + tradex/tests 33）。
+
 ## [3.3.11] - 2026-09-07
 
 ### Changed（P2 技术债全清）

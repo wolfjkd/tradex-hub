@@ -6,6 +6,12 @@
   2. 环境变量覆盖：通过 .env 文件或环境变量覆盖默认值
   3. 集中管理：所有配置项集中在此文件，便于维护和查找
 
+网络铁律（项目级，勿违反）：
+  - 数据源流量（AKShare/eltdx/腾讯/东财等 A 股数据接口）**永远直连**，import 时已清代理环境变量。
+  - 代理（本机 127.0.0.1 上的 Clash）只允许用于 GitHub push/clone 等操作。
+  - 本网关/服务的监听绑定与代理无关：MCP_HOST 默认 0.0.0.0（云/容器形态），
+    Host 校验白名单用 MCP_ALLOWED_HOSTS 控制，禁止把代理地址当作服务网关地址。
+
 Usage:
     from .config import config
 
@@ -84,13 +90,19 @@ class Config:
 
     # ── MCP 服务 ────────────────────────────────────────────
     MCP_TRANSPORT: str = _get_env("MCP_TRANSPORT", "stdio")
-    """MCP 传输模式：stdio | sse | http"""
+    """MCP 传输模式：stdio（本地管道）| sse（HTTP/SSE：GET /sse + POST /messages/）| http（Streamable HTTP：/mcp）。可被 CLI --http/--sse/--transport 覆盖"""
 
-    MCP_HOST: str = _get_env("MCP_HOST", "127.0.0.1")
-    """MCP HTTP/SSE 模式监听地址。默认 127.0.0.1 仅本地访问，外网部署需显式设置 MCP_HOST=0.0.0.0"""
+    MCP_HOST: str = _get_env("MCP_HOST", "0.0.0.0")
+    """MCP HTTP 网关监听地址。默认 0.0.0.0（云/容器/远程网关形态，监听全部网卡，与代理无关）；
+    仅本机调试可设 MCP_HOST=localhost。配合 MCP_ALLOWED_HOSTS 白名单使用，勿裸奔公网"""
 
     MCP_PORT: int = _get_env("MCP_PORT", 8000, int)
     """MCP HTTP/SSE 模式监听端口"""
+
+    MCP_ALLOWED_HOSTS: str = _get_env("MCP_ALLOWED_HOSTS", "")
+    """HTTP Host 校验白名单（逗号分隔）。默认空=仅允许本机回环访问（SDK DNS rebinding 防护开启）。
+    绑 0.0.0.0 对外/跨机部署需显式设置，如 MCP_ALLOWED_HOSTS=47.102.212.49,example.com；
+    * 表示关闭 DNS rebinding 防护、允许任意 Host（仅限可信内网）。可被 CLI --allowed-hosts 覆盖"""
 
     # ── WebSocket 推送服务 ──────────────────────────────────
     WS_SERVER_ENABLED: bool = _get_env("WS_SERVER_ENABLED", "false").lower() == "true"

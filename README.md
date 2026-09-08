@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/License-Apache--2.0-yellow.svg" alt="License"/>
   <img src="https://img.shields.io/badge/Data-A股-red.svg" alt="Data Scope"/>
   <img src="https://img.shields.io/badge/Tools-129-orange.svg" alt="MCP Tools"/>
-  <img src="https://img.shields.io/badge/Version-3.3.11-blue.svg" alt="Version"/>
+  <img src="https://img.shields.io/badge/Version-3.3.12-blue.svg" alt="Version"/>
 </p>
 
 ---
@@ -332,6 +332,42 @@ pip install "akshare>=1.18.91" mcp pandas pydantic "eltdx>=2.0.2"
 
 ---
 
+## HTTP 远程模式（v3.3.12+）
+
+tradex **原生支持 HTTP 传输**（基于 mcp SDK `FastMCP`，无需 supergateway 等外部转发进程），
+单端口同时提供三种端点：
+
+```bash
+python -m tradex --http                 # HTTP gateway（默认监听 0.0.0.0:8000）
+python -m tradex --http --allowed-hosts 47.102.x.x,example.com   # 对外部署：Host 白名单
+python -m tradex --http --allowed-hosts '*'    # 仅可信内网：关闭 Host 校验（不推荐公网）
+```
+
+> [!important] 网络边界（铁律）
+> 本网关监听与代理**无关**：数据源流量（AKShare/eltdx/东财等）**永远直连**，import 时已清代理环境变量；
+> 本机 Clash 代理（127.0.0.1:7897）**只用于 GitHub push/clone**，禁止用作服务/网关地址。
+> 网关默认监听 `0.0.0.0`（云/容器形态），远程可访问性由 `--allowed-hosts` 白名单控制。
+
+| 端点 | 传输 | 说明 |
+|------|------|------|
+| `POST /mcp` | **Streamable HTTP** | MCP 2025 新标准传输，Dify / LangChain / Claude 远程客户端首选 |
+| `GET /sse` + `POST /messages/` | legacy SSE | 旧客户端兼容（MCP 官方已标 deprecated，保留过渡） |
+| `GET /health` | HTTP | 健康检查：`{"status":"ok","service":"tradex-mcp","version":"3.3.12","tools":129}`，轻量探活不触发数据源网络 |
+
+**Dify / LangChain 配置示例**（Streamable HTTP）：
+
+```
+URL: http://<服务器IP或域名>:8000/mcp
+类型: streamable-http（或 SSE 旧端点用 http://<服务器IP或域名>:8000/sse）
+```
+
+> 运行 HTTP 模式需安装 Web 依赖：`pip install "tradex[http]"`（uvicorn/starlette/sse-starlette，均已在 requirements 声明）。
+
+> [!注意] Host 校验（DNS rebinding 防护）
+> 默认**仅允许本机回环**访问（伪造 Host 返回 421）。监听默认 `0.0.0.0`，对外/跨机访问时用 `--allowed-hosts` 或环境变量 `MCP_ALLOWED_HOSTS` 放行目标 Host/IP（逗号分隔）；`*` 表示关闭校验全放行——**仅限可信内网**。`MCP_HOST`/`MCP_PORT` 可作为 `--host`/`--port` 的默认值。
+
+---
+
 ## 配置到 AI Agent
 
 编辑 MCP 配置文件（如 `~/.trae-cn/mcp.json` 或对应 AI Agent 的配置文件）：
@@ -347,6 +383,9 @@ pip install "akshare>=1.18.91" mcp pandas pydantic "eltdx>=2.0.2"
   }
 }
 ```
+
+本地开发用 **stdio**（如上，`python -m tradex` 默认）；远程/容器/多客户端场景用
+**HTTP 模式**（`python -m tradex --http`，见上节）。
 
 保存后重启 AI Agent，连接器页面 `tradex` 应显示绿色。
 
@@ -378,6 +417,8 @@ AI 会调用 `mcp__tradex__eltdx_get_kline`，返回 100 根日 K 线。
 
 | 版本 | 日期 | 内容 |
 |------|------|------|
+| v3.3.12 | 2026-09-08 | HTTP 网关原生支持（无需 supergateway）：`python -m tradex --http` 单端口提供 Streamable HTTP(/mcp 新标准, Dify/LangChain 新版) + legacy SSE(/sse 兼容) + /health 健康检查；修正 docker-compose healthcheck(原探测 /mcp 在 SSE 下必 404)；README 文档化 HTTP 模式 |
+| v3.3.11 | 2026-09-07 | P2 技术债全清：指标算法单一实现收敛、EMA 种子对齐通达信、K线缓冲保留、eltdx period 归一化、代理清理改连接级、腾讯前缀防重、版本比较语义化、市场代码识别鲁棒、server lifespan 公共配置、删死代码；测试 390 passed |
 | v3.3.10 | 2026-09-07 | 双源合一(astock_signals 并入本仓 src/ 为主源,独立仓退役) + P0/P1 修复：Sortino 下行波动率算法修正、可转债/沪市债券交易所判定修正、金融主营构成 symbol 前缀修正、逐笔方向字段修正(eltdx side, 原误读 buy_or_sell 全标 sell)、SmartRouter 故障源半开探测自愈、东财限流加锁、SSL 替换加锁、注册幂等加固 + 仓库卫生(删根 src 空壳/cn-financial-mcp 僵尸/串仓测试, pytest 合跑修复) |
 | v3.3.9 | 2026-08-18 | 全局直连(import去代理) + 同花顺4接口/东财slist板块归属/东财限流防封/实时涨跌家数/行业涨幅/通达信本地数据 + 本地数据MCP工具2个(get_local_kline/get_local_minute)，工具数 127→129 |
 | v3.3.8 | 2026-08-14 | eltdx 2.0 第二梯队 B 级接入：分类行情(涨幅榜/成交额榜)、交易日判定、历史开盘撮合、股本变动、特殊涨跌停扫描、F10通用入口(估值/题材/总评/盈利预测/排名/治理/增减持/主营/公告/新闻)，工具数 121→127 |

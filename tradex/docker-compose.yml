@@ -9,7 +9,9 @@ services:
       - PYTHONPATH=/app/src
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/mcp')"]
+      # v3.3.12: 探测 /health（原探测 /mcp 仅 Streamable HTTP 存在，SSE transport 下必 404
+      # → urllib 抛 HTTPError → 容器恒 unhealthy）
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
