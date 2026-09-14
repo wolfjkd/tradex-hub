@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/License-Apache--2.0-yellow.svg" alt="License"/>
   <img src="https://img.shields.io/badge/Data-A股-red.svg" alt="Data Scope"/>
   <img src="https://img.shields.io/badge/Tools-129-orange.svg" alt="MCP Tools"/>
-  <img src="https://img.shields.io/badge/Version-3.3.12-blue.svg" alt="Version"/>
+  <img src="https://img.shields.io/badge/Version-3.3.13-blue.svg" alt="Version"/>
 </p>
 
 ---
@@ -28,7 +28,7 @@
 **数据源架构（v3.3.9）**：
 - **data_sources 数据源层**：74 个数据类型，85 个数据源注册（28 种源），按封禁风险分三梯队
 - **SmartRouter 全量覆盖**：L1 工具通过 `SmartRouter.route()` 统一获取数据，自动健康评分/降级/故障隔离
-- **eltdx 2.0.2**：行情类第一主源，31 个工具覆盖五档盘口/集合竞价/逐笔/F10/分时/K线/全景档案/短线指标/题材/分类行情等；新增常驻连接管理器 `eltdx_stream.py`（游标增量轮询实现准实时五档盘口）
+- **eltdx 3.2.2**：行情类第一主源，31 个工具覆盖五档盘口/集合竞价/逐笔/F10/分时/K线/全景档案/短线指标/题材/分类行情等；新增常驻连接管理器 `eltdx_stream.py`（游标增量轮询实现准实时五档盘口）。3.x 为 Rust 重写内核（native wheel，cp310-abi3）
 - **数据源梯队**：第一梯队（eltdx/腾讯/本地 vipdoc，不封 IP）+ 第二梯队（同花顺/新浪/巨潮/财联社，低风险）+ 第三梯队（东财 push2/push2ex/slist，仅独有数据 + 限流防封）
 - **数据源看板**：`python -m tradex.dashboard`（端口 8765），可视化查看数据源健康/路由/工具分布；MCP 工具 `get_data_source_dashboard` 可在 Agent 对话中查询
 
@@ -327,7 +327,7 @@ pip install --no-build-isolation -e .
 ### 5. 安装运行时依赖
 
 ```bash
-pip install "akshare>=1.18.91" mcp pandas pydantic "eltdx>=2.0.2"
+pip install "akshare>=1.18.94" mcp pandas pydantic "eltdx>=3.2.2"
 ```
 
 ---
@@ -352,7 +352,7 @@ python -m tradex --http --allowed-hosts '*'    # 仅可信内网：关闭 Host �
 |------|------|------|
 | `POST /mcp` | **Streamable HTTP** | MCP 2025 新标准传输，Dify / LangChain / Claude 远程客户端首选 |
 | `GET /sse` + `POST /messages/` | legacy SSE | 旧客户端兼容（MCP 官方已标 deprecated，保留过渡） |
-| `GET /health` | HTTP | 健康检查：`{"status":"ok","service":"tradex-mcp","version":"3.3.12","tools":129}`，轻量探活不触发数据源网络 |
+| `GET /health` | HTTP | 健康检查：`{"status":"ok","service":"tradex-mcp","version":"3.3.13","tools":129}`，轻量探活不触发数据源网络 |
 
 **Dify / LangChain 配置示例**（Streamable HTTP）：
 
@@ -417,6 +417,7 @@ AI 会调用 `mcp__tradex__eltdx_get_kline`，返回 100 根日 K 线。
 
 | 版本 | 日期 | 内容 |
 |------|------|------|
+| v3.3.13 | 2026-09-14 | 上游依赖升级：eltdx 2.0.2→3.2.2（major，Rust 重写内核 native wheel；`bars.all`→`bars.get(all_pages=True)`、`helpers.adjusted_kline`→`bars.get(adjust=)` 两处迁移）+ akshare 1.18.91→1.18.94；修复 `fetch_full_kline` 跨页乱序（回测数据 bug，6389 根 K 线重排为严格升序）；修复 `start_dashboard.bat` 解释器探测错误与端口未传递，新增 `--check` 依赖检查模式；测试 398 passed |
 | v3.3.12 | 2026-09-08 | HTTP 网关原生支持（无需 supergateway）：`python -m tradex --http` 单端口提供 Streamable HTTP(/mcp 新标准, Dify/LangChain 新版) + legacy SSE(/sse 兼容) + /health 健康检查；修正 docker-compose healthcheck(原探测 /mcp 在 SSE 下必 404)；README 文档化 HTTP 模式 |
 | v3.3.11 | 2026-09-07 | P2 技术债全清：指标算法单一实现收敛、EMA 种子对齐通达信、K线缓冲保留、eltdx period 归一化、代理清理改连接级、腾讯前缀防重、版本比较语义化、市场代码识别鲁棒、server lifespan 公共配置、删死代码；测试 390 passed |
 | v3.3.10 | 2026-09-07 | 双源合一(astock_signals 并入本仓 src/ 为主源,独立仓退役) + P0/P1 修复：Sortino 下行波动率算法修正、可转债/沪市债券交易所判定修正、金融主营构成 symbol 前缀修正、逐笔方向字段修正(eltdx side, 原误读 buy_or_sell 全标 sell)、SmartRouter 故障源半开探测自愈、东财限流加锁、SSL 替换加锁、注册幂等加固 + 仓库卫生(删根 src 空壳/cn-financial-mcp 僵尸/串仓测试, pytest 合跑修复) |

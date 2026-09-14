@@ -4,6 +4,32 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
 
+## [3.3.13] - 2026-09-14
+
+### Changed（上游依赖升级 —— eltdx 跨大版本）
+
+- **eltdx 2.0.2 → 3.2.2（major，Rust 重写内核）**：3.x 将 7709 协议与传输运行核心改为 Rust 强类型实现，发布物从纯 Python 包变为 `cp310-abi3` native wheel（覆盖 CPython 3.10–3.14）。上游承诺 `TdxClient`/`Client`、全部模块化业务 API、公开 dataclass、异常继承、分页、序列化与 `include_raw`、自定义 Transport 注入、Helpers/F10/MCP/CLI 均保留；tradex 实际用到的接口面（`client` 的 `bars`/`minutes`/`quotes`/`trades`/`limits`/`corporate`/`auctions`/`codes`/`session`/`f10`/`helpers`）实测无差异。
+- **akshare 1.18.91 → 1.18.94（patch）**。
+- `tradex/pyproject.toml` / `tradex/requirements.txt` 依赖下界同步为 `eltdx>=3.2.2`、`akshare>=1.18.94`。
+- 依赖检查看板（`start_dashboard.bat` → `GET /api/dashboard`）确认 90 个数据源全部健康，两依赖均 `has_update=false`。
+
+### Fixed
+
+- **eltdx 3.x 移除 `client.bars.all()`**：`fetch_full_kline` 迁移至 `client.bars.get(..., all_pages=True, max_pages=...)`（上游迁移文档指定路径，签名 `get(code, period, start, count, adjust, anchor_date, kind, include_raw, all_pages, page_size, max_pages, batch_size)`）。
+- **eltdx 3.x 移除 `client.helpers.adjusted_kline()`**：`fetch_adjusted_kline` 迁移至 `client.bars.get(..., adjust="qfq"/"hfq")`，复权由主站计算（2.x 时代为本地计算复权因子）。
+- **`fetch_full_kline` 跨页乱序（数据 bug，直接影响回测）**：eltdx 分页顺序为「最近页 → 更早页」、各页内部升序，直接拼接使 6389 根 K 线全局乱序（首行 2023-05-31、末行 2003-03-19）。现按 `time.timestamp()` 重排为严格升序；修复后区间为 1999-11-10（浦发银行上市首日）→ 2026-09-14。
+- **`start_dashboard.bat` 完全不可用（两处缺陷）**：
+  1. **解释器探测错误** —— 原脚本用 `where python` 取首个命中，本机命中的是**裸解释器**（`binaries/python/versions/3.13.12`，未安装 tradex），必然报 `No module named 'tradex'`。现按「项目 `.venv` → WorkBuddy 托管 `envs/default` → PATH」顺序探测，且要求 `import tradex.dashboard,eltdx,akshare` 全部成功。
+     （说明：仅探测 `import tradex` 不足 —— cwd 为项目根时本地 `tradex/` 目录会被当作 namespace package，在空环境里也能假通过。）
+  2. **端口未传递** —— 原脚本只把端口用于打印 URL，而 dashboard 实际读取 `TRADEX_DASHBOARD_PORT`，自定义端口必然打开错误地址。现导出该环境变量；另新增 `--check` 模式（仅探测解释器并打印依赖版本，不启动服务）。
+
+### 验证
+
+- `pytest -m "not network"`：**398 passed / 7 deselected / 1 warning（8.32s）**，与升级前完全一致（零回归）。
+- 真实行情 E2E：`fetch_adjusted_kline` 返回 5×7 正确 DataFrame；`fetch_full_kline` 返回 6389 行且严格升序。
+- MCP 协议级探针：冷启动 0.77s，`tools/list` 仍为 **129 个工具**（升级前后一致）。
+- `start_dashboard.bat --check`：正确选中 `envs/default`，输出 tradex 3.3.13 / eltdx 3.2.2 / akshare 1.18.94。
+
 ## [3.3.12] - 2026-09-08
 
 ### Added（HTTP 网关原生支持，免 supergateway）

@@ -481,29 +481,46 @@ def _bar_to_row(b) -> dict:
     }
 
 
+def _bar_sort_key(bar):
+    """K 线时间排序键（跨页合并后重排用）。
+
+    eltdx 分页按「最近页 → 更早页」返回，页内升序；跨页合并后必须重排。
+    用 timestamp() 比较，规避 tz-aware 与 None 混排的 TypeError。
+    """
+    t = getattr(bar, "time", None)
+    try:
+        return t.timestamp()
+    except Exception:
+        return 0.0
+
+
 def fetch_full_kline(code: str = "", symbol: str = "", period: str = "day", max_pages: int = 30, **kwargs):
     """全量 K 线（eltdx 源，v3.3.7 新增）。
 
-    自动分页拉取全量历史 K 线（bars.all），适合回测。
+    自动分页拉取全量历史 K 线（bars.get(all_pages=True)），适合回测。
     与 fetch_historical_kline（单页 bars.get）互补。
+
+    v3.3.13: eltdx 3.x 移除 client.bars.all()，改用 bars.get(all_pages=True, max_pages=...)。
     """
     import pandas as pd
     client = _get_client()
     if client is None:
         raise RuntimeError("eltdx client not available")
     norm_code = _normalize_symbol_code(symbol, code)
-    result = client.bars.all(norm_code, period=period, max_pages=max_pages)
+    result = client.bars.get(norm_code, period=period, all_pages=True, max_pages=max_pages)
     bars = getattr(result, "bars", None) or []
     if not bars:
         raise RuntimeError(f"no kline bars for {norm_code}")
+    # v3.3.13: 跨页合并后按时间升序重排（分页序为「最近页→更早页」，直接拼接会乱序）
+    bars = sorted(bars, key=_bar_sort_key)
     return pd.DataFrame([_bar_to_row(b) for b in bars])
 
 
 def fetch_adjusted_kline(code: str = "", symbol: str = "", period: str = "day", adjust: str = "qfq", count: int = 800, **kwargs):
     """复权 K 线（eltdx 源，v3.3.7 新增）。
 
-    通过 helpers.adjusted_kline 返回前复权(qfq)/后复权(hfq) K 线，
-    复权因子由 eltdx 本地计算。
+    通过 bars.get(adjust=...) 返回前复权(qfq)/后复权(hfq) K 线，
+    复权由主站计算（eltdx 3.x 起；2.x 时代为 helpers.adjusted_kline 本地计算）。
     """
     import pandas as pd
     client = _get_client()
@@ -511,7 +528,7 @@ def fetch_adjusted_kline(code: str = "", symbol: str = "", period: str = "day", 
         raise RuntimeError("eltdx client not available")
     norm_code = _normalize_symbol_code(symbol, code)
     period = _normalize_period(period)
-    result = client.helpers.adjusted_kline(norm_code, period=period, adjust=adjust, count=count)
+    result = client.bars.get(norm_code, period=period, adjust=adjust, count=count)
     bars = getattr(result, "bars", None) or []
     if not bars:
         raise RuntimeError(f"no adjusted kline bars for {norm_code}")
