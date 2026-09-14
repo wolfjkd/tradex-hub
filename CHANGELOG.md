@@ -4,6 +4,49 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
 
+## [3.3.15] - 2026-09-14
+
+### Fixed
+
+- **`fetch_fund_hold_data` 默认日期恒为空表（P1-1，静默数据丢失）**：原实现用 `f"{year}{q*3:02d}31"` 拼上一季度末，Q2/Q3 会算出 `20260631` / `20260931` 这类**不存在的日期**，上游直接报错、又被 `except` 静默吞成空表 —— 结果是每年 4–9 月「机构持仓」不传 `date` 的默认调用恒返回空。现新增 `_prev_quarter_end()`，用 `calendar.monthrange()` 取真实月末（3月→31 / 6月→30 / 9月→30 / 12月→31）。实测修复后默认调用返回 **5311 行**。
+- **8 个 fetch_fn 静默吞异常（P1-2，失败不可见、破坏降级链）**：`except Exception: return pd.DataFrame()` 会让 SmartRouter 把「上游挂了」判定为「成功返回空表」—— 既不降级到备源、又给主源计满健康度，故障被伪装成正常。下列 8 个函数改为 `raise`（上抛给 SmartRouter 降级并计健康度）：`fetch_baidu_economic_calendar`、`fetch_baidu_trade_notify`、`fetch_index_news_sentiment`、`fetch_futures_news`、`fetch_hot_search_baidu`、`fetch_hot_rank_data`、`fetch_xueqiu_hot`、`fetch_fund_hold_data`。
+- **`fetch_index_news_sentiment` 的 SSL 兜底从未生效**：原实现 patch `ssl._create_default_https_context`（urllib 层），但 akshare 该接口内部走 **requests**，注入点根本不对，那段「兜底」从未起作用。现改为在 `requests.sessions.Session.request` 层注入 `verify=False`，并用锁串行化该窗口。修正后实测：SSL 已绕过（HTTP 200），但上游 `chinascope` 返回 HTML 而非 JSON —— 该上游**已永久失效**，故改用乐咕乐股作为跨上游情绪备源（见 Added）。
+- **`industry_comparison` 名义双源、实际同生共死（P2-2）**：主源 `em_push2` 与备源 akshare `stock_sector_fund_flow_rank` **同属东财 push2 族**，本机实测两会同时 `RemoteDisconnected`，即主源失效时备源一起死、整类型无兜底。现补同花顺行业资金流 `ths_flow`（priority=200，跨上游）作为实际可用的一环。
+
+### Added
+
+- **补 7 个类型的独立备源**（一律选**非主源上游**，避免同生共死）。其中 6 类原为**单源**注册、源失效即整类型失效；另 1 类 `industry_comparison` 虽名义双源，但两源同属东财 push2 族、实际同生共死：
+  - `baidu_economic_calendar` ← 百度财报披露时间表 `news_report_time_baidu`（该接口默认日期被上游硬编码为 `20251126`，故显式传当日日期）
+  - `baidu_trade_notify` ← 全市场停复牌表 `stock_tfp_em`（语义精确对应，实测 911 行）
+  - `hot_rank` / `hot_search` / `xueqiu_hot` ← 同花顺人气榜 `ths_fetchers.fetch_ths_hot_list`（三类型共用同一兜底源，实测 100 行）
+  - `index_news_sentiment` ← 乐咕乐股「赚钱效应」`stock_market_activity_legu`（跨上游情绪源，替代已永久失效的 chinascope）
+  - `industry_comparison` ← 同花顺行业资金流 `stock_fund_flow_industry`（对应上方 Fixed 第 4 条）
+- 新增回归测试 `tests/test_v3315_fixes.py`（32 项），覆盖季度末边界、异常上抛、备源注册与优先级、备源适配器契约。全量离线套件：**450 passed / 7 deselected / 0 failed**（基线 418 + 本次新增 32）。
+
+### Changed
+
+- 数据源矩阵规模：**94 → 101**（新增 7 个注册）；数据类型 **78** 不变；去重源 31→36；MCP 工具数 **129** 不变。
+- `fund_hold` / `futures_news` **刻意保持单源**（上游分别为东财 datacenter 与上海有色网 `futures_news_shmet`，akshare 无等价第二源），但其静默吞异常问题已一并修复。
+
+### 验证
+
+- `pytest -m "not network"`：**450 passed / 7 deselected / 0 failed**（8.3s，零回归）。
+- 真实联网冒烟（`route()` 逐路口实调，打印**实际命中源**与数据规模，非只判真假）：
+
+  | 数据类型 | 实际命中源 | 结果 | 说明 |
+  |---|---|---|---|
+  | `fund_hold` | `akshare_fund_hold` | 5311 行 × 9 列 | P1-1：修复前默认调用因非法日期恒返回空 |
+  | `index_news_sentiment` | **`legu_activity`** | 12 行 × 2 列 | 主源 chinascope 已永久失效，实测**降级到新备源**成功 |
+  | `industry_comparison` | **`ths_flow`** | 20 个行业 | 主源 + 备源本轮**同时失败**，降级链救回（P2-2 实证） |
+  | `hot_rank` | **`ths_hot`** | 100 行 × 8 列 | 主源东财人气榜失败，降级成功 |
+  | `hot_search` | **`ths_hot`** | 100 行 × 8 列 | 主源百度热搜失败，降级成功 |
+  | `xueqiu_hot` | `akshare_xueqiu_hot` | 5642 行 | 主源本轮可用（约 8s，偏慢），备源待命 |
+  | `baidu_economic_calendar` | `akshare_baidu_economic` | 71 行 × 8 列 | 主源可用，备源待命 |
+  | `baidu_trade_notify` | `akshare_baidu_notify` | 6 行 × 12 列 | 主源可用，备源待命 |
+
+- **健康度可见性已验证**（P1-2 的核心目的）：本轮 `industry_comparison:em_push2`、`industry_comparison:akshare`、`index_news_sentiment:akshare_index_sentiment`、`hot_rank:akshare_hot_rank`、`hot_search:akshare_hot_search` 均被如实记为 `fail_count=1`；修复前这些失败会被静默吞成「空表成功」，既不降级也不计健康度。
+- 代理铁律复核：socket 层审计本地代理端口（7897/10808/9）**0 命中**，全部国内直连。
+
 ## [3.3.14] - 2026-09-14
 
 ### Fixed

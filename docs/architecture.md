@@ -1,6 +1,6 @@
 # 金融数据中枢 - 架构设计文档
 
-> 最后更新：2026-09-14 | v3.3.14（⚠️ 架构正文基于 v3.1.4，最新工具清单/数据源数以仓库根 README.md v3.3.14 为准）
+> 最后更新：2026-09-14 | v3.3.15（⚠️ 架构正文基于 v3.1.4，最新工具清单/数据源数以仓库根 README.md v3.3.15 为准）
 
 ## 1. 系统概览
 
@@ -9,7 +9,7 @@ tradex-hub 是为 AI Agent（Trae / Claude Code / Cursor / Dify / LangChain）�
 - **MCP 工具总数**：89 个（v3.1.4 口径；v3.3.9 已扩至 129 个，见 README）
 - **数据源**：data_sources 数据源层（25 类型 34 源）→ SmartRouter 全量路由（eltdx 主 + AKShare/东财/同花顺备）
 - **传输方式**：stdio（本地 MCP Server，默认）+ HTTP 网关（v3.3.12+，`python -m tradex --http`，单端口提供 Streamable HTTP `/mcp` + legacy SSE `/sse` + `/health`，见 `tradex/http_server.py`）
-- **包名**：tradex（v3.3.14），astock_signals 已并入本仓 tradex/src/astock_signals 作为唯一主源（v3.3.11，独立仓已退役）
+- **包名**：tradex（v3.3.15），astock_signals 已并入本仓 tradex/src/astock_signals 作为唯一主源（v3.3.11，独立仓已退役）
 
 ## 2. 核心组件
 

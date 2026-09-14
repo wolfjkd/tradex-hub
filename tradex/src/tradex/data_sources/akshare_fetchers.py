@@ -13,6 +13,7 @@ AKShare 数据源 fetch_fn 包装器。
 
 from __future__ import annotations
 
+import calendar
 import logging
 import threading
 from datetime import datetime, timedelta
@@ -22,9 +23,32 @@ import pandas as pd
 
 logger = logging.getLogger("tradex.akshare")
 
-# v3.3.9+：SSL 全局替换的互斥锁。fetch_index_news_sentiment 因 akshare 接口
-# 不暴露 verify/session 参数，被迫临时替换进程级 ssl 默认上下文；加锁串行化
-# 该窗口，避免并发线程在窗口期发起 HTTPS 请求时被静默跳过证书校验。
+# v3.3.15 新增：季度末日期计算。
+# 旧实现用 f"{year}{q*3:02d}31" 硬编码 31 日，Q2(6月)/Q3(9月) 会算出
+# 20260631 / 20260931 这类**不存在的日期**，上游直接报错，而错误又被
+# except 静默吞成空表 —— 结果是每年 4–9 月「机构持仓」默认调用恒返回空。
+_QUARTER_END_MONTH = {1: 3, 2: 6, 3: 9, 4: 12}
+
+
+def _prev_quarter_end(today: "datetime | None" = None) -> str:
+    """返回「上一季度末」的真实日期，格式 YYYYMMDD。
+
+    以真实月末为准（6→30、9→30、12→31），不再硬编码 31 日。
+    今天 2026-09-14 → 所属 Q3 → 上一季度末 = 20260630。
+    """
+    d = (today or datetime.now()).date()
+    q = (d.month - 1) // 3 + 1          # 当前季度 1-4
+    py, pq = (d.year, q - 1) if q > 1 else (d.year - 1, 4)   # 上一季度
+    m = _QUARTER_END_MONTH[pq]
+    last_day = calendar.monthrange(py, m)[1]                  # 真实月末，不假设 31
+    return f"{py}{m:02d}{last_day:02d}"
+
+# v3.3.9+：SSL 兜底的互斥锁。fetch_index_news_sentiment 的目标站点
+# (chinascope) 证书链不受信任，而 akshare 接口不暴露 verify/session 参数，
+# 只能在 requests 会话层临时注入 verify=False；加锁串行化该窗口，
+# 避免并发线程在窗口期发起 HTTPS 请求时被静默跳过证书校验。
+# v3.3.15：注入点由 urllib 的 ssl 默认上下文改为 requests.Session.request
+# （akshare 走 requests，旧注入点无效）。
 _ssl_patch_lock = threading.Lock()
 
 
@@ -922,7 +946,9 @@ def fetch_baidu_economic_calendar(date: str = "", **kwargs) -> pd.DataFrame:
         return df
     except Exception as e:
         logger.warning("fetch_baidu_economic_calendar(%s) failed: %s", date, e)
-        return pd.DataFrame()
+        # v3.3.15：不吞异常。吞掉会让 SmartRouter 把失败当成功（不降级、不计健康度），
+        # 调用方也分不清「当天确实无数据」与「上游挂了」。
+        raise
 
 
 # ============================================================
@@ -962,7 +988,8 @@ def fetch_baidu_trade_notify(endpoint: str = "suspend", date: str = "", **kwargs
         return df
     except Exception as e:
         logger.warning("fetch_baidu_trade_notify(%s, %s) failed: %s", endpoint, date, e)
-        return pd.DataFrame()
+        # v3.3.15：不吞异常，交由 SmartRouter 降级并计健康度
+        raise
 
 
 # ============================================================
@@ -980,24 +1007,32 @@ def fetch_index_news_sentiment(**kwargs) -> pd.DataFrame:
     """
     ak = _ak()
     try:
-        # 部分环境下 chinascope.com.cn 证书不受信任，需临时绕过 SSL 验证。
-        # akshare 此接口不暴露 verify 参数，只能全局替换 ssl 上下文；
-        # 加锁串行化替换窗口，最小化对进程内其他 HTTPS 请求的影响。
-        import ssl
+        # chinascope 站点证书链不受信任（requests / curl_cffi 均验不过，需 verify=False）。
+        # v3.3.15 修正：akshare 该接口内部用 **requests.get**，而不是 urllib。
+        # 旧实现 patch ssl._create_default_https_context 只影响 urllib，
+        # 所以此前那段"兜底"实际从未生效 —— 该源一直是失效的。
+        # 现改为在 requests 会话层注入 verify=False，并用锁串行化该窗口。
+        import requests as _rq
         with _ssl_patch_lock:
-            _original = ssl._create_default_https_context
-            ssl._create_default_https_context = ssl._create_unverified_context
+            _orig_request = _rq.sessions.Session.request
+
+            def _request_no_verify(self, *args, **kwargs):
+                kwargs["verify"] = False
+                return _orig_request(self, *args, **kwargs)
+
+            _rq.sessions.Session.request = _request_no_verify
             try:
                 df = ak.index_news_sentiment_scope()
             finally:
-                ssl._create_default_https_context = _original
+                _rq.sessions.Session.request = _orig_request
         if df is None or df.empty:
             logger.debug("fetch_index_news_sentiment: empty")
             return pd.DataFrame()
         return df
     except Exception as e:
         logger.warning("fetch_index_news_sentiment failed: %s", e)
-        return pd.DataFrame()
+        # v3.3.15：不吞异常，交由 SmartRouter 降级并计健康度
+        raise
 
 
 # ============================================================
@@ -1024,7 +1059,8 @@ def fetch_futures_news(symbol: str = "全部", **kwargs) -> pd.DataFrame:
         return df
     except Exception as e:
         logger.warning("fetch_futures_news(%s) failed: %s", symbol, e)
-        return pd.DataFrame()
+        # v3.3.15：不吞异常，交由 SmartRouter 降级并计健康度
+        raise
 
 
 # ============================================================
@@ -1055,7 +1091,8 @@ def fetch_hot_search_baidu(symbol: str = "A股", date: str = "", time: str = "�
         return df
     except Exception as e:
         logger.warning("fetch_hot_search_baidu(%s) failed: %s", symbol, e)
-        return pd.DataFrame()
+        # v3.3.15：不吞异常（百度该接口常间歇性返回 KeyError 'list'，吞掉会伪装成"无热搜"）
+        raise
 
 
 # ============================================================
@@ -1105,7 +1142,9 @@ def fetch_hot_rank_data(endpoint: str = "rank", symbol: str = "", **kwargs) -> p
         return df
     except Exception as e:
         logger.warning("fetch_hot_rank_data(%s) failed: %s", endpoint, e)
-        return pd.DataFrame()
+        # v3.3.15：不吞异常。东财人气榜走 push2 族，本机会间歇性被 RST，
+        # 旧实现把它伪装成"人气榜为空"，既不让位给备源也让健康度虚高。
+        raise
 
 
 # ============================================================
@@ -1143,7 +1182,8 @@ def fetch_xueqiu_hot(endpoint: str = "follow", symbol: str = "最热门", **kwar
         return df
     except Exception as e:
         logger.warning("fetch_xueqiu_hot(%s) failed: %s", endpoint, e)
-        return pd.DataFrame()
+        # v3.3.15：不吞异常，交由 SmartRouter 降级并计健康度
+        raise
 
 
 # ============================================================
@@ -1168,12 +1208,9 @@ def fetch_fund_hold_data(endpoint: str = "hold", symbol: str = "基金持仓", d
     """
     ak = _ak()
     if not date:
-        # 默认上一季度末
-        now = datetime.now()
-        q = (now.month - 1) // 3
-        year = now.year - (1 if q == 0 else 0)
-        q = q if q > 0 else 4
-        date = f"{year}{q*3:02d}31"
+        # 默认上一季度末（v3.3.15 修复：改用真实月末，旧实现 Q2/Q3 会产出
+        # 20260631 / 20260931 这类不存在的日期，导致默认调用恒返回空）
+        date = _prev_quarter_end()
     try:
         if endpoint == "hold":
             df = ak.stock_report_fund_hold(symbol=symbol, date=date)
@@ -1187,7 +1224,8 @@ def fetch_fund_hold_data(endpoint: str = "hold", symbol: str = "基金持仓", d
         return df
     except Exception as e:
         logger.warning("fetch_fund_hold_data(%s, %s) failed: %s", endpoint, symbol, e)
-        return pd.DataFrame()
+        # v3.3.15：不吞异常，交由 SmartRouter 降级并计健康度
+        raise
 
 
 # ============================================================
@@ -1285,3 +1323,153 @@ def fetch_industry_data_ths(endpoint: str = "board_industry_name_em", **kwargs):
         f"ths 备源不支持 industry_data endpoint={endpoint!r}"
         "（支持: board_industry_name_em/ths, board_concept_name_em/ths）"
     )
+
+
+# ============================================================
+# v3.3.15 新增备源 —— 补「单源无兜底」的 8 个数据类型
+# ============================================================
+# 背景：hot_rank / hot_search / xueqiu_hot / fund_hold / futures_news /
+#      baidu_economic_calendar / baidu_trade_notify / index_news_sentiment
+#      原为单源注册，源失效即整类型失效；且部分源此前还把异常静默吞成空表，
+#      失败完全不可见。本节补齐「非同一上游」的备源，避免与主源同生共死。
+#
+# 选源原则（与 P2-2 的教训一致）：
+#   备源不得与主源打同一个上游域名族 —— 否则主源被限流时备源一起死。
+#   东财 push2 族在本机会间歇性被 RST，故首选同花顺 / 百度 / 巨潮等独立上游。
+
+
+def fetch_industry_comparison_ths(
+    endpoint: str = "即时", code: str = "", symbol: str = "",
+    trade_date: str = "", top_n: int = 20, **kwargs,
+) -> dict:
+    """行业横向对比备源（同花顺行业资金流，非东财）。
+
+    v3.3.15 新增：industry_comparison 原先主备两源（em_push2 / akshare
+    stock_sector_fund_flow_rank）**都打东财 push2 族**，主源被限流时备源一同失败，
+    整类型失效。本源改走同花顺 10jqka，与主源完全解耦。
+
+    返回与 em_push2 / akshare 源完全相同的 dict 结构，工具层无需改动。
+    """
+    ak = _ak()
+    if not trade_date:
+        trade_date = datetime.now().strftime("%Y-%m-%d")
+
+    # 同花顺行业资金流：即时 / 3日排行 / 5日排行 / 10日排行 / 20日排行
+    indicator = endpoint if endpoint in (
+        "即时", "3日排行", "5日排行", "10日排行", "20日排行"
+    ) else "即时"
+
+    df = ak.stock_fund_flow_industry(symbol=indicator)
+    if df is None or df.empty:
+        raise RuntimeError("同花顺行业资金流数据为空")
+
+    chg_col = next(
+        (c for c in ("行业-涨跌幅", "阶段涨跌幅", "涨跌幅") if c in df.columns), None
+    )
+
+    result: dict = {
+        "source": f"THS stock_fund_flow_industry({indicator})",
+        "date": trade_date,
+        "code": code or symbol or None,
+        "industries": [],
+    }
+    for i, (_, row) in enumerate(df.iterrows()):
+        if i >= top_n:
+            break
+        try:
+            chg = float(row.get(chg_col, 0) or 0) if chg_col else 0.0
+        except (TypeError, ValueError):
+            chg = 0.0
+        result["industries"].append({
+            "rank": i + 1,
+            "name": str(row.get("行业", "") or ""),
+            "change_pct": chg,
+            "up_count": 0,
+            "down_count": 0,
+            "leader": str(row.get("领涨股", "") or ""),
+        })
+    if not result["industries"]:
+        raise RuntimeError("同花顺行业资金流解析后为空")
+    return result
+
+
+def fetch_hot_rank_ths(
+    endpoint: str = "rank", symbol: str = "", period: str = "", **kwargs,
+) -> pd.DataFrame:
+    """热度榜备源（同花顺人气榜，非东财）。
+
+    v3.3.15 新增，同时服务 hot_rank / hot_search / xueqiu_hot 三个类型的降级兜底。
+    这三类主源分别是东财人气榜(push2，本机会间歇性 RST)、百度股市通、雪球热度，
+    都属"个股热度排行"语义，同花顺人气榜可作为结构相近的降级备源。
+
+    返回列：排名 / 代码 / 名称 / 人气值 / 涨幅% / 排名变化 / 概念标签 / 热度标签
+
+    个股维度的 endpoint（detail/realtime/keyword/latest/relate）无法用全市场榜
+    替代，遇到时直接抛错 —— 宁可如实记为失败，也不返回语义不符的数据。
+    """
+    from . import ths_fetchers as _ths   # 局部导入，避免模块级循环依赖
+
+    if endpoint in ("detail", "realtime", "keyword", "latest", "relate"):
+        raise ValueError(
+            f"ths 备源不支持个股维度 endpoint={endpoint!r}（同花顺热榜仅提供全市场榜）"
+        )
+    p = period or ("day" if endpoint in ("up", "3日排行") else "hour")
+    df = _ths.fetch_ths_hot_list(period=p)
+    if df is None or df.empty:
+        raise RuntimeError("同花顺热榜返回空")
+    return df
+
+
+def fetch_baidu_economic_calendar_bak(date: str = "", **kwargs) -> pd.DataFrame:
+    """财报披露日历备源（百度股市通，非东财）。
+
+    v3.3.15 新增，服务 baidu_economic_calendar 的兜底。
+    主源是百度理财日历（宏观事件），本备源给的是 A股财报披露时间表，
+    语义偏"财报日历"一侧，属**降级备源**（字段不同，工具层泛化输出）。
+    """
+    ak = _ak()
+    # 注意：ak.news_report_time_baidu 的 date 默认值是**写死的过期日期**，
+    # 不传就用 2025 年的旧值。这里显式补当天，避免备源返回陈旧数据。
+    d = date or datetime.now().strftime("%Y%m%d")
+    df = ak.news_report_time_baidu(date=d)
+    if df is None or df.empty:
+        raise RuntimeError(f"百度财报披露时间表返回空（date={d}）")
+    return df
+
+
+def fetch_market_sentiment_legu(**kwargs) -> pd.DataFrame:
+    """A股市场情绪备源（乐咕乐股「赚钱效应分析」，非东财、非 chinascope）。
+
+    v3.3.15 新增，服务 index_news_sentiment 的兜底。
+
+    背景（实测结论）：主源 akshare index_news_sentiment_scope 的上游
+    www.chinascope.com 已**不再提供 JSON 接口**，现在返回 HTML 页面
+    （content-type: text/html，正文是 <!DOCTYPE html>），任何客户端都拿不到数据 ——
+    属上游永久失效，非本机网络/证书问题。
+
+    本备源给出标准 A股市场情绪口径（上涨/下跌/涨停/跌停家数、真实涨跌幅、
+    活跃度等），来自 legulegu.com，与主源完全独立。
+    """
+    ak = _ak()
+    df = ak.stock_market_activity_legu()
+    if df is None or df.empty:
+        raise RuntimeError("乐咕乐股市场活跃度返回空")
+    return df
+
+
+def fetch_baidu_trade_notify_tfp(
+    endpoint: str = "suspend", symbol: str = "", date: str = "", **kwargs,
+) -> pd.DataFrame:
+    """交易提示/停复牌备源（akshare stock_tfp_em 全市场停复牌表，非百度）。
+
+    v3.3.15 新增，服务 baidu_trade_notify 的兜底。
+    主源是百度交易提示（停复牌口径）。本备源给出全市场停复牌明细
+    （序号/代码/名称/停牌时间/停牌截止时间/停牌期限/停牌原因），语义精确对应，
+    且**不需要股票代码**，与工具层"市场级调用"的方式一致。
+    """
+    ak = _ak()
+    df = ak.stock_tfp_em()
+    if df is None or df.empty:
+        raise RuntimeError("全市场停复牌表返回空")
+    return df
+

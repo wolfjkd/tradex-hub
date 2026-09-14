@@ -83,15 +83,21 @@ class TestSignalDataFlowRegistration:
         )
 
     def test_data_types_have_two_sources_each(self):
-        """每种数据类型恰好有 2 个源（一主一备）。"""
+        """这些类型至少各有 2 个源（一主一备）。
+
+        v3.3.15 起 industry_comparison 有 3 源（em_push2 / akshare / ths_flow：
+        前两源同属东财 push2 族会一起失效，故补同花顺 ths_flow 作跨上游兜底）。
+        断言由 `== 2` 放宽为 `>= 2` —— 本测试的语义是「至少一主一备」，
+        不设上限，后续再补源不会弄坏它。
+        """
         from tradex.data_sources import register_all_sources
         register_all_sources()
 
         router = get_router()
         for data_type in ("fund_flow", "dragon_tiger", "industry_comparison"):
             sources = router._sources.get(data_type, [])
-            assert len(sources) == 2, (
-                f"{data_type} expected 2 sources, got {len(sources)}"
+            assert len(sources) >= 2, (
+                f"{data_type} expected >=2 sources, got {len(sources)}"
             )
 
 

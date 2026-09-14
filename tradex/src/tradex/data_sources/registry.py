@@ -25,7 +25,7 @@
   | cb_data              | akshare           |               |               |           |
   | fund_flow            | em_push2          | akshare       |               |           |
   | dragon_tiger         | em_datacenter     | akshare       |               |           |
-  | industry_comparison  | em_push2          | akshare       |               |           |
+  | industry_comparison  | em_push2          | akshare       | ths_flow      |           |
   | northbound           | ths_hsgt          | akshare       |               |           |
   | hot_money            | ths_editorial     |               |               | 是        |
   | lockup_expiry        | em_datacenter     |               |               | 是        |
@@ -33,14 +33,14 @@
   | hot_stocks           | akshare           |               |               |           |
   | profit_forecast      | akshare           | tencent_http  |               |           |
   | concept_attribution  | em_push2delay     |               |               |           |
-  | baidu_economic_calendar | akshare_baidu_economic |           |               |           |
-  | baidu_trade_notify   | akshare_baidu_notify |             |               |           |
-  | index_news_sentiment | akshare_index_sentiment |           |               |           |
+  | baidu_economic_calendar | akshare_baidu_economic | akshare_report_time |         |           |
+  | baidu_trade_notify   | akshare_baidu_notify | akshare_tfp   |               |           |
+  | index_news_sentiment | akshare_index_sentiment | legu_activity |           |           |
   | futures_news         | akshare_futures_news |             |               |           |
   | sina_finance_news    | sina_direct       |               |               |           |
-  | hot_search           | akshare_hot_search |               |               |           |
-  | hot_rank             | akshare_hot_rank   |               |               |           |
-  | xueqiu_hot           | akshare_xueqiu_hot |               |               |           |
+  | hot_search           | akshare_hot_search | ths_hot       |               |           |
+  | hot_rank             | akshare_hot_rank   | ths_hot       |               |           |
+  | xueqiu_hot           | akshare_xueqiu_hot | ths_hot       |               |           |
   | fund_hold            | akshare_fund_hold  |               |               |           |
   | wencai_query         | pywencai           |               |               |           |
   | wencai_news          | iwencai_openapi    |               |               |           |
@@ -164,6 +164,11 @@ def _do_register() -> None:
 
     router.register("industry_comparison", "em_push2", asf.fetch_industry_comparison_em, priority=1)
     router.register("industry_comparison", "akshare", akf.fetch_industry_comparison, priority=100)
+    # v3.3.15：上面两源**同属东财 push2 族**，本机会一起被 RST（实测两源同时
+    # RemoteDisconnected），名义双源、实际无兜底。补同花顺行业资金流作为
+    # 跨上游兜底，主源同族失效时它是实际可用的一环。
+    router.register("industry_comparison", "ths_flow",
+                    akf.fetch_industry_comparison_ths, priority=200)
 
     # ── 同花顺主 + akshare 备 ──
     router.register("northbound", "ths_hsgt", asf.fetch_northbound_ths, priority=1)
@@ -213,6 +218,28 @@ def _do_register() -> None:
     router.register("hot_rank", "akshare_hot_rank", akf.fetch_hot_rank_data, priority=1)
     router.register("xueqiu_hot", "akshare_xueqiu_hot", akf.fetch_xueqiu_hot, priority=1)
     router.register("fund_hold", "akshare_fund_hold", akf.fetch_fund_hold_data, priority=1)
+
+    # ── v3.3.15：补「单源无兜底」类型的备源（一律选**非同一上游**，避免同生共死） ──
+    # 盘点结论：下列 8 类此前均为单源注册，源失效即整类型失效，且部分源还把异常
+    # 静默吞成空表，失败完全不可见。补齐后每类至少有 2 个不同上游的源。
+    #
+    # 财报日历：补百度财报披露时间表（主源同属百度但接口不同，属降级备源）
+    router.register("baidu_economic_calendar", "akshare_report_time",
+                    akf.fetch_baidu_economic_calendar_bak, priority=100)
+    # 交易提示：补全市场停复牌表（百度主源 → akshare 停复牌，语义精确对应）
+    router.register("baidu_trade_notify", "akshare_tfp",
+                    akf.fetch_baidu_trade_notify_tfp, priority=100)
+    # 热度三兄弟（东财人气榜 / 百度热搜 / 雪球热度）→ 统一以同花顺热榜兜底
+    router.register("hot_rank", "ths_hot", akf.fetch_hot_rank_ths, priority=100)
+    router.register("hot_search", "ths_hot", akf.fetch_hot_rank_ths, priority=100)
+    router.register("xueqiu_hot", "ths_hot", akf.fetch_hot_rank_ths, priority=100)
+    # 指数情绪：主源上游 chinascope 已永久失效（改为返回 HTML，非 JSON），
+    # 补乐咕乐股「赚钱效应」作为跨上游情绪源
+    router.register("index_news_sentiment", "legu_activity",
+                    akf.fetch_market_sentiment_legu, priority=100)
+    # fund_hold / futures_news 保持单源，理由见 CHANGELOG：
+    #   - fund_hold：上游为东财 datacenter（非 push2 族，本机实测稳定），akshare 无等价第二源
+    #   - futures_news：上游为上海有色网，akshare 无等价第二源
 
     # ── v3.3.0 新增：同花顺问财数据源（可选依赖） ──
     router.register("wencai_query", "pywencai", wf.fetch_wencai_query, priority=1)
