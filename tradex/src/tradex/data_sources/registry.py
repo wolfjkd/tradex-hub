@@ -12,10 +12,10 @@
   | call_auction         | eltdx             |               |               | 是        |
   | tick_data            | eltdx             |               |               | 是        |
   | f10_profile          | eltdx             |               |               | 是        |
-  | company_info         | akshare           |               |               |           |
-  | financial_stmt       | akshare           |               |               |           |
-  | valuation            | akshare           |               |               |           |
-  | industry_data        | akshare           |               |               |           |
+  | company_info         | akshare           | cninfo        |               |           |
+  | financial_stmt       | akshare           | sina          |               |           |
+  | valuation            | akshare           | eltdx         |               |           |
+  | industry_data        | akshare           | ths           |               |           |
   | market_overview      | akshare           |               |               |           |
   | news_data            | em_news_direct    | akshare       |               |           |
   | telegraph_news       | cls_telegraph     |               |               |           |
@@ -135,9 +135,14 @@ def _do_register() -> None:
 
     # ── akshare 单源（备 tencent_http） ──
     router.register("company_info", "akshare", akf.fetch_company_info, priority=1)
+    # v3.3.14: 补独立备源（非东财）——原先这四类均为 akshare 单源，东财异常时无兜底
+    router.register("company_info", "cninfo", akf.fetch_company_info_cninfo, priority=100)
     router.register("financial_stmt", "akshare", akf.fetch_financial_stmt, priority=1)
+    router.register("financial_stmt", "sina", akf.fetch_financial_stmt_sina, priority=100)
     router.register("valuation", "akshare", akf.fetch_valuation, priority=1)
+    router.register("valuation", "eltdx", ef.fetch_valuation_eltdx, priority=100)
     router.register("industry_data", "akshare", akf.fetch_industry_data, priority=1)
+    router.register("industry_data", "ths", akf.fetch_industry_data_ths, priority=100)
     router.register("market_overview", "akshare", akf.fetch_market_overview, priority=1)
     router.register("market_overview", "tencent_http", hf.fetch_market_overview_tencent, priority=100)
     router.register("index_daily_amount", "akshare", akf.fetch_index_daily_amount, priority=1)

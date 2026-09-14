@@ -35,6 +35,30 @@ def _ak():
 
 
 # ============================================================
+# K 线周期归一化（v3.3.14 新增）
+# ============================================================
+# SmartRouter 会把同一个 period 参数**原样转发**给主源(eltdx)与备源(akshare)，
+# 但两源值域不同：eltdx 认 day/week/month，akshare 认 daily/weekly/monthly。
+# eltdx 源内部有 _normalize_period() 归一化，akshare 源此前没有 ——
+# 于是传 'day' 时主源正常、一旦降级到 akshare 就 KeyError('day')，降级链在该值下必断。
+# 这里做反向归一化，使两个源的 period 语义对齐。
+_AK_PERIOD_ALIASES = {
+    "day": "daily", "daily": "daily", "d": "daily", "1d": "daily",
+    "week": "weekly", "weekly": "weekly", "w": "weekly", "1w": "weekly",
+    "month": "monthly", "monthly": "monthly", "m": "monthly", "1m": "monthly",
+}
+
+
+def _normalize_ak_period(period: str) -> str:
+    """把 eltdx 风格周期名(day/week/month)转成 akshare 期望的(daily/weekly/monthly)。
+
+    已是 akshare 风格的值保持不变；未识别的值原样透传，交由 akshare 自行报错。
+    """
+    key = str(period or "").strip().lower()
+    return _AK_PERIOD_ALIASES.get(key, period)
+
+
+# ============================================================
 # realtime_quote — 全量行情快照
 # ============================================================
 
@@ -74,10 +98,12 @@ def fetch_historical_kline(
     """历史 K 线（东方财富 stock_zh_a_hist）。返回中文列名 DataFrame。
 
     兼容 symbol/code 两种参数名（SmartRouter 路由归一化）。
+    v3.3.14: period 先做归一化(day/week/month → daily/weekly/monthly)，
+    使本备源与 eltdx 主源的周期语义对齐，避免路由原样透传时降级链断裂。
     """
     ak = _ak()
     sym = symbol or code
-    em_kwargs: dict = {"symbol": sym, "period": period, "adjust": adjust}
+    em_kwargs: dict = {"symbol": sym, "period": _normalize_ak_period(period), "adjust": adjust}
     if start_date:
         em_kwargs["start_date"] = start_date
     if end_date:
@@ -1162,3 +1188,100 @@ def fetch_fund_hold_data(endpoint: str = "hold", symbol: str = "基金持仓", d
     except Exception as e:
         logger.warning("fetch_fund_hold_data(%s, %s) failed: %s", endpoint, symbol, e)
         return pd.DataFrame()
+
+
+# ============================================================
+# v3.3.14 新增：单源类型的独立备源（避免东财一挂全挂）
+# ============================================================
+# 背景：company_info / financial_stmt / industry_data 此前均为 akshare 单源，
+# 且都走东方财富。东财不可用（限流 / 反爬 / 代理误路由）时这些数据类型
+# **完全没有兜底**，违反「一主一备」原则。
+# 以下备源刻意选用**非东财**厂商：巨潮资讯 / 新浪财经 / 同花顺。
+
+
+def _code6(code: str) -> str:
+    """提取 6 位纯代码（去掉 sh/sz/bj 前缀）。"""
+    c = str(code or "").strip().lower()
+    return c[2:] if c.startswith(("sh", "sz", "bj")) else c
+
+
+def _prefixed_code(code: str) -> str:
+    """补全为 sh/sz/bj 前缀形式（新浪等接口需要）。"""
+    c = str(code or "").strip().lower()
+    if c.startswith(("sh", "sz", "bj")):
+        return c
+    if len(c) == 6 and c.isdigit():
+        if c.startswith(("60", "68", "90", "11", "13")):
+            return "sh" + c
+        if c.startswith(("00", "30", "20")):
+            return "sz" + c
+        if c.startswith(("8", "43", "92")):
+            return "bj" + c
+    return c
+
+
+def fetch_company_info_cninfo(
+    endpoint: str = "individual_info",
+    symbol: str = "",
+    code: str = "",
+    **kwargs,
+) -> pd.DataFrame:
+    """公司信息备源（巨潮资讯 stock_profile_cninfo，非东财）。
+
+    v3.3.14 新增：company_info 此前只有 akshare 东财单源。
+    仅覆盖 individual_info 语义；其它 endpoint 直接报错，交由路由汇总失败原因。
+    """
+    if endpoint != "individual_info":
+        raise ValueError(
+            f"cninfo 备源不支持 company_info endpoint={endpoint!r}（仅 individual_info）"
+        )
+    sym = _code6(code or symbol)
+    if not sym:
+        raise RuntimeError("stock code is required")
+    return _ak().stock_profile_cninfo(symbol=sym)
+
+
+_SINA_STMT_MAP = {
+    "profit": "利润表",
+    "balance": "资产负债表",
+    "cashflow": "现金流量表",
+}
+
+
+def fetch_financial_stmt_sina(
+    endpoint: str = "profit",
+    symbol: str = "",
+    code: str = "",
+    **kwargs,
+) -> pd.DataFrame:
+    """财务报表备源（新浪财经 stock_financial_report_sina，非东财）。
+
+    v3.3.14 新增：financial_stmt 此前只有 akshare 东财单源。
+    覆盖 profit / balance / cashflow 三个主 endpoint。
+    """
+    if endpoint not in _SINA_STMT_MAP:
+        raise ValueError(
+            f"sina 备源不支持 financial_stmt endpoint={endpoint!r}"
+            f"（支持: {list(_SINA_STMT_MAP)}）"
+        )
+    sym = _prefixed_code(code or symbol)
+    if not sym:
+        raise RuntimeError("stock code is required")
+    return _ak().stock_financial_report_sina(stock=sym, symbol=_SINA_STMT_MAP[endpoint])
+
+
+def fetch_industry_data_ths(endpoint: str = "board_industry_name_em", **kwargs):
+    """行业 / 概念板块备源（同花顺，非东财）。
+
+    v3.3.14 新增：industry_data 此前只有 akshare 东财单源。
+    接受主源的 endpoint 名并映射到对应的同花顺接口。
+    """
+    ak = _ak()
+    if endpoint in ("board_industry_name_em", "board_industry_name_ths"):
+        return ak.stock_board_industry_name_ths()
+    if endpoint in ("board_concept_name_em", "board_concept_name_ths"):
+        return ak.stock_board_concept_name_ths()
+    raise ValueError(
+        f"ths 备源不支持 industry_data endpoint={endpoint!r}"
+        "（支持: board_industry_name_em/ths, board_concept_name_em/ths）"
+    )

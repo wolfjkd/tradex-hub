@@ -10,6 +10,16 @@ from pathlib import Path
 for _k in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"):
     os.environ.pop(_k, None)
 
+# v3.3.14 修复：仅 pop 环境变量是不够的。
+# requests/urllib 的 getproxies() 实现为 getproxies_environment() or getproxies_registry()，
+# 当环境变量为空时会**回退读取 Windows 注册表代理**(Internet Settings)，
+# 导致 akshare 等基于 requests 的数据源仍走 Clash(127.0.0.1:7897)，
+# 国内东财接口被代理拦截（实测 ProxyError）。
+# 显式设置 NO_PROXY 使 getproxies_environment() 返回非空({'no':'*'})从而短路注册表读取，
+# 彻底绕过系统代理。实测：设后 getproxies() == {'no': '*'}。
+os.environ["NO_PROXY"] = "*"
+os.environ["no_proxy"] = "*"
+
 
 def _read_version() -> str:
     """从项目根目录的 VERSION 文件读取版本号(单一事实来源)。"""

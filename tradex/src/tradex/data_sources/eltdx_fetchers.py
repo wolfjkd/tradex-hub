@@ -481,17 +481,22 @@ def _bar_to_row(b) -> dict:
     }
 
 
-def _bar_sort_key(bar):
+def _bar_sort_key(bar) -> float:
     """K 线时间排序键（跨页合并后重排用）。
 
     eltdx 分页按「最近页 → 更早页」返回，页内升序；跨页合并后必须重排。
     用 timestamp() 比较，规避 tz-aware 与 None 混排的 TypeError。
+
+    v3.3.14: 收窄异常捕获（原 `except Exception: return 0.0` 会静默把异常 bar
+    排到最前、污染回测首行）。现在只捕获可预期的取值异常并记 warning，
+    异常 bar 返回 +inf 排到末尾（不丢数据、不污染首行），异常不再被静默吞掉。
     """
     t = getattr(bar, "time", None)
     try:
-        return t.timestamp()
-    except Exception:
-        return 0.0
+        return float(t.timestamp())
+    except (AttributeError, TypeError, ValueError, OSError) as exc:
+        logger.warning("K线 bar 时间字段无法解析(%r: %s)，排序时置于末尾", t, exc)
+        return float("inf")
 
 
 def fetch_full_kline(code: str = "", symbol: str = "", period: str = "day", max_pages: int = 30, **kwargs):
@@ -966,3 +971,26 @@ def fetch_f10_extra(entry: str = "", code: str = "", symbol: str = "", **kwargs)
         raise RuntimeError(f"f10 entry not available: {entry}")
     resp = method(code6)
     return _f10_rows_to_df(resp)
+
+
+# ============================================================
+# v3.3.14 新增：估值备源（走通达信自有服务器，非东财 / 百度）
+# ============================================================
+
+def fetch_valuation_eltdx(
+    endpoint: str = "baidu",
+    code: str = "",
+    symbol: str = "",
+    **kwargs,
+):
+    """估值数据备源（eltdx F10 valuation）。
+
+    v3.3.14 新增：valuation 此前只有 akshare 百度单源，百度接口收紧后无兜底。
+    本备源走 eltdx（通达信行情服务器，与东财/百度完全独立），
+    覆盖 PE / PB / PS / 市值等估值指标，仅对应主源的 baidu 语义。
+    """
+    if endpoint != "baidu":
+        raise ValueError(
+            f"eltdx 备源不支持 valuation endpoint={endpoint!r}（仅 baidu）"
+        )
+    return fetch_f10_extra(entry="valuation", code=code, symbol=symbol)

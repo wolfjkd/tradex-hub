@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
 
+## [3.3.14] - 2026-09-14
+
+### Fixed
+
+- **akshare 备源 period 未归一化，导致降级链断裂**：SmartRouter 会把同一个 `period` 参数**原样转发**给主源（eltdx）与备源（akshare），但两源值域不同 —— eltdx 认 `day/week/month`，akshare 认 `daily/weekly/monthly`。eltdx 源内部有 `_normalize_period()` 归一化，akshare 源此前没有，于是传 `period='day'` 时主源正常、一旦降级到 akshare 就 `KeyError('day')`，降级链在该值下必然断裂。现新增 `_normalize_ak_period()` 做反向归一化（`day→daily` / `week→weekly` / `month→monthly`，并兼容 `d/1d/w/1w/m/1m`），使两源周期语义对齐。
+- **`HTTP_PROXY=""` 拦不住系统代理，国内数据源被误路由**：`requests.getproxies()` 的实现是 `getproxies_environment() or getproxies_registry()`，当环境变量为空时会**回退读取 Windows 注册表代理**（Internet Settings）。此前 `tradex/__init__.py` 只 `pop` 了代理环境变量，导致 akshare 等基于 requests 的数据源仍走 Clash（`127.0.0.1:7897`），国内东财接口被代理拦截（实测 `ProxyError`）。现显式设置 `NO_PROXY=*` / `no_proxy=*`，使环境变量分支返回非空（`{'no':'*'}`）从而短路注册表读取，彻底绕开系统代理。
+- **`_bar_sort_key` 静默降级污染回测首行**：原实现为 `except Exception: return 0.0`，会把取不到时间字段的 K 线 bar 静默排到**最前**（epoch 1970），既污染回测首行、又让异常被完全吞掉。现收窄异常捕获为 `(AttributeError, TypeError, ValueError, OSError)`，命中时记 `warning` 日志并返回 `float('inf')` 排到**末尾**（不丢数据、不污染首行、异常可见）。
+
+### Added
+
+- **4 个单源类型的独立备源**（原本这几类均为 akshare 单源且走东方财富，东财异常时无任何兜底，违反「一主一备」原则；新增备源均刻意选用**非东财**厂商）：
+  - `company_info` ← 巨潮资讯 `stock_profile_cninfo`
+  - `financial_stmt` ← 新浪财经 `stock_financial_report_sina`（覆盖 profit / balance / cashflow）
+  - `valuation` ← eltdx F10 valuation（通达信行情服务器）
+  - `industry_data` ← 同花顺 `stock_board_industry_name_ths` / `stock_board_concept_name_ths`
+- 新增回归测试 `tests/test_v3314_fixes.py`（20 项），覆盖上述全部修复点。
+
+### Changed
+
+- 数据源矩阵规模：**90 → 94**（新增 4 个独立备源）；MCP 工具数不变（129）。
+
 ## [3.3.13] - 2026-09-14
 
 ### Changed（上游依赖升级 —— eltdx 跨大版本）
