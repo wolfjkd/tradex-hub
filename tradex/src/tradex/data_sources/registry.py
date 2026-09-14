@@ -41,7 +41,7 @@
   | hot_search           | akshare_hot_search | ths_hot       |               |           |
   | hot_rank             | akshare_hot_rank   | ths_hot       |               |           |
   | xueqiu_hot           | akshare_xueqiu_hot | ths_hot       |               |           |
-  | fund_hold            | akshare_fund_hold  |               |               |           |
+  | fund_hold            | em_zlsj_direct     | akshare_fund_hold |           |           |
   | wencai_query         | pywencai           |               |               |           |
   | wencai_news          | iwencai_openapi    |               |               |           |
 """
@@ -218,7 +218,11 @@ def _do_register() -> None:
     router.register("hot_search", "akshare_hot_search", akf.fetch_hot_search_baidu, priority=1)
     router.register("hot_rank", "akshare_hot_rank", akf.fetch_hot_rank_data, priority=1)
     router.register("xueqiu_hot", "akshare_xueqiu_hot", akf.fetch_xueqiu_hot, priority=1)
-    router.register("fund_hold", "akshare_fund_hold", akf.fetch_fund_hold_data, priority=1)
+    # 机构持仓汇总：**主源改为直取东财**（akshare 版列错位，见 akshare_fetchers 说明）。
+    # 直取版按上游字段名映射列，上游再改字段顺序也不会错位。
+    # akshare 版降为备源，但它只服务 endpoint="detail"（hold 会直接 raise）。
+    router.register("fund_hold", "em_zlsj_direct", akf.fetch_fund_hold_direct, priority=1)
+    router.register("fund_hold", "akshare_fund_hold", akf.fetch_fund_hold_data, priority=100)
 
     # ── v3.3.15：补「单源无兜底」类型的备源（一律选**非同一上游**，避免同生共死） ──
     # 盘点结论：下列 8 类此前均为单源注册，源失效即整类型失效，且部分源还把异常
@@ -245,9 +249,9 @@ def _do_register() -> None:
                     akf.fetch_market_sentiment_legu, priority=1)
     router.register("index_news_sentiment", "ths_distribution",
                     ths.fetch_ths_up_down_distribution, priority=100)
-    # fund_hold / futures_news 保持单源，理由见 CHANGELOG：
-    #   - fund_hold：上游为东财 datacenter（非 push2 族，本机实测稳定），akshare 无等价第二源
+    # futures_news 保持单源，理由见 CHANGELOG：
     #   - futures_news：上游为上海有色网，akshare 无等价第二源
+    # （fund_hold 已从单源升为双源：em_zlsj_direct 主 + akshare_fund_hold 备）
 
     # ── v3.3.0 新增：同花顺问财数据源（可选依赖） ──
     router.register("wencai_query", "pywencai", wf.fetch_wencai_query, priority=1)

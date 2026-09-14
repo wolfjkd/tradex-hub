@@ -23,6 +23,7 @@ from tradex.data_sources.akshare_fetchers import (
     fetch_hot_rank_data,
     fetch_xueqiu_hot,
     fetch_fund_hold_data,
+    fetch_fund_hold_direct,
     fetch_industry_comparison_ths,
     fetch_hot_rank_ths,
 )
@@ -77,25 +78,43 @@ class TestPrevQuarterEnd:
 
 
 class TestFundHoldDefaultDate:
-    """fetch_fund_hold_data 未传 date 时默认走 _prev_quarter_end，日期必须合法。"""
+    """机构持仓未传 date 时默认走 _prev_quarter_end，日期必须合法。
+
+    注：hold 分支已改由 fetch_fund_hold_direct 承担（akshare 列错位停用），
+    故这里断言直取版传给东财的 date 参数。
+    """
 
     def test_default_date_is_prev_quarter_end_and_parsable(self, monkeypatch):
+        from tradex.data_sources import em_client
+
         captured = {}
 
-        def fake_stock_report_fund_hold(symbol, date):
-            captured["date"] = date
-            return pd.DataFrame({"a": [1]})
+        class _Resp:
+            def json(self):
+                return {"pages": 1, "data": [{
+                    "SECURITY_CODE": "000680", "SECURITY_NAME_ABBR": "山推股份",
+                    "HOULD_NUM": "4", "TOTAL_SHARES": "1", "HOLD_VALUE": "1",
+                    "FREESHARES_RATIO": "1", "HOLDCHA": "减仓",
+                    "HOLDCHA_NUM": "1", "HOLDCHA_RATIO": "1",
+                }]}
 
-        fake_ak = MagicMock()
-        fake_ak.stock_report_fund_hold.side_effect = fake_stock_report_fund_hold
-        monkeypatch.setattr(akf, "_ak", lambda: fake_ak)
+        def fake_em_get(url, params=None, **kw):
+            captured["params"] = params or {}
+            return _Resp()
 
-        fetch_fund_hold_data()  # 不传 date
+        monkeypatch.setattr(em_client, "em_get", fake_em_get)
+
+        fetch_fund_hold_direct(endpoint="hold", symbol="社保持仓")  # 不传 date
 
         expected = _prev_quarter_end()
-        assert captured["date"] == expected
-        # 必须能被 strptime 解析（即真实存在的日期）
-        datetime.strptime(captured["date"], "%Y%m%d")
+        # 直取版把 YYYYMMDD 转成东财要的 YYYY-MM-DD
+        assert captured["params"]["date"] == (
+            f"{expected[:4]}-{expected[4:6]}-{expected[6:]}"
+        )
+        # 必须能被 strptime 解析（即真实存在的日期），且不得是旧的非法形态
+        datetime.strptime(expected, "%Y%m%d")
+        assert not expected.endswith("0631"), f"{expected} 是非法日期（6月无31日）"
+        assert not expected.endswith("0931"), f"{expected} 是非法日期（9月无31日）"
 
 
 # ============================================================
@@ -165,10 +184,16 @@ class TestExceptionPropagation:
         with pytest.raises(RuntimeError):
             fetch_xueqiu_hot(endpoint="follow")
 
-    def test_fund_hold_data_raises(self, monkeypatch):
-        # 默认 endpoint=hold → ak.stock_report_fund_hold（会走网络的分支）
-        _patch_ak_raising(monkeypatch, "stock_report_fund_hold")
+    def test_fund_hold_data_detail_raises(self, monkeypatch):
+        # hold 分支已改为直接 raise（akshare 列错位停用），故这里测 detail 分支：
+        # detail → ak.stock_report_fund_hold_detail（会走网络的分支）
+        _patch_ak_raising(monkeypatch, "stock_report_fund_hold_detail")
         with pytest.raises(RuntimeError):
+            fetch_fund_hold_data(endpoint="detail", symbol="000001")
+
+    def test_fund_hold_hold_branch_disabled(self):
+        """akshare 的 hold 分支必须直接 raise，不能再作为兜底（否则会返回错标数据）。"""
+        with pytest.raises(RuntimeError, match="列已错位"):
             fetch_fund_hold_data(endpoint="hold")
 
 
@@ -187,8 +212,10 @@ NEW_SOURCES = [
     ("index_news_sentiment", "legu_activity", 1),       # 旧主源退役后提为主源
     ("index_news_sentiment", "ths_distribution", 100),  # 跨上游备源（同花顺）
 ]
-# 这两个类型刻意保持单源（未过度改动护栏）
-SINGLE_SOURCE_TYPES = ["fund_hold", "futures_news"]
+# 刻意保持单源的类型（未过度改动护栏）
+#   - futures_news：上游上海有色网，akshare 无等价第二源
+#   （fund_hold 原为单源，因 akshare 列错位已改为 em_zlsj_direct 主 + akshare 备，故移出）
+SINGLE_SOURCE_TYPES = ["futures_news"]
 
 
 def _source_priority(router, data_type, name):
@@ -217,8 +244,9 @@ class TestBackupSourceRegistration:
         assert len(router._sources) == 78
 
     def test_total_registrations(self, router):
-        # 总注册数 94 → 101（新增 7 个备源）
-        assert sum(len(v) for v in router._sources.values()) == 101
+        # 总注册数演进：90 → 94（v3.3.14）→ 101（v3.3.15）
+        #   → 102（本次：fund_hold 由单源升为 em_zlsj_direct + akshare 双源）
+        assert sum(len(v) for v in router._sources.values()) == 102
 
     def test_new_sources_registered_with_priority(self, router):
         for data_type, name, prio in NEW_SOURCES:
@@ -234,6 +262,82 @@ class TestBackupSourceRegistration:
     def test_fund_hold_and_futures_news_remain_single(self, router):
         for dt in SINGLE_SOURCE_TYPES:
             assert len(router._sources.get(dt, [])) == 1, f"{dt} 应仍为单源"
+
+
+# ============================================================
+# 机构持仓直取版（修复 akshare 列错位）
+# ============================================================
+
+class TestFundHoldDirect:
+    """fetch_fund_hold_direct 按**字段名**映射列，且对列错位有守卫。"""
+
+    def test_hold_maps_by_field_name_not_position(self, monkeypatch):
+        """上游字段顺序被打乱，输出列语义仍必须正确 —— 这是本次修复的核心。"""
+        from tradex.data_sources import em_client
+
+        # 故意用**乱序**字段 + 夹带无关字段，模拟上游改版
+        payload = {
+            "pages": 1,
+            "data": [{
+                "HOLDCHA_RATIO": "-21.36",
+                "SECURITY_NAME_ABBR": "山推股份",
+                "UNRELATED_NOISE": "x",
+                "SECURITY_CODE": "000680",
+                "HOULD_NUM": "4",
+                "TOTAL_SHARES": "87893360",
+                "HOLD_VALUE": "883328268",
+                "FREESHARES_RATIO": "6.68608925",
+                "HOLDCHA": "减仓",
+                "HOLDCHA_NUM": "-23868601",
+            }],
+        }
+
+        class _Resp:
+            def json(self):
+                return payload
+
+        monkeypatch.setattr(em_client, "em_get", lambda *a, **k: _Resp())
+        df = akf.fetch_fund_hold_direct(endpoint="hold", symbol="社保持仓",
+                                       date="20260630")
+        row = df.iloc[0]
+        assert row["股票代码"] == "000680"        # 不能是市值
+        assert row["股票简称"] == "山推股份"       # 不能是代码
+        assert row["持股变化"] == "减仓"           # 方向文本在方向列
+        assert row["持股变动数值"] == -23868601    # 数值列是数值
+        assert row["持股变动比例"] == -21.36
+        assert row["持有基金家数"] == 4
+        assert row["持股占流通股比"] == 6.68608925
+
+    def test_misaligned_code_column_raises(self, monkeypatch):
+        """守卫：股票代码列若拿到非 6 位数字（上游再改字段的典型征兆），
+        必须抛错而不是把错标数据交给下游。"""
+        from tradex.data_sources import em_client
+
+        payload = {"pages": 1, "data": [{
+            "SECURITY_CODE": "-415345718.82",   # 正是 akshare 错位时的表现
+            "SECURITY_NAME_ABBR": "000680",
+            "HOULD_NUM": "03", "TOTAL_SHARES": "4", "HOLD_VALUE": "87893360",
+            "FREESHARES_RATIO": "6.68608925",
+            "HOLDCHA": "减仓", "HOLDCHA_NUM": "-23868601", "HOLDCHA_RATIO": "-21.36",
+        }]}
+
+        class _Resp:
+            def json(self):
+                return payload
+
+        monkeypatch.setattr(em_client, "em_get", lambda *a, **k: _Resp())
+        with pytest.raises(RuntimeError, match="股票代码列异常"):
+            akf.fetch_fund_hold_direct(endpoint="hold", symbol="社保持仓",
+                                       date="20260630")
+
+    def test_detail_endpoint_not_supported(self):
+        """detail 不属于直取版职责，必须显式抛错让路由降级到 akshare。"""
+        with pytest.raises(ValueError, match="仅支持 endpoint='hold'"):
+            akf.fetch_fund_hold_direct(endpoint="detail", symbol="000001")
+
+    def test_unknown_symbol_raises(self):
+        with pytest.raises(ValueError, match="未知机构类型"):
+            akf.fetch_fund_hold_direct(endpoint="hold", symbol="不存在的机构")
 
 
 # ============================================================

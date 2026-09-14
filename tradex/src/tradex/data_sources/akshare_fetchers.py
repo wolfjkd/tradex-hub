@@ -1171,30 +1171,44 @@ def fetch_xueqiu_hot(endpoint: str = "follow", symbol: str = "最热门", **kwar
 # ============================================================
 
 def fetch_fund_hold_data(endpoint: str = "hold", symbol: str = "基金持仓", date: str = "", **kwargs) -> pd.DataFrame:
-    """机构持仓数据（多 endpoint 分派）。
+    """机构持仓数据（仅服务 endpoint="detail"，hold 已移交直取实现）。
 
-    endpoint:
-      - hold:   基金/QFII/社保等持仓汇总（ak.stock_report_fund_hold）
-      - detail: 单只基金持仓明细（ak.stock_report_fund_hold_detail）
+    ⚠️ endpoint="hold" **已故意停用**（v3.3.15 之后发现的问题）：
+    本函数原先调用 `ak.stock_report_fund_hold`，但该 akshare 接口用
+      `big_df.columns = ["序号","_","股票简称","_","_","持有基金家数",...]`
+    **按位置**硬编码中文列名，而上游东财 `/dataapi/zlsj/list` 的字段顺序
+    已经改版 → **整行列错位**。实测（直接调 akshare，绕开本项目全部代码）：
+      股票代码 列拿到 HOLDCHA_VALUE = -415345718.82（一个市值，不是代码）
+      股票简称 列拿到 SECURITY_CODE  = 000680（代码跑到了简称列）
+      持股变动数值 列拿到 HOLDCHA     = '减仓'（文本跑进了数值列）
+    且 1.18.91 与 1.18.94 **同样错位** → 属上游字段漂移 + akshare 位置映射，
+    **不是本项目升级引入**。此前每年 4–9 月因默认日期非法而返回空表，所以看不出来。
+
+    关键：真正需要的 `SECURITY_NAME_ABBR`（股票简称）落在 akshare 标为 "_" 的
+    位置，最终 `big_df[[...]]` 选择时被**丢弃** → 无法在其输出上补救列名，
+    只能绕开 akshare 直取上游。故 hold 改由 `fetch_fund_hold_direct` 承担。
+    此处 hold 直接 raise，而**不作为备源兜底** —— 否则 direct 失败时它会
+    静默返回错标数据，比直接失败更糟。
 
     Args:
-        endpoint: 数据类型
-        symbol: "hold" 时取 {"基金持仓", "QFII持仓", "社保持仓", "券商持仓", "保险持仓", "信托持仓"}；
-                "detail" 时为基金代码
-        date: 财报日期，格式 "YYYYMMDD"（如 "20260331"）
+        endpoint: 仅支持 "detail"（单只基金持仓明细，走 ak.stock_report_fund_hold_detail）
+        symbol: detail 时为基金代码
+        date: 财报日期 "YYYYMMDD"
 
     Returns:
         DataFrame
     """
     ak = _ak()
+    if endpoint == "hold":
+        raise RuntimeError(
+            "akshare 的 stock_report_fund_hold 列已错位（上游字段顺序改版 + akshare "
+            "按位置硬编码列名），hold 已改由 fetch_fund_hold_direct 直取东财；"
+            "此处不再作为兜底，以免返回错标数据"
+        )
     if not date:
-        # 默认上一季度末（v3.3.15 修复：改用真实月末，旧实现 Q2/Q3 会产出
-        # 20260631 / 20260931 这类不存在的日期，导致默认调用恒返回空）
         date = _prev_quarter_end()
     try:
-        if endpoint == "hold":
-            df = ak.stock_report_fund_hold(symbol=symbol, date=date)
-        elif endpoint == "detail":
+        if endpoint == "detail":
             df = ak.stock_report_fund_hold_detail(symbol=symbol, date=date)
         else:
             raise ValueError(f"Unknown fund_hold_data endpoint: {endpoint}")
@@ -1206,6 +1220,136 @@ def fetch_fund_hold_data(endpoint: str = "hold", symbol: str = "基金持仓", d
         logger.warning("fetch_fund_hold_data(%s, %s) failed: %s", endpoint, symbol, e)
         # v3.3.15：不吞异常，交由 SmartRouter 降级并计健康度
         raise
+
+
+# ============================================================
+# 机构持仓汇总 —— 直取东财（修复 akshare 列错位）
+# ============================================================
+# 上游：东方财富 datacenter /dataapi/zlsj/list
+# 与 akshare 的唯一区别：**按上游字段名映射中文列名**，而不是按位置。
+# 上游字段顺序再变也不会错位。
+_EM_ZLSJ_URL = "http://data.eastmoney.com/dataapi/zlsj/list"
+
+# 机构类型 -> 东财 type 参数
+_FUND_HOLD_SYMBOL_MAP = {
+    "基金持仓": "1",
+    "QFII持仓": "2",
+    "社保持仓": "3",
+    "券商持仓": "4",
+    "保险持仓": "5",
+    "信托持仓": "6",
+}
+
+# (上游字段名, 输出中文列名) —— 顺序即输出列顺序
+#
+# ⚠️ 列名**刻意沿用 akshare 原有的 9 个列名**（不新增/不改名），只把「哪个字段
+# 填进哪个列」改对。原因：下游（如周末复盘报告模板）按列名取值，改名会静默
+# 打断它们。最后额外追加一列 持股占流通股比（纯新增，不改动既有列，风险低）。
+_FUND_HOLD_FIELDS = [
+    ("SECURITY_CODE", "股票代码"),
+    ("SECURITY_NAME_ABBR", "股票简称"),
+    ("HOULD_NUM", "持有基金家数"),
+    ("TOTAL_SHARES", "持股总数"),
+    ("HOLD_VALUE", "持股市值"),
+    ("HOLDCHA", "持股变化"),          # 增仓 / 减仓（方向）
+    ("HOLDCHA_NUM", "持股变动数值"),   # 股数增减
+    ("HOLDCHA_RATIO", "持股变动比例"), # 百分比
+    ("FREESHARES_RATIO", "持股占流通股比"),  # 新增列（akshare 原 schema 无此列）
+]
+
+_FUND_HOLD_NUM_COLS = (
+    "持有基金家数", "持股总数", "持股市值", "持股变动数值",
+    "持股变动比例", "持股占流通股比",
+)
+
+
+def fetch_fund_hold_direct(
+    endpoint: str = "hold", symbol: str = "基金持仓", date: str = "", **kwargs
+) -> pd.DataFrame:
+    """机构持仓汇总 —— 直取东财 datacenter，按字段名映射列（修复列错位）。
+
+    仅支持 endpoint="hold"；其余 endpoint 抛 ValueError，交由 SmartRouter
+    降级到 akshare 源（后者负责 detail）。
+
+    Args:
+        endpoint: 仅 "hold"
+        symbol: {"基金持仓","QFII持仓","社保持仓","券商持仓","保险持仓","信托持仓"}
+        date: 财报日期 "YYYYMMDD"，默认上一季度末
+
+    Returns:
+        DataFrame，列沿用 akshare 原有命名以保证下游不被打断：
+        序号 / 股票代码 / 股票简称 / 持有基金家数 / 持股总数 / 持股市值 /
+        持股变化 / 持股变动数值 / 持股变动比例，并追加 持股占流通股比。
+        其中「持股变化」为方向文本（增仓/减仓），「持股变动数值」为股数，
+        「持股变动比例」为百分比。
+    """
+    if endpoint != "hold":
+        raise ValueError(
+            f"fetch_fund_hold_direct 仅支持 endpoint='hold'，收到 {endpoint!r}"
+            "（detail 请走 akshare 源）"
+        )
+    t = str(symbol or "基金持仓").strip()
+    if t not in _FUND_HOLD_SYMBOL_MAP:
+        raise ValueError(
+            f"未知机构类型 {symbol!r}（支持: {list(_FUND_HOLD_SYMBOL_MAP)}）"
+        )
+    if not date:
+        date = _prev_quarter_end()
+    em_date = (
+        f"{date[:4]}-{date[4:6]}-{date[6:]}"
+        if (len(date) == 8 and date.isdigit())
+        else date
+    )
+
+    from .em_client import em_get
+
+    rows: list = []
+    page = 1
+    total_pages = 1
+    while page <= total_pages:
+        params = {
+            "date": em_date,
+            "type": _FUND_HOLD_SYMBOL_MAP[t],
+            "zjc": "0",
+            "sortField": "HOULD_NUM",
+            "sortDirec": "1",
+            "pageNum": str(page),
+            "pageSize": "500",
+            "p": str(page),
+            "pageNo": str(page),
+        }
+        resp = em_get(_EM_ZLSJ_URL, params=params, timeout=25)
+        payload = resp.json()
+        if not payload or not payload.get("data"):
+            break
+        rows.extend(payload["data"])
+        try:
+            total_pages = int(payload.get("pages") or 1)
+        except (TypeError, ValueError):
+            total_pages = 1
+        page += 1
+        if page > 60:  # 安全阀：最多 60 页（3 万条），防上游 pages 异常导致死循环
+            logger.warning("fetch_fund_hold_direct(%s): 分页超过 60 页，提前截断", t)
+            break
+
+    if not rows:
+        raise RuntimeError(f"东财机构持仓({t}, {date}) 返回空数据")
+
+    out = pd.DataFrame(
+        [{cn: r.get(en) for en, cn in _FUND_HOLD_FIELDS} for r in rows]
+    )
+    out.insert(0, "序号", range(1, len(out) + 1))
+    for c in _FUND_HOLD_NUM_COLS:
+        if c in out.columns:
+            out[c] = pd.to_numeric(out[c], errors="coerce")
+    # 护栏：列错位会立刻暴露 —— 股票代码必须是 6 位数字，否则宁可失败也不给错标数据
+    codes = out["股票代码"].astype(str).str.strip()
+    if not codes.str.fullmatch(r"\d{6}").all():
+        bad = codes[~codes.str.fullmatch(r"\d{6}")].head(3).tolist()
+        raise RuntimeError(
+            f"东财机构持仓({t}) 股票代码列异常（疑似上游字段再变）：{bad}"
+        )
+    return out
 
 
 # ============================================================
