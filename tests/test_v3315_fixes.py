@@ -386,3 +386,82 @@ class TestBackupAdapterContracts:
         monkeypatch.setattr(akf, "_ak", lambda: fake_ak)
         with pytest.raises(RuntimeError):
             fetch_industry_comparison_ths()
+
+
+# ============================================================
+# 机构持仓路由超时（基金持仓全量 11 页 > 路由默认 12s）
+# ============================================================
+
+class _MockMCP:
+    """捕获 register() 中通过 @mcp.tool() 注册的 async 工具函数。"""
+
+    def __init__(self) -> None:
+        self.tools: dict = {}
+
+    def tool(self):
+        def decorator(func):
+            self.tools[func.__name__] = func
+            return func
+        return decorator
+
+
+def _capture_news_tools():
+    from tradex.tools import news_events
+
+    m = _MockMCP()
+    news_events.register(m)
+    return news_events, m.tools
+
+
+class TestFundHoldRouteTimeout:
+    """get_fund_hold 必须以**放宽后**的超时调用路由。
+
+    背景：hold 分支走 em_zlsj_direct 的**全量翻页**，东财接口 pageSize 硬顶 500，
+    「基金持仓」5311 行 / 11 页实测 ~17s，用路由默认 12s 会稳定超时；
+    而「基金持仓」恰是 get_fund_hold 的**默认 symbol**，即无参调用必挂。
+    """
+
+    def test_route_called_with_relaxed_timeout(self, monkeypatch):
+        import asyncio
+        import json
+
+        from tradex.utils.cache import cache
+
+        cache.clear()  # 防止缓存命中导致 route 根本不被调用
+
+        seen: dict = {}
+
+        class _RecRouter:
+            def route(self, data_type, timeout=None, **kw):
+                seen["data_type"] = data_type
+                seen["timeout"] = timeout
+                seen["kwargs"] = kw
+                return pd.DataFrame({
+                    "序号": [1],
+                    "股票代码": ["300308"],
+                    "股票简称": ["中际旭创"],
+                }), "em_zlsj_direct"
+
+        news_events, tools = _capture_news_tools()
+        monkeypatch.setattr(news_events, "_router", _RecRouter())
+
+        raw = asyncio.run(tools["get_fund_hold"]())
+        payload = json.loads(raw)
+
+        assert seen["data_type"] == "fund_hold"
+        assert seen["timeout"] == news_events._FUND_HOLD_ROUTE_TIMEOUT
+        # 必须显著高于路由默认 12s，否则基金持仓仍会超时
+        assert seen["timeout"] >= 30.0
+        # 参数仍应原样透传
+        assert seen["kwargs"] == {"endpoint": "hold", "symbol": "基金持仓"}
+        assert payload[0]["股票代码"] == "300308"
+
+    def test_default_symbol_is_the_slow_one(self):
+        """无参调用的默认 symbol 就是「基金持仓」——正是最慢的那条，
+        故超时放宽是必须项，而非可选优化。"""
+        import inspect
+
+        _news_events, tools = _capture_news_tools()
+        sig = inspect.signature(tools["get_fund_hold"])
+        assert sig.parameters["symbol"].default == "基金持仓"
+        assert sig.parameters["endpoint"].default == "hold"

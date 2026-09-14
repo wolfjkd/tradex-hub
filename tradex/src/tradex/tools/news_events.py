@@ -22,11 +22,11 @@ Data source routing (via SmartRouter, v3.3.0):
   实时电报: cls_telegraph(priority=1)
   全量公告: cninfo_direct(priority=1)
   财报日历: stock_report_disclosure(priority=1) → baidu_economic_calendar(priority=100)
-  指数情绪: index_news_sentiment(priority=1)
+  指数情绪: legu_activity(priority=1) → ths_distribution(priority=100)
   期货新闻: futures_news(priority=1)
   人气榜: hot_rank(priority=1)
   雪球热度: xueqiu_hot(priority=1)
-  机构持仓: fund_hold(priority=1)
+  机构持仓: em_zlsj_direct(priority=1) → akshare(priority=100，仅 detail)
   百度热搜: hot_search(priority=1)
   问财查询: wencai_query(priority=1, pywencai 可选依赖)
   问财搜索: wencai_news(priority=1, iwencai OpenAPI 需 API Key)
@@ -43,6 +43,11 @@ from ..utils.formatter import df_to_json, error_response, slim_df
 from ..utils.symbol import normalize_symbol
 
 _router = get_router()
+
+# 机构持仓（fund_hold）走直取东财的**全量翻页**：东财接口 pageSize 硬顶 500，
+# 「基金持仓」有 5311 行 / 11 页，实测全量 ~17s，超过路由默认 12s 上限会被判超时。
+# 故该数据类型单独放宽；其余数据类型仍走 _DEFAULT_ROUTE_TIMEOUT(12s)。
+_FUND_HOLD_ROUTE_TIMEOUT = 40.0
 
 
 def register(mcp: FastMCP):
@@ -522,7 +527,9 @@ def register(mcp: FastMCP):
             kw = {"endpoint": endpoint, "symbol": symbol}
             if date:
                 kw["date"] = date
-            df, _src = _router.route("fund_hold", **kw)
+            df, _src = _router.route(
+                "fund_hold", timeout=_FUND_HOLD_ROUTE_TIMEOUT, **kw
+            )
             if df is None or df.empty:
                 return df_to_json(pd.DataFrame())
             result = df_to_json(df)
