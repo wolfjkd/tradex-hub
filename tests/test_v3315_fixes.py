@@ -18,7 +18,6 @@ from tradex.data_sources.akshare_fetchers import (
     _prev_quarter_end,
     fetch_baidu_economic_calendar,
     fetch_baidu_trade_notify,
-    fetch_index_news_sentiment,
     fetch_futures_news,
     fetch_hot_search_baidu,
     fetch_hot_rank_data,
@@ -126,10 +125,23 @@ class TestExceptionPropagation:
         with pytest.raises(RuntimeError):
             fetch_baidu_trade_notify(endpoint="suspend")
 
-    def test_index_news_sentiment_raises(self, monkeypatch):
-        _patch_ak_raising(monkeypatch, "index_news_sentiment_scope")
-        with pytest.raises(RuntimeError):
-            fetch_index_news_sentiment()
+    def test_index_news_sentiment_source_retired(self):
+        """旧主源已退役：函数与配套 SSL hack 都必须真删干净，不能只是不注册。
+
+        上游 chinascope 永久失效（301 跳官网首页返 HTML），留着这个源只会有害：
+        每次白失败一次、污染健康度、且必须保留「篡改进程级 requests.Session.request
+        的全局副作用」hack。所以断言的是「彻底移除」，不是「不注册」。
+        """
+        assert not hasattr(akf, "fetch_index_news_sentiment"), (
+            "fetch_index_news_sentiment 应已删除（上游永久失效）"
+        )
+        assert not hasattr(akf, "_ssl_patch_lock"), (
+            "_ssl_patch_lock 应随退役源一并删除（其唯一服务对象已不存在）"
+        )
+        # threading 若已无其他用途，模块属性也不该再被 import 进来
+        assert not hasattr(akf, "threading"), (
+            "akshare_fetchers 不应再 import threading（原先只服务于 _ssl_patch_lock）"
+        )
 
     def test_futures_news_raises(self, monkeypatch):
         _patch_ak_raising(monkeypatch, "futures_news_shmet")
@@ -172,7 +184,8 @@ NEW_SOURCES = [
     ("hot_rank", "ths_hot", 100),
     ("hot_search", "ths_hot", 100),
     ("xueqiu_hot", "ths_hot", 100),
-    ("index_news_sentiment", "legu_activity", 100),
+    ("index_news_sentiment", "legu_activity", 1),       # 旧主源退役后提为主源
+    ("index_news_sentiment", "ths_distribution", 100),  # 跨上游备源（同花顺）
 ]
 # 这两个类型刻意保持单源（未过度改动护栏）
 SINGLE_SOURCE_TYPES = ["fund_hold", "futures_news"]
@@ -186,7 +199,13 @@ def _source_priority(router, data_type, name):
 
 
 class TestBackupSourceRegistration:
-    """v3.3.15 补的 7 个备源必须就位，且总注册数 94→101。"""
+    """备源注册必须就位，且总注册数 94 → 101。
+
+    NEW_SOURCES 的语义已从「v3.3.15 补的 7 个备源」演进为「v3.3.15 补的备源 +
+    指数情绪源重装」：index_news_sentiment 因旧主源（chinascope）永久失效而
+    整体重装 —— legu_activity 由备源(100)提为主源(1)，另补 ths_distribution(100)。
+    该重装为「删一源 + 加一源」，故总数仍为 101。
+    """
 
     @pytest.fixture(scope="class")
     def router(self):

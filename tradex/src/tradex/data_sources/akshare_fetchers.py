@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import calendar
 import logging
-import threading
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -43,13 +42,12 @@ def _prev_quarter_end(today: "datetime | None" = None) -> str:
     last_day = calendar.monthrange(py, m)[1]                  # 真实月末，不假设 31
     return f"{py}{m:02d}{last_day:02d}"
 
-# v3.3.9+：SSL 兜底的互斥锁。fetch_index_news_sentiment 的目标站点
-# (chinascope) 证书链不受信任，而 akshare 接口不暴露 verify/session 参数，
-# 只能在 requests 会话层临时注入 verify=False；加锁串行化该窗口，
-# 避免并发线程在窗口期发起 HTTPS 请求时被静默跳过证书校验。
-# v3.3.15：注入点由 urllib 的 ssl 默认上下文改为 requests.Session.request
-# （akshare 走 requests，旧注入点无效）。
-_ssl_patch_lock = threading.Lock()
+# 待发版：`_ssl_patch_lock` 已随 `fetch_index_news_sentiment` 一并删除。
+# 原因：该锁只为串行化「临时篡改进程级 requests.sessions.Session.request 的
+# verify 开关」而存在 —— 这是全局副作用，锁只能缩小窗口、不能消除风险。
+# 而其唯一服务对象（chinascope 指数新闻情绪）上游**已永久失效**（端点 301 跳官网首页、
+# 返回 text/html，akshare 内部 r.json() 必然 JSONDecodeError），源已退役，
+# 这把拿全局副作用换来的锁自然失去存在理由。
 
 
 def _ak():
@@ -993,46 +991,28 @@ def fetch_baidu_trade_notify(endpoint: str = "suspend", date: str = "", **kwargs
 
 
 # ============================================================
-# index_news_sentiment — 指数新闻情绪
+# index_news_sentiment — 指数新闻情绪（主源已退役，见下）
 # ============================================================
-
-def fetch_index_news_sentiment(**kwargs) -> pd.DataFrame:
-    """指数新闻情绪。
-
-    调用 ak.index_news_sentiment_scope() 获取指数新闻情感得分。
-    目标网站 www.chinascope.com.cn 证书可能不受信任，自动绕过 SSL 验证。
-
-    Returns:
-        DataFrame with columns: 指数代码, 情感得分, 相关新闻数量等
-    """
-    ak = _ak()
-    try:
-        # chinascope 站点证书链不受信任（requests / curl_cffi 均验不过，需 verify=False）。
-        # v3.3.15 修正：akshare 该接口内部用 **requests.get**，而不是 urllib。
-        # 旧实现 patch ssl._create_default_https_context 只影响 urllib，
-        # 所以此前那段"兜底"实际从未生效 —— 该源一直是失效的。
-        # 现改为在 requests 会话层注入 verify=False，并用锁串行化该窗口。
-        import requests as _rq
-        with _ssl_patch_lock:
-            _orig_request = _rq.sessions.Session.request
-
-            def _request_no_verify(self, *args, **kwargs):
-                kwargs["verify"] = False
-                return _orig_request(self, *args, **kwargs)
-
-            _rq.sessions.Session.request = _request_no_verify
-            try:
-                df = ak.index_news_sentiment_scope()
-            finally:
-                _rq.sessions.Session.request = _orig_request
-        if df is None or df.empty:
-            logger.debug("fetch_index_news_sentiment: empty")
-            return pd.DataFrame()
-        return df
-    except Exception as e:
-        logger.warning("fetch_index_news_sentiment failed: %s", e)
-        # v3.3.15：不吞异常，交由 SmartRouter 降级并计健康度
-        raise
+# 【已退役】原 `fetch_index_news_sentiment`（走 ak.index_news_sentiment_scope →
+# www.chinascope.com/inews/senti/index）**上游永久失效，函数已删除**。
+#
+# 实测铁证（非猜测，可复现）：
+#   curl -kL "https://www.chinascope.com/inews/senti/index?period=YEAR"
+#     → 301 跳转到 https://www.chinascope.com.cn/ （公司官网首页）
+#     → HTTP 200 + content_type: text/html（22,833 字节的官网 HTML）
+#   ⇒ 该 JSON API 端点已被数库科技撤下/搬迁；akshare 内部 r.json() 必然
+#     JSONDecodeError。与 SSL 无关（-k 绕过证书照样拿到 HTML）。
+#
+# 为什么删而不是留着当"备胎"：它的上游是死的，留着只会有害 ——
+#   ① 每次调用先白失败一次（浪费一次 HTTP 往返 + 超时窗口）；
+#   ② 把该源健康分压低，污染健康度看板；
+#   ③ 为了它必须保留「在锁里篡改进程级 requests.sessions.Session.request」
+#      这种全局副作用 hack（见本文件顶部已删的 _ssl_patch_lock 说明），
+#      用一个全局副作用去维持一个永远失败的源，收益为负。
+#
+# 现装配：主源 legu_activity（乐咕乐股赚钱效应，实测 12 项），
+#         备源 ths_distribution（同花顺涨跌分布，实测 11 行，跨上游）。
+# 详见 registry.py 的 index_news_sentiment 注册块。
 
 
 # ============================================================

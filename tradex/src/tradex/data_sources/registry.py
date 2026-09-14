@@ -35,7 +35,7 @@
   | concept_attribution  | em_push2delay     |               |               |           |
   | baidu_economic_calendar | akshare_baidu_economic | akshare_report_time |         |           |
   | baidu_trade_notify   | akshare_baidu_notify | akshare_tfp   |               |           |
-  | index_news_sentiment | akshare_index_sentiment | legu_activity |           |           |
+  | index_news_sentiment | legu_activity | ths_distribution |         |           |
   | futures_news         | akshare_futures_news |             |               |           |
   | sina_finance_news    | sina_direct       |               |               |           |
   | hot_search           | akshare_hot_search | ths_hot       |               |           |
@@ -211,7 +211,8 @@ def _do_register() -> None:
     # ── v3.3.0 新增：新闻/资讯类数据源 ──
     router.register("baidu_economic_calendar", "akshare_baidu_economic", akf.fetch_baidu_economic_calendar, priority=1)
     router.register("baidu_trade_notify", "akshare_baidu_notify", akf.fetch_baidu_trade_notify, priority=1)
-    router.register("index_news_sentiment", "akshare_index_sentiment", akf.fetch_index_news_sentiment, priority=1)
+    # index_news_sentiment 的旧主源 akshare_index_sentiment 已退役（上游 chinascope
+    # 永久失效），改由下方 v3.3.15 区块统一装配主源+备源，故此处不再注册。
     router.register("futures_news", "akshare_futures_news", akf.fetch_futures_news, priority=1)
     router.register("sina_finance_news", "sina_direct", nf.fetch_sina_finance_news, priority=1)
     router.register("hot_search", "akshare_hot_search", akf.fetch_hot_search_baidu, priority=1)
@@ -233,10 +234,17 @@ def _do_register() -> None:
     router.register("hot_rank", "ths_hot", akf.fetch_hot_rank_ths, priority=100)
     router.register("hot_search", "ths_hot", akf.fetch_hot_rank_ths, priority=100)
     router.register("xueqiu_hot", "ths_hot", akf.fetch_hot_rank_ths, priority=100)
-    # 指数情绪：主源上游 chinascope 已永久失效（改为返回 HTML，非 JSON），
-    # 补乐咕乐股「赚钱效应」作为跨上游情绪源
+    # 指数情绪：**主源整体重装**（旧主源 akshare_index_sentiment 已退役）。
+    # 旧主源上游 chinascope 永久失效（端点 301 跳官网首页、返 text/html，
+    # akshare 内部 r.json() 必然 JSONDecodeError，与 SSL 无关），源与配套的
+    # 全局 SSL hack 一并删除。现把实测可用的乐咕乐股「赚钱效应」提为主源，
+    # 并补同花顺涨跌分布作跨上游备源（两者上游不同，非同生共死）。
+    # 注意：备源必须返回 DataFrame —— 工具层 get_market_sentiment 写的是
+    # `df is None or df.empty`，若给 dict（如 ths_market_breadth）会 AttributeError。
     router.register("index_news_sentiment", "legu_activity",
-                    akf.fetch_market_sentiment_legu, priority=100)
+                    akf.fetch_market_sentiment_legu, priority=1)
+    router.register("index_news_sentiment", "ths_distribution",
+                    ths.fetch_ths_up_down_distribution, priority=100)
     # fund_hold / futures_news 保持单源，理由见 CHANGELOG：
     #   - fund_hold：上游为东财 datacenter（非 push2 族，本机实测稳定），akshare 无等价第二源
     #   - futures_news：上游为上海有色网，akshare 无等价第二源
