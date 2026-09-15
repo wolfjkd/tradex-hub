@@ -4,6 +4,53 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
 
+## [3.3.16] - 2026-09-15
+
+### Fixed
+
+- **机构持仓「列错位」——整列语义全错，但行数正常（数据正确性，影响复盘「机构持仓」章节）**：akshare `stock_report_fund_hold` 用 `big_df.columns = [...]` **按位置**硬编码中文列名，而上游东财 `/dataapi/zlsj/list` 字段顺序已改版 → **每列的语义都错**。实测（直调 akshare、绕开本项目全部代码）：`股票代码` 列里是市值 `-415345718.82`、`股票简称` 列里是代码 `000680`、`持股变动数值` 列里是文本 `减仓`。这类 bug 只判「行数/非空」**必然漏检**（返回 615 行、84KB，看着完全正常）。**1.18.91 与 1.18.94 同样错位** ⇒ 属上游字段漂移 + akshare 位置映射，**非本次依赖升级引入**；此前每年 4–9 月因默认日期非法恒返回空表，所以一直没暴露。
+- **`get_fund_hold()` 无参调用稳定超时（P1，默认参数必挂）**：机构持仓主源 `em_zlsj_direct` 是**全量翻页**（东财接口 `pageSize` 硬顶 500，实测传 1000/2000/5000 均只回 500），基金持仓 5311 行 = 11 页 ≈ 17s，超过路由默认单源超时 `_DEFAULT_ROUTE_TIMEOUT = 12.0` → 判超时；而 akshare 兜底已按设计拒用（不再返回错标数据）⇒ 最终报错、无数据。偏偏 **「基金持仓」正是该工具默认 `symbol`** ⇒ 无参调用必然失败。逐类型全量耗时实测：信托 1.4s/158 行、社保 1.8s/615 行、QFII 6.3s/1719 行（已接近上限）、**基金持仓 16.8s/5311 行（超限）**。
+- **退役已永久失效的 `index_news_sentiment` 旧主源**（v3.3.15 遗留项）：旧主源走 `ak.index_news_sentiment_scope` → `www.chinascope.com/inews/senti/index`，该上游**已永久失效**（实测端点 301 跳转到官网首页，返回 200 + `text/html` 22,833 字节；akshare 内部 `r.json()` 必然 `JSONDecodeError`。与 SSL 无关，`-k` 绕证书照样是 HTML）。v3.3.15 只修好了它那段从未生效的 SSL 兜底，但源本身已死，留着有害：每次调用先白失败一次（浪费 HTTP 往返）、压低健康分污染看板、且为它必须保留「在锁里篡改进程级 `requests.sessions.Session.request`」这种全局副作用 hack。
+
+### Changed
+
+- **`fund_hold` 的 `hold` 分支改为直取东财 + 按字段名映射**：新增 `fetch_fund_hold_direct`，绕开 akshare 直取上游 datacenter，**按上游字段名映射列**（上游再改字段顺序也不会错位），并复用本项目 `em_get`（含节流 + UA + 反爬）。之所以不能在输出上补救列名——真正需要的 `SECURITY_NAME_ABBR`（股票简称）落在 akshare 标为 `"_"` 的位置，最终 `big_df[[...]]` 选择时被**丢弃**，只能绕开 akshare。
+  - **列名刻意沿用 akshare 原有 9 个命名**（只把映射改对），避免静默打断按列名取值的下游报告模板；新增列**只做追加**（`持股占流通股比`）。
+  - 加**列错位守卫**：`股票代码` 必须全是 6 位数字，否则**抛错** —— 宁可失败，也不把错标数据交给下游。
+  - `fetch_fund_hold_data` 的 `hold` 分支改为**直接 `raise`**（不再作兜底，否则 direct 失败时它会静默返回错标数据，比直接失败更糟）；`detail` 分支保留（该 API 按 key 取，无错位）。
+  - `fund_hold` 由**单源升为双源**：`em_zlsj_direct`(1) 主 + `akshare_fund_hold`(100) 备。`detail` 请求走 direct 会抛 `ValueError` → 按设计降级到 akshare，实测 77 行正常。
+- **`fund_hold` 路由超时单独放宽**：新增 `_FUND_HOLD_ROUTE_TIMEOUT = 40.0`（`tools/news_events.py`），**仅该数据类型放宽**，其余仍走默认 12s，不拖慢整体降级速度。
+- **`index_news_sentiment` 主备对调 + 补跨上游备源**：移除 `akshare_index_sentiment` 注册；把实测可用的乐咕乐股「赚钱效应」`legu_activity` 由备源(100) **提为主源(1)**；补同花顺涨跌分布 `ths_distribution`(100) 作跨上游备源（与乐咕上游不同，非同生共死）。⚠️ 备源必须返 `DataFrame`：工具层 `get_market_sentiment` 写的是 `df is None or df.empty`，若给 dict 会 `AttributeError`。
+- 顺带修正 `tools/news_events.py` docstring 两处过时描述（指数情绪源已退役换 `legu_activity` + `ths_distribution`；机构持仓主源为 `em_zlsj_direct`）。
+- 代码卫生：`akshare_fetchers.py` 删除 `fetch_index_news_sentiment`、`_ssl_patch_lock` 及仅服务于它的 `import threading`，该文件**不再有任何全局 SSL 篡改**。
+- 数据源矩阵规模：**101 → 102**（新增直取主源 `em_zlsj_direct`）；数据类型 **78** 不变；去重源 **36 → 37**；MCP 工具数 **129** 不变。
+
+### Added
+
+- 新增 7 项回归测试（`tests/test_v3315_fixes.py` 32 → 39）：
+  - `TestFundHoldDirect`：上游字段**乱序**时仍映射正确 / 列错位守卫必须抛错 / `endpoint` 与 `symbol` 契约。
+  - `TestFundHoldRouteTimeout`：断言路由收到放宽后的超时且 **≥30s**、断言默认 `symbol` 恰为最慢那条（防止默认参数再落回慢源）。
+  - 「退役守卫」断言：`fetch_index_news_sentiment` / `_ssl_patch_lock` / `threading` 三者必须**真删干净**（而非仅不注册）。
+  - P1-1 默认日期用例改打直取版；计数断言 `101→102`、去重源 `36→37`、单源护栏移除 `fund_hold`。
+
+### 验证
+
+- `pytest -m "not network"`：**457 passed / 7 deselected / 0 failed**（8.5s，零回归；基线 450 + 本次新增 7）。
+- 代理铁律复核：socket 层审计本地代理端口（7897/10808/9）**0 命中**，全部国内直连。
+- 真实联网冒烟（`route()` 逐路口实调，打印**实际命中源**与数据规模）：
+
+  | 数据类型 | 实际命中源 | 结果 | 说明 |
+  |---|---|---|---|
+  | `fund_hold`（默认 `基金持仓`） | **`em_zlsj_direct`** | **5311 行 × 10 列** | 修复前无参调用因超时必挂；现 15.8s 返回 |
+  | `fund_hold`（`社保持仓`） | `em_zlsj_direct` | 615 行 | 列语义正确 |
+  | `index_news_sentiment` | **`legu_activity`** | 12 行 × 2 列 | 旧主源已退役，新主源直连可用 |
+
+- **列错位验收（不只判行数）**：`get_fund_hold(symbol="基金持仓")` 首行实测
+  `300308 中际旭创 / 持有基金家数 3578 / 持股市值 272,710,423,590 / 持股变动 减仓 / 持股变动比例 -6.89`；
+  `股票代码` 列 **5311/5311 全为 6 位数字、0 处错位**。
+- **MCP 进程内双确认**（第三次重启后）：运行进程 `health_check` = `healthy`（工具 129 / 数据源 102 / 不健康 0 / akshare 1.18.94）；
+  独立 MCP stdio 探针复跑 `基金持仓` **14.99s / 5311 行**，返回体长度（845,528 字符）与运行进程**完全一致** ⇒ 同源同码。
+
 ## [3.3.15] - 2026-09-14
 
 ### Fixed
