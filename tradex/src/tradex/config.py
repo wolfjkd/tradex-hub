@@ -105,10 +105,10 @@ class Config:
     * 表示关闭 DNS rebinding 防护、允许任意 Host（仅限可信内网）。可被 CLI --allowed-hosts 覆盖"""
 
     # ── WebSocket 推送服务 ──────────────────────────────────
-    WS_SERVER_ENABLED: bool = _get_env("WS_SERVER_ENABLED", "false").lower() == "true"
+    WS_SERVER_ENABLED: bool = _get_env("WS_SERVER_ENABLED", False, bool)
     """是否启用 WebSocket 实时推送服务（默认关闭）"""
 
-    WS_PORT: int = int(_get_env("WS_PORT", "8765"))
+    WS_PORT: int = _get_env("WS_PORT", 8765, int)
     """WebSocket 服务监听端口"""
 
     WS_TOKEN: str = _get_env("WS_TOKEN", "")

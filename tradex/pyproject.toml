@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tradex"
-version = "3.3.16"
+version = "3.3.17"
 description = "China Financial Data MCP Server based on AKShare - Free alternative to commercial financial data MCPs"
 readme = "README.md"
 license = "Apache-2.0"
@@ -26,7 +26,8 @@ classifiers = [
 ]
 
 dependencies = [
-    "mcp>=1.0.0",
+    # mcp 2.x 移除了 mcp.server.fastmcp.FastMCP v1 API（本项目 15+ 模块在用），锁定 1.x
+    "mcp>=1.0.0,<2",
     "akshare>=1.18.94",
     "eltdx>=3.2.2",
     "pandas>=2.0.0",

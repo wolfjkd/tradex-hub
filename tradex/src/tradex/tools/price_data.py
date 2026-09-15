@@ -262,8 +262,8 @@ def register(mcp: FastMCP):
                     result = dict_to_json(info)
                     cache.set(cache_key, result, TTL_REALTIME)
                     return result
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("市值 Tier1(实时快照) 失败(%s): %s", symbol, exc)
 
         # === Tier 2: 全量行情快照 ===
         try:
@@ -288,8 +288,8 @@ def register(mcp: FastMCP):
                     result = df_to_json(row[available_cols])
                     cache.set(cache_key, result, TTL_REALTIME)
                     return result
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("市值 Tier2(全量行情) 失败(%s): %s", symbol, exc)
 
         return error_response(
             f"获取市值数据失败 ({symbol}): 所有数据源均不可用",

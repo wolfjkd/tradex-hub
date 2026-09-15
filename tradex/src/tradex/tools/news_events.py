@@ -34,6 +34,8 @@ Data source routing (via SmartRouter, v3.3.0):
 
 from __future__ import annotations
 
+import logging
+
 from mcp.server.fastmcp import FastMCP
 
 import pandas as pd
@@ -41,6 +43,8 @@ from ..data_sources import get_router
 from ..utils.cache import TTL_DAILY, TTL_REALTIME, cache
 from ..utils.formatter import df_to_json, error_response, slim_df
 from ..utils.symbol import normalize_symbol
+
+logger = logging.getLogger(__name__)
 
 _router = get_router()
 
@@ -105,16 +109,16 @@ def register(mcp: FastMCP):
                 df1, _src1 = _router.route("news_data", endpoint="stock_report_disclosure")
                 if df1 is not None and not df1.empty:
                     all_dfs.append(df1)
-            except Exception:
+            except Exception as exc:
                 # em_news_direct 无 symbol 时会失败，自动降级到 akshare
-                pass
+                logger.debug("财报披露源失败: %s", exc)
             # Source 2: 百度经济数据日历（v3.3.0 新增）
             try:
                 df2, _src2 = _router.route("baidu_economic_calendar", date=date)
                 if df2 is not None and not df2.empty:
                     all_dfs.append(df2)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("百度经济日历源失败: %s", exc)
 
             if not all_dfs:
                 return df_to_json(pd.DataFrame())
@@ -263,8 +267,8 @@ def register(mcp: FastMCP):
                     df, _src = _router.route("news_data", symbol=symbol)
                     if df is not None and not df.empty:
                         all_dfs.append(df)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("个股新闻源失败(%s): %s", symbol, exc)
             # 如果个股新闻无数据或未指定symbol，尝试全市场源
             if not all_dfs:
                 # 全市场源：财联社快讯 + 新浪财经 + 百度交易提醒 + 期货新闻 + 百度热搜
@@ -273,16 +277,16 @@ def register(mcp: FastMCP):
                     df, _src = _router.route("telegraph_news", num_results=num_results)
                     if df is not None and not df.empty:
                         all_dfs.append(df)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("财联社快讯源失败: %s", exc)
 
                 # Source 2: 新浪财经新闻（纯新闻，v3.3.0）
                 try:
                     df, _src = _router.route("sina_finance_news", num_results=20)
                     if df is not None and not df.empty:
                         all_dfs.append(df)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("新浪财经源失败: %s", exc)
 
                 # Source 3: 百度交易提醒（v3.3.0）
                 try:
@@ -290,24 +294,24 @@ def register(mcp: FastMCP):
                         df, _src = _router.route("baidu_trade_notify", endpoint=ep, date="")
                         if df is not None and not df.empty:
                             all_dfs.append(df)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("百度交易提醒源失败: %s", exc)
 
                 # Source 4: 期货新闻（v3.3.0）
                 try:
                     df, _src = _router.route("futures_news", symbol="全部")
                     if df is not None and not df.empty:
                         all_dfs.append(df)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("期货新闻源失败: %s", exc)
 
                 # Source 5: 百度热搜（v3.3.0）
                 try:
                     df, _src = _router.route("hot_search", symbol="A股")
                     if df is not None and not df.empty:
                         all_dfs.append(df)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("百度热搜源失败: %s", exc)
 
             if not all_dfs:
                 return df_to_json(pd.DataFrame())

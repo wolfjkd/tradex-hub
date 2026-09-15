@@ -98,6 +98,15 @@ class TestProxyBypass:
 # P2: 独立备源
 # ============================================================
 
+@pytest.fixture(scope="class")
+def router():
+    from tradex.data_sources.registry import register_all_sources
+    from astock_signals.smart_router import get_router
+
+    register_all_sources()
+    return get_router()
+
+
 class TestIndependentBackupSources:
     """4 个原单源类型必须有非东财的独立备源。"""
 
@@ -107,14 +116,6 @@ class TestIndependentBackupSources:
         ("valuation", "eltdx"),
         ("industry_data", "ths"),
     ]
-
-    @pytest.fixture(scope="class")
-    def router(self):
-        from tradex.data_sources.registry import register_all_sources
-        from astock_signals.smart_router import get_router
-
-        register_all_sources()
-        return get_router()
 
     def test_backup_sources_registered(self, router):
         for data_type, source in self.EXPECTED:

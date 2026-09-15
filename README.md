@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/License-Apache--2.0-yellow.svg" alt="License"/>
   <img src="https://img.shields.io/badge/Data-A股-red.svg" alt="Data Scope"/>
   <img src="https://img.shields.io/badge/Tools-129-orange.svg" alt="MCP Tools"/>
-  <img src="https://img.shields.io/badge/Version-3.3.16-blue.svg" alt="Version"/>
+  <img src="https://img.shields.io/badge/Version-3.3.17-blue.svg" alt="Version"/>
 </p>
 
 ---
@@ -417,6 +417,7 @@ AI 会调用 `mcp__tradex__eltdx_get_kline`，返回 100 根日 K 线。
 
 | 版本 | 日期 | 内容 |
 |------|------|------|
+| v3.3.17 | 2026-09-15 | 依赖声明与健壮性修复：`mcp>=1.0.0,<2` 锁上限（mcp 2.x 移除 v1 `FastMCP` API，15 个工具模块在用，新环境解析到 2.x 直接 ImportError，pyproject+requirements 两处同修）；`WS_PORT` 环境变量非数字改容错回退默认（原在 import 期 ValueError 崩服务）；requirements.txt 补齐 `requests`/`stockstats`/`python-dotenv` 3 个运行时依赖；降级链 10 处静默吞错补 `logger.debug` 留痕（`get_market_capitalization` Tier1/2 + `news_events` 8 源，多源全挂时可排查各路死因）；pytest class-scoped fixture 迁模块级（pytest 10 兼容，消 2 条弃用警告）；删除 V2.5.0 时代无引用死脚本 `verify_v250.py`。测试 457 passed，MCP stdio 握手 129 工具验证通过 |
 | v3.3.16 | 2026-09-15 | 修复机构持仓数据正确性与超时：`fetch_fund_hold_data` 因 akshare 按位置映射列而上游行序漂移 → **整列语义全错**（行数正常故长期漏检，1.18.91/1.18.94 同样错位、非升级引入），改为新增 `fetch_fund_hold_direct` **直取东财 + 按上游字段名映射**并加「代码列必须全 6 位数字」错位守卫，列名沿用 akshare 原 9 名（只追加 `持股占流通股比`）、`fund_hold` 升为双源（`em_zlsj_direct` 主 + akshare 备）；`get_fund_hold()` 默认 `基金持仓` 因全量翻页 11 页 ≈17s 超路由 12s 上限而**无参调用必挂**，新增 `_FUND_HOLD_ROUTE_TIMEOUT=40.0` 单独放宽；退役已永久失效的 `index_news_sentiment` 旧主源（chinascope 返回 HTML 非 JSON），`legu_activity` 提为主源 + 补同花顺 `ths_distribution` 跨上游备源。数据源 101→102（去重 36→37），新增 7 项回归测试，测试 457 passed |
 | v3.3.15 | 2026-09-14 | 修复静默数据丢失与降级链伪装：`fetch_fund_hold_data` 季度末非法日期（默认调用恒空表）、8 个 fetch_fn 静默吞异常改 raise（SmartRouter 可降级并计健康度）、`fetch_index_news_sentiment` SSL 兜底注入点错位（urllib 层改 requests 层）、`industry_comparison` 双源同属东财 push2 族实际同生共死（补同花顺 `ths_flow` 跨上游兜底）；为 6 个单源类型补非主源上游独立备源，数据源 94→101（去重 31→36），测试 450 passed |
 | v3.3.14 | 2026-09-14 | 修复备源降级链与代理误路由：akshare 备源新增 `period` 归一化（`day→daily`，修复传 eltdx 风格周期时降级必断的 `KeyError`）；`tradex/__init__.py` 补设 `NO_PROXY=*`（原仅 pop 环境变量，`requests` 会回退读注册表代理导致国内数据源走 Clash）；`_bar_sort_key` 收窄异常捕获并告警（原静默 `return 0.0` 污染回测首行）。为 `company_info`/`financial_stmt`/`valuation`/`industry_data` 四类补非东财独立备源（巨潮/新浪/eltdx/同花顺），数据源 90→94；新增 20 项回归测试，测试 418 passed |

@@ -225,6 +225,12 @@ def _source_priority(router, data_type, name):
     raise AssertionError(f"{data_type}:{name} 未在注册表中找到")
 
 
+@pytest.fixture(scope="class")
+def router():
+    register_all_sources()  # 幂等，可安全多次调用
+    return get_router()
+
+
 class TestBackupSourceRegistration:
     """备源注册必须就位，且总注册数 94 → 101。
 
@@ -233,11 +239,6 @@ class TestBackupSourceRegistration:
     整体重装 —— legu_activity 由备源(100)提为主源(1)，另补 ths_distribution(100)。
     该重装为「删一源 + 加一源」，故总数仍为 101。
     """
-
-    @pytest.fixture(scope="class")
-    def router(self):
-        register_all_sources()  # 幂等，可安全多次调用
-        return get_router()
 
     def test_total_data_types(self, router):
         # 数据类型数不变（仍 78 个）

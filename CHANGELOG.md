@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
 
+## [3.3.17] - 2026-09-15
+
+### Fixed
+
+- **`mcp>=1.0.0` 无上限约束（P0，新环境安装必炸）**：全部 15 个工具模块使用 mcp v1 API（`mcp.server.fastmcp.FastMCP`），mcp 2.x 已移除该路径；此前 uv/pip 在全新环境会把 mcp 解析到 2.x，`python -m tradex` 直接 ImportError（本机 venv 曾实际踩坑，靠手动 pin 1.30.0 恢复但项目文件未修）。改为 `mcp>=1.0.0,<2`，`pyproject.toml` 与 `requirements.txt` 两处同修。
+- **`WS_PORT` 环境变量非数字会在 import 期崩服务**：`int(_get_env("WS_PORT", "8765"))` 绕过了 `_get_env` 的容错转换，`WS_PORT=abc` 在模块加载时直接 ValueError。改用 `_get_env("WS_PORT", 8765, int)`（非法值回退默认）；`WS_SERVER_ENABLED` 一并统一为 `_get_env` bool cast 写法。
+- **requirements.txt 缺 3 个运行时依赖**：`requests`/`stockstats`/`python-dotenv`（pyproject 已声明、requirements 漏抄，`pip install -r requirements.txt` 装不齐），补齐。
+- **pytest 未来兼容（PytestRemovedIn10Warning ×2）**：`test_v3314_fixes.py`/`test_v3315_fixes.py` 的 class-scoped fixture 由类内实例方法迁至模块级（`scope="class"` 语义不变），pytest 10 可继续运行。
+
+### Changed
+
+- **降级链吞错加日志（10 处）**：`get_market_capitalization`（Tier1/Tier2）与 `news_events`（财报披露/百度经济日历/个股新闻/财联社快讯/新浪财经/百度交易提醒/期货新闻/百度热搜）原 `except Exception: pass` 全静默——多源全挂时只报"所有数据源均不可用"，无从排查各路死因。现统一 `logger.debug` 留痕（单源失败属设计预期，debug 级不刷屏）；`news_events.py` 补 `logger` 定义。
+
+### Removed
+
+- 删除 `tradex/verify_v250.py`：V2.5.0 时代一次性验证脚本（无任何引用），git 历史可追溯。
+
 ## [3.3.16] - 2026-09-15
 
 ### Fixed
