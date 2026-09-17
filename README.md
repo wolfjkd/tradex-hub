@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/License-Apache--2.0-yellow.svg" alt="License"/>
   <img src="https://img.shields.io/badge/Data-A股-red.svg" alt="Data Scope"/>
   <img src="https://img.shields.io/badge/Tools-129-orange.svg" alt="MCP Tools"/>
-  <img src="https://img.shields.io/badge/Version-3.3.17-blue.svg" alt="Version"/>
+  <img src="https://img.shields.io/badge/Version-3.3.18-blue.svg" alt="Version"/>
 </p>
 
 ---
@@ -25,7 +25,7 @@
 - **L2 计算引擎层**（8个工具）：技术指标计算6个、绩效指标计算2个
 - **L3 决策支持层**（16个工具）：交易信号生成3个、多因子分析2个、条件选股2个、系统诊断5个、综合分析3个、技术分析引擎1个
 
-**数据源架构（v3.3.16）**：
+**数据源架构（v3.3.18）**：
 - **data_sources 数据源层**：78 个数据类型，102 个数据源注册（37 种源），按封禁风险分三梯队
 - **SmartRouter 全量覆盖**：L1 工具通过 `SmartRouter.route()` 统一获取数据，自动健康评分/降级/故障隔离
 - **eltdx 3.2.2**：行情类第一主源，31 个工具覆盖五档盘口/集合竞价/逐笔/F10/分时/K线/全景档案/短线指标/题材/分类行情等；新增常驻连接管理器 `eltdx_stream.py`（游标增量轮询实现准实时五档盘口）。3.x 为 Rust 重写内核（native wheel，cp310-abi3）
@@ -352,7 +352,7 @@ python -m tradex --http --allowed-hosts '*'    # 仅可信内网：关闭 Host �
 |------|------|------|
 | `POST /mcp` | **Streamable HTTP** | MCP 2025 新标准传输，Dify / LangChain / Claude 远程客户端首选 |
 | `GET /sse` + `POST /messages/` | legacy SSE | 旧客户端兼容（MCP 官方已标 deprecated，保留过渡） |
-| `GET /health` | HTTP | 健康检查：`{"status":"ok","service":"tradex-mcp","version":"3.3.16","tools":129}`，轻量探活不触发数据源网络 |
+| `GET /health` | HTTP | 健康检查：`{"status":"ok","service":"tradex-mcp","version":"3.3.18","tools":129}`，轻量探活不触发数据源网络 |
 
 **Dify / LangChain 配置示例**（Streamable HTTP）：
 
@@ -417,6 +417,7 @@ AI 会调用 `mcp__tradex__eltdx_get_kline`，返回 100 根日 K 线。
 
 | 版本 | 日期 | 内容 |
 |------|------|------|
+| v3.3.18 | 2026-09-18 | **根因修复 MCP 频繁断连**：eltdx 3.x Rust 内核（pyo3 native）panic 抛 `PanicException`（继承 `BaseException`，不被 `except Exception` 捕获）穿透 `route()`/`_safe_call` 杀穿事件循环 → server 进程干净退出 → WorkBuddy 报 `-32000` 且永不重连。触发：v3.3.2 的 8 线程池并发 × v3.3.13 的 eltdx Rust 内核单例。三层防御（不降级 eltdx）：L1 `route()` 加 `except BaseException` 按源降级（KI/SE/CancelledError 放行）；L2 `_NativePanicShield` 互斥锁序列化所有 native 调用 + `BaseException→RuntimeError`（`_get_client()` 返代理，40+ 调用点零改动）；L2b `eltdx_stream` 第二裸 client 同包盾；L3 `_safe_call` BaseException 双保险。新增 14 条回归测试，测试 471 passed |
 | v3.3.17 | 2026-09-15 | 依赖声明与健壮性修复：`mcp>=1.0.0,<2` 锁上限（mcp 2.x 移除 v1 `FastMCP` API，15 个工具模块在用，新环境解析到 2.x 直接 ImportError，pyproject+requirements 两处同修）；`WS_PORT` 环境变量非数字改容错回退默认（原在 import 期 ValueError 崩服务）；requirements.txt 补齐 `requests`/`stockstats`/`python-dotenv` 3 个运行时依赖；降级链 10 处静默吞错补 `logger.debug` 留痕（`get_market_capitalization` Tier1/2 + `news_events` 8 源，多源全挂时可排查各路死因）；pytest class-scoped fixture 迁模块级（pytest 10 兼容，消 2 条弃用警告）；删除 V2.5.0 时代无引用死脚本 `verify_v250.py`。测试 457 passed，MCP stdio 握手 129 工具验证通过 |
 | v3.3.16 | 2026-09-15 | 修复机构持仓数据正确性与超时：`fetch_fund_hold_data` 因 akshare 按位置映射列而上游行序漂移 → **整列语义全错**（行数正常故长期漏检，1.18.91/1.18.94 同样错位、非升级引入），改为新增 `fetch_fund_hold_direct` **直取东财 + 按上游字段名映射**并加「代码列必须全 6 位数字」错位守卫，列名沿用 akshare 原 9 名（只追加 `持股占流通股比`）、`fund_hold` 升为双源（`em_zlsj_direct` 主 + akshare 备）；`get_fund_hold()` 默认 `基金持仓` 因全量翻页 11 页 ≈17s 超路由 12s 上限而**无参调用必挂**，新增 `_FUND_HOLD_ROUTE_TIMEOUT=40.0` 单独放宽；退役已永久失效的 `index_news_sentiment` 旧主源（chinascope 返回 HTML 非 JSON），`legu_activity` 提为主源 + 补同花顺 `ths_distribution` 跨上游备源。数据源 101→102（去重 36→37），新增 7 项回归测试，测试 457 passed |
 | v3.3.15 | 2026-09-14 | 修复静默数据丢失与降级链伪装：`fetch_fund_hold_data` 季度末非法日期（默认调用恒空表）、8 个 fetch_fn 静默吞异常改 raise（SmartRouter 可降级并计健康度）、`fetch_index_news_sentiment` SSL 兜底注入点错位（urllib 层改 requests 层）、`industry_comparison` 双源同属东财 push2 族实际同生共死（补同花顺 `ths_flow` 跨上游兜底）；为 6 个单源类型补非主源上游独立备源，数据源 94→101（去重 31→36），测试 450 passed |

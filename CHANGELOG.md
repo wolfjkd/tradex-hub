@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
 
+## [3.3.18] - 2026-09-18
+
+### Fixed
+
+- **根因修复 MCP 频繁断连**：eltdx 3.x Rust 内核（pyo3 native）panic 时抛出 `PanicException`（继承 `BaseException`，不被 `except Exception` 捕获），穿透 `SmartRouter.route()` 与 `_safe_call`，杀穿 anyio 事件循环导致 MCP server 进程干净退出（Windows 10 天 394 条应用崩溃 0 条 python 佐证），WorkBuddy 报 `-32000 Connection closed` 且永不重连。触发条件为 v3.3.2 的 8 线程池并发 × v3.3.13 的 eltdx Rust 内核单例（native 非线程安全间歇 panic）。
+
+### Changed
+
+- **三层防御（不降级 eltdx）**：
+  - L1 `smart_router.route()`：新增 `except BaseException` 统一兜底按源失败降级；`KeyboardInterrupt`/`SystemExit`/`asyncio.CancelledError` 放行（不吞进程/协程取消语义）。
+  - L2 `eltdx_fetchers._NativePanicShield`：全局互斥锁序列化所有 native 调用（消除并发竞争触发条件）+ `BaseException→RuntimeError`；`_get_client()` 返回代理，40+ 调用点零改动；标量属性原样返回。
+  - L2b `eltdx_stream`：常驻流第二裸 client 同包盾（共享互斥锁）+ init 期兜底。
+  - L3 `composite_analysis._safe_call`：`except BaseException` 双保险，`CancelledError` 放行。
+
+### Added
+
+- `tests/test_baseexception_shield.py`：14 条回归测试（先红后绿），覆盖 route() BaseException 穿透、native shield 序列化、标量属性、CancelledError 放行。
+
+### 验证
+
+- `pytest -m "not network"`: 471 passed / 7 deselected / 0 failed。
+- 真实 eltdx 10 线程并发零 panic 逃逸；stdio 启动压测 5/5。
+- 端到端（HTTP 网关新代码）：`analyze_stock_comprehensive(600519)`（9-17 18:17 死亡现场同款调用）1.6s 完整返回；shield 日志确认激活。
+
 ## [3.3.17] - 2026-09-15
 
 ### Fixed
