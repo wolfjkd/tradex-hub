@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 import logging
 import threading
@@ -263,16 +264,30 @@ class SmartRouter:
                     "SmartRouter: %s via %s OK (%.0fms)", data_type, source_name, latency_ms
                 )
                 return result, source_name
-            except Exception as e:
+            except BaseException as e:
+                # 统一兜底（含 2026-09-18 根因修复：MCP 频繁断连）：
+                # 必须捕获 BaseException 而非 Exception —— pyo3 native 扩展
+                # （eltdx 3.x Rust 内核）panic 时抛出 PanicException，它继承
+                # BaseException。若只捕 Exception，异常穿透 anyio 事件循环
+                # 导致 MCP server 进程整体退出（客户端 -32000 Connection
+                # closed 且 WorkBuddy 不重连）。此处一律按源失败处理：
+                # 记录失败、走降级；独占源转为 RuntimeError。
+                # KeyboardInterrupt / SystemExit 必须放行（进程语义不可吞）；
+                # asyncio.CancelledError（3.8+ 属 BaseException）同样放行，
+                # 避免吞掉协程取消语义（客户端断开/超时取消场景）。
+                if isinstance(e, (KeyboardInterrupt, SystemExit, asyncio.CancelledError)):
+                    raise
                 health.record_failure()
-                errors.append(f"{source_name}: {e}")
+                errors.append(f"{source_name}: {type(e).__name__}: {e}")
                 logger.warning(
-                    "SmartRouter: %s via %s FAILED: %s", data_type, source_name, e
+                    "SmartRouter: %s via %s FAILED: %s: %s",
+                    data_type, source_name, type(e).__name__, e,
                 )
                 # 独占源失败不降级，直接 raise
                 if exclusive:
                     raise RuntimeError(
-                        f"Exclusive source '{source_name}' for '{data_type}' failed: {e}"
+                        f"Exclusive source '{source_name}' for '{data_type}' "
+                        f"failed with {type(e).__name__}: {e}"
                     ) from e
 
         raise RuntimeError(

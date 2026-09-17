@@ -68,6 +68,19 @@ async def _safe_call(func, *args, timeout: float = 30.0, **kwargs) -> dict:
     except Exception as exc:
         logger.warning("组合分析子调用失败 %s: %s", getattr(func, "__name__", "?"), exc)
         return {"success": False, "error": str(exc)}
+    except BaseException as exc:
+        # 2026-09-18 根因修复：pyo3 native panic（PanicException, BaseException 系）
+        # 不被上面 except Exception 捕获，会穿透 gather/anyio 杀穿 MCP server。
+        # KeyboardInterrupt / SystemExit / asyncio.CancelledError 必须放行——
+        # CancelledError（3.8+ 属 BaseException）是 anyio 取消语义的载体，
+        # 吞掉会导致客户端断开/超时取消失效（恰是断连场景）。
+        if isinstance(exc, (KeyboardInterrupt, SystemExit, asyncio.CancelledError)):
+            raise
+        logger.warning(
+            "组合分析子调用失败(BaseException) %s: %s: %s",
+            getattr(func, "__name__", "?"), type(exc).__name__, exc,
+        )
+        return {"success": False, "error": f"{type(exc).__name__}: {exc}"}
 
 
 def _get_realtime_quote_sync(symbol: str) -> dict:

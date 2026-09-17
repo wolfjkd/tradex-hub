@@ -9,12 +9,66 @@ eltdx 数据源 fetch_fn 包装器。
 
 from __future__ import annotations
 
+import functools
 import logging
 import threading
 import atexit
 from typing import Any, Optional
 
 logger = logging.getLogger("tradex.eltdx")
+
+
+# ============================================================
+# native panic 盾牌（2026-09-18 根因修复：MCP 频繁断连）
+# ============================================================
+#
+# 背景：eltdx 3.x 为 Rust 内核（pyo3 native 扩展）。两个叠加问题：
+#   1) pool_size=1 的单例 client 被 SmartRouter 8 线程池并发调用，
+#      native 内部状态非线程安全时会触发 Rust panic；
+#   2) pyo3 将 panic 转为 PanicException —— 继承 BaseException 而非
+#      Exception，上层所有 `except Exception` 全部失效，异常穿透
+#      anyio 事件循环导致 MCP server 进程整体退出（客户端收到
+#      -32000 Connection closed 且 WorkBuddy 不重连 → 频繁断连）。
+#
+# 对策：所有 client.<api>.<method>(...) 调用经过本代理 —
+#   - 全局互斥锁序列化（消除并发触发条件；eltdx 调用串行，可接受）；
+#   - BaseException（PanicException 等）转为 RuntimeError，
+#     使 SmartRouter 既有健康评分/降级链正常生效；
+#   - KeyboardInterrupt / SystemExit 原样放行（进程语义不可吞）。
+
+_native_call_lock = threading.Lock()
+
+
+class _NativePanicShield:
+    """eltdx TdxClient 的防御性代理：序列化 + BaseException→RuntimeError。"""
+
+    def __init__(self, target: Any):
+        object.__setattr__(self, "_shield_target", target)
+
+    def __getattr__(self, name: str):
+        target = object.__getattribute__(self, "_shield_target")
+        attr = getattr(target, name)
+        if not callable(attr):
+            # 标量/普通数据属性（pool_size、heartbeat 等）原样返回；
+            # 仅对 API 命名空间对象（client.auctions / client.f10 等）递归包一层
+            if isinstance(attr, (str, bytes, int, float, bool, type(None))):
+                return attr
+            return _NativePanicShield(attr)
+
+        @functools.wraps(attr)
+        def _guarded(*args, **kwargs):
+            with _native_call_lock:
+                try:
+                    return attr(*args, **kwargs)
+                except (KeyboardInterrupt, SystemExit):
+                    raise
+                except BaseException as e:
+                    raise RuntimeError(
+                        f"eltdx native call {name} failed: "
+                        f"{type(e).__name__}: {e}"
+                    ) from e
+
+        return _guarded
 
 
 # ============================================================
@@ -45,12 +99,25 @@ def _get_client():
         _client_initializing = True
     try:
         from eltdx import TdxClient
-        _client = TdxClient.from_hosts(timeout=8.0, pool_size=1)
-        _client.connect()
-        logger.info("eltdx TdxClient connected")
+        raw_client = TdxClient.from_hosts(timeout=8.0, pool_size=1)
+        raw_client.connect()
+        # 2026-09-18：单例外包 native panic 盾牌（序列化 + PanicException 转换），
+        # 本文件全部 fetch_fn 经此代理调用，无需逐点改造。
+        _client = _NativePanicShield(raw_client)
+        logger.info("eltdx TdxClient connected (native panic shield active)")
         return _client
     except Exception as e:
         logger.error(f"eltdx client init failed: {e}")
+        _client = None
+        return None
+    except BaseException as e:
+        # 初始化期 native panic（PanicException）同样按普通失败处理，不得穿透
+        if isinstance(e, (KeyboardInterrupt, SystemExit)):
+            raise
+        logger.error(
+            "eltdx client init failed(BaseException): %s: %s",
+            type(e).__name__, e,
+        )
         _client = None
         return None
     finally:

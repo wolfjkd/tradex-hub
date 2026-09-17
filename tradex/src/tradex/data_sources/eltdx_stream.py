@@ -84,17 +84,27 @@ class EltdxStreamManager:
             saved_proxy = _without_proxy_env()
             try:
                 from eltdx import TdxClient
-                self._client = TdxClient.from_hosts(
+                raw_client = TdxClient.from_hosts(
                     timeout=self._timeout,
                     pool_size=self._pool_size,
                     heartbeat_interval=self._heartbeat_interval,
                 )
-                self._client.connect()
+                raw_client.connect()
+                # 2026-09-18 根因修复：常驻流 client 同样包 native panic 盾牌
+                # （与 eltdx_fetchers 共享互斥锁，两个 client 的 native 调用
+                # 全部串行；PanicException→RuntimeError 使下方 except Exception
+                # 兜底生效，不再穿透杀进程）。
+                from .eltdx_fetchers import _NativePanicShield
+                self._client = _NativePanicShield(raw_client)
                 self._started = True
-                logger.info("eltdx stream client connected (pool=%d)", self._pool_size)
+                logger.info("eltdx stream client connected (pool=%d, shield active)", self._pool_size)
                 return True
-            except Exception as exc:  # noqa: BLE001
-                logger.error("eltdx stream client start failed: %s", exc)
+            except BaseException as exc:  # noqa: BLE001
+                # 统一兜底（含 connect 期 native panic，此时尚未包盾）；
+                # KeyboardInterrupt / SystemExit 放行（进程语义不可吞）。
+                if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                    raise
+                logger.error("eltdx stream client start failed: %s: %s", type(exc).__name__, exc)
                 self._client = None
                 self._started = False
                 return False
