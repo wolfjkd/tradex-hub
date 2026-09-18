@@ -4,6 +4,71 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
 
+## [3.4.0] - 2026-09-19
+
+### Added — REST API 层（阶段一工单 01-12 全量交付）
+
+- **双协议并存（Direction B）**：新增 44 个 `/api/v1/*` REST 端点 + 129 个 MCP 工具零回归，两者共享同一 service 层（契约一致性）。
+- **11 个 service 模块**（每个业务领域抽出纯函数层）：
+  - `market_service` / `fund` / `price` / `company` / `financial` / `news` / `industry` / `indicator` / `diagnostic` / `write` / `metrics`
+  - MCP 工具改为薄包装（`json.dumps(service_result)`）；REST 路由也薄包装（`envelope_ok(service_result)`）
+- **REST 端点清单**（44 个）：
+  - 行情 4 + 资金 2 + 价格 3 + 公司 4 + 财务 8 + 新闻 3 + 板块 5 + 指标 4 + 诊断 3 + 写操作 7 + 指标导出 2
+- **统一响应包裹** `{code, data, msg}`；错误码 40001/40401/50001/50002/50003
+- **Pydantic 入参校验**：symbol 6 位 isdigit；period 枚举；look_back_days 范围；FastAPI 422 自动映射到 40001
+- **Prometheus 指标**（`/metrics` 文本 + `/api/v1/metrics/json` JSON）：
+  - 10 个指标：requests_total / request_duration_seconds(Histogram) / errors_total / data_source_health / data_source_latency_seconds / slow_queries_total / gateway_uptime_seconds / tools_registered / cache_hits_total / cache_misses_total
+  - FastAPI 中间件自动计数（每次请求记录 method/path/code/duration；超过阈值计慢查询并写日志）
+  - 慢查询日志：超过 `TRADEX_SLOW_QUERY_MS`（默认 800ms）写 `tradex_slow_query.log`
+- **监控看板**（`GET /dashboard` HTML）：
+  - 商务风格、暗色模式（`prefers-color-scheme`）、响应式（viewport meta）、手机竖屏友好
+  - JS 每 30 秒 fetch `/api/v1/metrics/json` 更新 DOM
+  - 错误处理：fetch 失败顶部 banner 显示错误信息
+- **写操作**（本地文件存储 CRUD，阶段一不引入数据库）：
+  - 策略：`data/written/strategies/{毫秒id}.json`，原子写（tempfile + os.replace）
+  - 自选股：`data/written/watchlist.json`，原子替换，重复添加同 symbol 更新 note 不重复
+
+### Changed
+
+- **版本号 bump**：v3.3.18 → v3.4.0（MINOR，新增 REST 是新功能，非 bug 修复）
+- **VERSION 文件**（单一事实来源）：3.3.18 → 3.4.0
+- **README**：新增「REST API」章节（调用示例 curl + Python、错误码表、端点清单、架构说明）+ 徽章版本号同步
+- **http_server.py**：
+  - 新增根路由 `/metrics`（Prometheus 文本）和 `/dashboard`（HTML）
+  - 新增 `_register_metrics_middleware()` 中间件自动采集请求指标
+  - 异常处理 code_map 增加 `422: ERR_BAD_REQUEST`（Pydantic 校验失败映射到参数错误）和 `502: ERR_DATA_SOURCE_UNREACHABLE`
+
+### Architecture Decisions
+
+- **Direction B 双协议并存**：MCP 和 REST 共存，共享 service 层（而非 Direction A 的独立 REST 服务）
+- **MCP 零回归红线**：129 个 MCP 工具行为不变，每个工单完成后都验证 `tools=129` 不变
+- **service 层薄抽取策略**：
+  - 数据获取类（工单 02-08）：直接抽纯函数到 service，MCP 工具改薄包装
+  - 编排器类（工单 09 diagnostic）：业务逻辑深嵌于 tools 模块辅助函数，service 层复用 tools 顶层辅助函数（避免大改引入回归）
+  - 指标类（工单 08 indicator）：底层已是模块级纯函数（`_macd_values` 等），service 直接调用，不动 MCP 工具
+- **写操作**（工单 10）：阶段一用本地文件存储，看板接入真实数据库时再迁移
+
+### Testing
+
+- **每工单独立测试套件**（共 10 个测试文件，~150 用例）：
+  - `test_rest_skeleton.py`、`test_market_service_rest.py`、`test_fund_rest.py`、`test_price_rest.py`、`test_company_financial_rest.py`、`test_news_rest.py`、`test_industry_rest.py`、`test_indicator_rest.py`、`test_diagnostic_rest.py`、`test_write_rest.py`、`test_metrics.py`、`test_dashboard.py`
+- **契约一致性验证**：每个工单完成后用 curl 抽查对应 REST 端点返回真实数据 + MCP 工具无回归
+- **网关重启验证模式**：`schtasks /End → kill PID → /Run → sleep 15 → curl /health` 确认 tools=129
+
+### Known Limitations
+
+- 阶段一未实现完整端点级 QPS/P95 表格（dashboard 当前只展示全局指标快照）
+- 数据源健康/延迟指标（`data_source_health` / `data_source_latency_seconds`）已定义但未在 service 层埋点（后续工单可在 `smart_router.route()` 前后埋点）
+- 慢查询日志展示区（dashboard 右侧）暂显示占位文本，未实际拉取日志（需新增日志读取端点）
+
+### Upgrade Notes
+
+- 无破坏性变更；既有 MCP 配置无需修改
+- REST 端点默认开放（与 MCP 同端口）；如需关闭可用反向代理白名单 `/api/v1/*`
+- `data/written/` 已在 `.gitignore` 的 `data/` 下覆盖，不会提交个人策略/自选股
+
+---
+
 ## [3.3.18] - 2026-09-18
 
 ### Fixed

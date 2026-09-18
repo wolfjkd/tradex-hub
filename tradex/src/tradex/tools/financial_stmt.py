@@ -13,30 +13,26 @@ Tools:
 
 Data source routing (via SmartRouter):
   财务报表: akshare financial_stmt (endpoints: profit/balance/cashflow/indicator/segments)
+
+v3.4.0 工单 05：业务逻辑已抽到 service/financial_service.py，本文件保留薄包装
+（MCP 工具层），调用 service 并用 json.dumps 转 MCP 协议字符串。
 """
 
 from __future__ import annotations
 
+import json
+
 from mcp.server.fastmcp import FastMCP
 
-from ..data_sources import get_router
-from ..utils.cache import TTL_FINANCIAL, cache
-from ..utils.formatter import (
-    BALANCE_SHEET_COLS,
-    CASHFLOW_STATEMENT_COLS,
-    INCOME_STATEMENT_COLS,
-    df_to_json,
-    error_response,
-    slim_df,
-    slim_financial_df,
-)
-from ..utils.symbol import format_em_symbol, normalize_symbol
-
-_router = get_router()
+from ..service import financial_service
+from ..utils.formatter import error_response
 
 
 def register(mcp: FastMCP):
-    """Register financial statement tools with the MCP server."""
+    """Register financial statement tools with the MCP server.
+
+    v3.4.0：业务逻辑在 service/financial_service.py，本函数只做 MCP 薄包装。
+    """
 
     @mcp.tool()
     async def get_income_statement(
@@ -54,25 +50,11 @@ def register(mcp: FastMCP):
             利润表数据 (JSON)，包含营业收入、营业成本、毛利润、净利润、
             研发费用、销售费用、管理费用等字段。
         """
-        symbol = normalize_symbol(symbol)
-        em_symbol = format_em_symbol(symbol)
-        cache_key = f"income_stmt:{symbol}:{num_quarters}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
         try:
-            df, _src = _router.route("financial_stmt", endpoint="profit", symbol=em_symbol)
-            if df is None or df.empty:
-                return error_response(
-                    f"利润表数据为空 ({symbol})", "get_income_statement"
-                )
-            if num_quarters > 0:
-                df = df.head(num_quarters)
-            df = slim_financial_df(df, INCOME_STATEMENT_COLS)
-            result = df_to_json(df)
-            cache.set(cache_key, result, TTL_FINANCIAL)
-            return result
+            result = financial_service.get_income_statement(
+                symbol=symbol, num_quarters=num_quarters
+            )
+            return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             return error_response(
                 f"获取利润表失败 ({symbol}): {e}", "get_income_statement"
@@ -94,25 +76,11 @@ def register(mcp: FastMCP):
             资产负债表数据 (JSON)，包含总资产、总负债、股东权益、
             流动资产、非流动资产、存货、应收账款等。
         """
-        symbol = normalize_symbol(symbol)
-        em_symbol = format_em_symbol(symbol)
-        cache_key = f"balance_sheet:{symbol}:{num_quarters}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
         try:
-            df, _src = _router.route("financial_stmt", endpoint="balance", symbol=em_symbol)
-            if df is None or df.empty:
-                return error_response(
-                    f"资产负债表数据为空 ({symbol})", "get_balance_sheet"
-                )
-            if num_quarters > 0:
-                df = df.head(num_quarters)
-            df = slim_financial_df(df, BALANCE_SHEET_COLS)
-            result = df_to_json(df)
-            cache.set(cache_key, result, TTL_FINANCIAL)
-            return result
+            result = financial_service.get_balance_sheet(
+                symbol=symbol, num_quarters=num_quarters
+            )
+            return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             return error_response(
                 f"获取资产负债表失败 ({symbol}): {e}", "get_balance_sheet"
@@ -134,25 +102,11 @@ def register(mcp: FastMCP):
             现金流量表数据 (JSON)，包含经营活动现金流、投资活动现金流、
             筹资活动现金流、自由现金流等。
         """
-        symbol = normalize_symbol(symbol)
-        em_symbol = format_em_symbol(symbol)
-        cache_key = f"cash_flow:{symbol}:{num_quarters}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
         try:
-            df, _src = _router.route("financial_stmt", endpoint="cashflow", symbol=em_symbol)
-            if df is None or df.empty:
-                return error_response(
-                    f"现金流量表数据为空 ({symbol})", "get_cash_flow_statement"
-                )
-            if num_quarters > 0:
-                df = df.head(num_quarters)
-            df = slim_financial_df(df, CASHFLOW_STATEMENT_COLS)
-            result = df_to_json(df)
-            cache.set(cache_key, result, TTL_FINANCIAL)
-            return result
+            result = financial_service.get_cash_flow_statement(
+                symbol=symbol, num_quarters=num_quarters
+            )
+            return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             return error_response(
                 f"获取现金流量表失败 ({symbol}): {e}", "get_cash_flow_statement"
@@ -176,67 +130,11 @@ def register(mcp: FastMCP):
         Returns:
             该科目的时间序列数据 (JSON)，包含报告期和对应值。
         """
-        symbol = normalize_symbol(symbol)
-        em_symbol = format_em_symbol(symbol)
-        cache_key = f"line_item:{symbol}:{item}:{num_quarters}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
         try:
-            # Try each financial statement to find the item
-            statements = [
-                ("利润表", "profit", INCOME_STATEMENT_COLS, em_symbol),
-                ("资产负债表", "balance", BALANCE_SHEET_COLS, em_symbol),
-                ("现金流量表", "cashflow", CASHFLOW_STATEMENT_COLS, em_symbol),
-            ]
-
-            for stmt_name, endpoint, whitelist, sym in statements:
-                try:
-                    df, _src = _router.route("financial_stmt", endpoint=endpoint, symbol=sym)
-                except Exception:
-                    continue
-                if df is None or df.empty:
-                    continue
-
-                # Slim the DataFrame so columns are in clean Chinese
-                slim = slim_financial_df(df, whitelist)
-
-                # Search for matching columns (fuzzy match)
-                matching_cols = [c for c in slim.columns if item in c]
-                if not matching_cols:
-                    # Also try case-insensitive match on original columns
-                    raw_match = [c for c in df.columns if item.upper() in c.upper()]
-                    if raw_match:
-                        # Found in raw columns — extract with date
-                        date_cols = [
-                            c for c in df.columns
-                            if "REPORT_DATE_NAME" in c.upper()
-                        ]
-                        keep = date_cols + raw_match
-                        avail = [c for c in keep if c in df.columns]
-                        sub = df[avail] if avail else df[raw_match]
-                        if num_quarters > 0:
-                            sub = sub.head(num_quarters)
-                        result = df_to_json(slim_df(sub))
-                        cache.set(cache_key, result, TTL_FINANCIAL)
-                        return result
-                    continue
-
-                # Found in slimmed Chinese columns
-                date_cols = [c for c in slim.columns if "报告期" in c]
-                keep = date_cols + matching_cols
-                avail = [c for c in keep if c in slim.columns]
-                sub = slim[avail] if avail else slim[matching_cols]
-                if num_quarters > 0:
-                    sub = sub.head(num_quarters)
-                result = df_to_json(sub)
-                cache.set(cache_key, result, TTL_FINANCIAL)
-                return result
-
-            return error_response(
-                f"在三大财务报表中未找到科目 '{item}'", "get_financial_line_item"
+            result = financial_service.get_financial_line_item(
+                symbol=symbol, item=item, num_quarters=num_quarters
             )
+            return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             return error_response(
                 f"获取财务科目失败 ({symbol}, {item}): {e}",
@@ -259,24 +157,11 @@ def register(mcp: FastMCP):
             财务指标数据 (JSON)，包含盈利能力、偿债能力、运营能力、
             成长能力等多维度指标。
         """
-        symbol = normalize_symbol(symbol)
-        cache_key = f"fin_indicators:{symbol}:{num_periods}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
         try:
-            df, _src = _router.route("financial_stmt", endpoint="indicator", symbol=symbol)
-            if df is None or df.empty:
-                return error_response(
-                    f"财务指标数据为空 ({symbol})", "get_financial_indicators"
-                )
-            if num_periods > 0:
-                df = df.head(num_periods)
-            df = slim_df(df)
-            result = df_to_json(df)
-            cache.set(cache_key, result, TTL_FINANCIAL)
-            return result
+            result = financial_service.get_financial_indicators(
+                symbol=symbol, num_periods=num_periods
+            )
+            return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             return error_response(
                 f"获取财务指标失败 ({symbol}): {e}", "get_financial_indicators"
@@ -297,36 +182,11 @@ def register(mcp: FastMCP):
         Returns:
             成长性指标数据 (JSON)，包含各项增长率。
         """
-        symbol = normalize_symbol(symbol)
-        cache_key = f"growth_rates:{symbol}:{num_periods}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
         try:
-            df, _src = _router.route("financial_stmt", endpoint="indicator", symbol=symbol)
-            if df is None or df.empty:
-                return error_response(
-                    f"增长指标数据为空 ({symbol})", "get_growth_rates"
-                )
-            # Filter growth-related columns（落空时明确报错，不静默返全表）
-            growth_cols = [
-                c for c in df.columns
-                if "增长" in c or "同比" in c or "环比" in c or "日期" in c or "报告" in c
-            ]
-            if not growth_cols:
-                return error_response(
-                    f"未在返回数据中找到增长指标列 (实际列: {list(df.columns)[:10]}...)，"
-                    "数据源表结构可能已变化",
-                    "get_growth_rates",
-                )
-            df = df[growth_cols]
-            if num_periods > 0:
-                df = df.head(num_periods)
-            df = slim_df(df)
-            result = df_to_json(df)
-            cache.set(cache_key, result, TTL_FINANCIAL)
-            return result
+            result = financial_service.get_growth_rates(
+                symbol=symbol, num_periods=num_periods
+            )
+            return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             return error_response(
                 f"获取增长指标失败 ({symbol}): {e}", "get_growth_rates"
@@ -347,36 +207,11 @@ def register(mcp: FastMCP):
         Returns:
             每股指标数据 (JSON)，包含EPS、BPS、每股经营现金流等。
         """
-        symbol = normalize_symbol(symbol)
-        cache_key = f"per_share:{symbol}:{num_periods}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
         try:
-            df, _src = _router.route("financial_stmt", endpoint="indicator", symbol=symbol)
-            if df is None or df.empty:
-                return error_response(
-                    f"每股指标数据为空 ({symbol})", "get_per_share_data"
-                )
-            # Filter per-share columns（落空时明确报错，不静默返全表）
-            share_cols = [
-                c for c in df.columns
-                if "每股" in c or "日期" in c or "报告" in c
-            ]
-            if not share_cols:
-                return error_response(
-                    f"未在返回数据中找到每股指标列 (实际列: {list(df.columns)[:10]}...)，"
-                    "数据源表结构可能已变化",
-                    "get_per_share_data",
-                )
-            df = df[share_cols]
-            if num_periods > 0:
-                df = df.head(num_periods)
-            df = slim_df(df)
-            result = df_to_json(df)
-            cache.set(cache_key, result, TTL_FINANCIAL)
-            return result
+            result = financial_service.get_per_share_data(
+                symbol=symbol, num_periods=num_periods
+            )
+            return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             return error_response(
                 f"获取每股指标失败 ({symbol}): {e}", "get_per_share_data"
@@ -393,23 +228,9 @@ def register(mcp: FastMCP):
         Returns:
             主营构成数据 (JSON)，包含各业务板块的营收、占比、毛利率等。
         """
-        symbol = normalize_symbol(symbol)
-        em_symbol = format_em_symbol(symbol)  # 东财 F10 主营构成需带市场前缀 SH600519
-        cache_key = f"segments:{symbol}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
         try:
-            df, _src = _router.route("financial_stmt", endpoint="segments", symbol=em_symbol)
-            if df is None or df.empty:
-                return error_response(
-                    f"主营构成数据为空 ({symbol})", "get_segments_revenue"
-                )
-            df = slim_df(df)
-            result = df_to_json(df)
-            cache.set(cache_key, result, TTL_FINANCIAL)
-            return result
+            result = financial_service.get_segments_revenue(symbol=symbol)
+            return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             return error_response(
                 f"获取主营构成失败 ({symbol}): {e}", "get_segments_revenue"

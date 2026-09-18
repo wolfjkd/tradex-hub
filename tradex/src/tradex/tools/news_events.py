@@ -34,6 +34,7 @@ Data source routing (via SmartRouter, v3.3.0):
 
 from __future__ import annotations
 
+import json
 import logging
 
 from mcp.server.fastmcp import FastMCP
@@ -43,6 +44,7 @@ from ..data_sources import get_router
 from ..utils.cache import TTL_DAILY, TTL_REALTIME, cache
 from ..utils.formatter import df_to_json, error_response, slim_df
 from ..utils.symbol import normalize_symbol
+from ..service import news_service
 
 logger = logging.getLogger(__name__)
 
@@ -68,18 +70,9 @@ def register(mcp: FastMCP):
         Returns:
             新闻列表 (JSON)，包含新闻标题、发布时间、来源、摘要、链接等。
         """
-        symbol = normalize_symbol(symbol)
-        cache_key = f"stock_news:{symbol}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
         try:
-            # 走 news_data 类型：em_news_direct(priority=1) → akshare(priority=100)
-            df, _src = _router.route("news_data", symbol=symbol)
-            result = df_to_json(df, max_rows=30)
-            cache.set(cache_key, result, TTL_REALTIME)
-            return result
+            result = news_service.get_stock_news(symbol=symbol)
+            return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             return error_response(
                 f"获取股票新闻失败 ({symbol}): {e}", "get_stock_news"
@@ -183,20 +176,11 @@ def register(mcp: FastMCP):
         Returns:
             公告列表 (JSON)，包含公告标题、发布日期、公告类型、PDF链接等。
         """
-        cache_key = f"announcements:{symbol}:{num_results}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
         try:
-            if symbol:
-                symbol = normalize_symbol(symbol)
-            # 走 cninfo_announcement 类型：cninfo_direct(priority=1)
-            df, _src = _router.route("cninfo_announcement", symbol=symbol)
-            df = df.head(num_results)
-            result = df_to_json(df)
-            cache.set(cache_key, result, TTL_DAILY)
-            return result
+            result = news_service.get_company_announcements(
+                symbol=symbol, num_results=num_results
+            )
+            return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             return error_response(
                 f"获取公司公告失败 ({symbol}): {e}", "get_company_announcements"
@@ -252,105 +236,11 @@ def register(mcp: FastMCP):
         Returns:
             匹配的新闻列表 (JSON)，包含标题、时间、来源、摘要等。
         """
-        cache_key = f"search_news:{keyword}:{symbol}:{num_results}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
         try:
-            all_dfs = []
-
-            if symbol:
-                symbol = normalize_symbol(symbol)
-                # Source 1: 东财个股新闻（em_news_direct 直连）
-                try:
-                    df, _src = _router.route("news_data", symbol=symbol)
-                    if df is not None and not df.empty:
-                        all_dfs.append(df)
-                except Exception as exc:
-                    logger.debug("个股新闻源失败(%s): %s", symbol, exc)
-            # 如果个股新闻无数据或未指定symbol，尝试全市场源
-            if not all_dfs:
-                # 全市场源：财联社快讯 + 新浪财经 + 百度交易提醒 + 期货新闻 + 百度热搜
-                # Source 1: 财联社实时快讯（纯新闻，v3.2.0）
-                try:
-                    df, _src = _router.route("telegraph_news", num_results=num_results)
-                    if df is not None and not df.empty:
-                        all_dfs.append(df)
-                except Exception as exc:
-                    logger.debug("财联社快讯源失败: %s", exc)
-
-                # Source 2: 新浪财经新闻（纯新闻，v3.3.0）
-                try:
-                    df, _src = _router.route("sina_finance_news", num_results=20)
-                    if df is not None and not df.empty:
-                        all_dfs.append(df)
-                except Exception as exc:
-                    logger.debug("新浪财经源失败: %s", exc)
-
-                # Source 3: 百度交易提醒（v3.3.0）
-                try:
-                    for ep in ["suspend", "dividend", "report_time"]:
-                        df, _src = _router.route("baidu_trade_notify", endpoint=ep, date="")
-                        if df is not None and not df.empty:
-                            all_dfs.append(df)
-                except Exception as exc:
-                    logger.debug("百度交易提醒源失败: %s", exc)
-
-                # Source 4: 期货新闻（v3.3.0）
-                try:
-                    df, _src = _router.route("futures_news", symbol="全部")
-                    if df is not None and not df.empty:
-                        all_dfs.append(df)
-                except Exception as exc:
-                    logger.debug("期货新闻源失败: %s", exc)
-
-                # Source 5: 百度热搜（v3.3.0）
-                try:
-                    df, _src = _router.route("hot_search", symbol="A股")
-                    if df is not None and not df.empty:
-                        all_dfs.append(df)
-                except Exception as exc:
-                    logger.debug("百度热搜源失败: %s", exc)
-
-            if not all_dfs:
-                return df_to_json(pd.DataFrame())
-
-            combined = pd.concat(all_dfs, ignore_index=True)
-
-            # Filter by keyword — 仅在文本列中搜索，兼容不同数据源列名
-            _TEXT_COLS = {"标题", "内容", "新闻标题", "文章来源", "新闻内容", "名称", "说明", "摘要"}
-            _text_cols = [c for c in combined.columns if c in _TEXT_COLS or "标题" in c or "内容" in c or "名称" in c]
-            keywords = [kw.strip() for kw in keyword.replace(",", " ").replace("，", " ").split() if kw.strip()]
-            if keywords and _text_cols:
-                mask = pd.Series(False, index=combined.index)
-                for col in _text_cols:
-                    for kw in keywords:
-                        try:
-                            mask = mask | combined[col].astype(str).str.contains(kw, case=False, na=False)
-                        except Exception:
-                            continue
-                combined = combined[mask]
-
-            # 如果文本列搜索无结果，回退到全量搜索（所有列）
-            if combined.empty and keywords:
-                mask = pd.Series(False, index=combined.index)
-                for col in combined.columns:
-                    for kw in keywords:
-                        try:
-                            mask = mask | combined[col].astype(str).str.contains(kw, case=False, na=False)
-                        except Exception:
-                            continue
-                combined = combined[mask]
-
-            # 如果关键词过滤后仍为空，返回未过滤的数据（避免返回空）
-            if combined.empty:
-                combined = pd.concat(all_dfs, ignore_index=True).head(num_results)
-
-            combined = combined.head(num_results)
-            result = df_to_json(combined)
-            cache.set(cache_key, result, TTL_REALTIME)
-            return result
+            result = news_service.search_news(
+                keyword=keyword, symbol=symbol, num_results=num_results
+            )
+            return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             return error_response(
                 f"搜索新闻失败 ({keyword}): {e}", "search_news"

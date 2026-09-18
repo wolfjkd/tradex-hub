@@ -16,6 +16,9 @@ Data source routing (via SmartRouter):
   北向资金: ths_hsgt(priority=1) → akshare(priority=100)  [northbound]
   涨跌停池: akshare hot_stocks
   龙虎榜:   em_datacenter(priority=1) → akshare(priority=100)  [dragon_tiger]
+
+v3.4.0 工单 02：业务逻辑已抽到 service/market_service.py，本文件保留薄包装
+（MCP 工具层），调用 service 并用 json.dumps 转成 MCP 协议要求的字符串返回。
 """
 
 from __future__ import annotations
@@ -24,14 +27,8 @@ import json
 
 from mcp.server.fastmcp import FastMCP
 
-import pandas as pd
-from ..data_sources import get_router
-from ..data_sources.akshare_fetchers import fetch_index_daily_amount
-from ..utils.cache import TTL_DAILY, TTL_REALTIME, cache
-from ..utils.formatter import df_to_json, error_response, slim_df
-from ..utils.symbol import normalize_symbol
-
-_router = get_router()
+from ..service import market_service
+from ..utils.formatter import error_response
 
 import logging
 
@@ -39,7 +36,10 @@ logger = logging.getLogger(__name__)
 
 
 def register(mcp: FastMCP):
-    """Register market overview tools with the MCP server."""
+    """Register market overview tools with the MCP server.
+
+    v3.4.0 起：业务逻辑在 service/market_service.py，本函数只做 MCP 薄包装。
+    """
 
     @mcp.tool()
     async def get_market_overview() -> str:
@@ -52,17 +52,9 @@ def register(mcp: FastMCP):
             主要指数实时行情 (JSON)，包含指数名称、最新点位、涨跌幅、
             成交量、成交额等。
         """
-        cache_key = "market_overview"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
         try:
-            df, _src = _router.route("market_overview")
-            df = slim_df(df)
-            result = df_to_json(df, max_rows=30)
-            cache.set(cache_key, result, TTL_REALTIME)
-            return result
+            result = market_service.get_market_overview()
+            return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             return error_response(
                 f"获取市场概览失败: {e}", "get_market_overview"
@@ -89,42 +81,13 @@ def register(mcp: FastMCP):
         - amount_yi: 成交额(亿元)
         单指数取数失败则在对应项中返回 {"series": [], "error": "..."}。
         """
-        cache_key = f"index_vol_compare:{days}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
-        indices = [
-            ("sh000001", "上证指数"),
-            ("sz399001", "深证成指"),
-            ("sz399006", "创业板指"),
-        ]
-        result: dict = {}
-        for code, name in indices:
-            try:
-                # v3.3.2: fetch_index_daily_amount 主源改为东财 push2his 直连
-                # （返回真实成交额 f57），腾讯 tx 降级为备源；不再走 SmartRouter 的 12s 硬超时。
-                data = fetch_index_daily_amount(symbol=code, days=days)
-                series = []
-                for d in (data or []):
-                    vol = float(d.get("volume", 0) or 0)
-                    amt = d.get("amount")
-                    amt = float(amt) if amt is not None else None
-                    series.append({
-                        "date": str(d.get("date", "")),
-                        "volume_hand": round(vol, 0),
-                        "volume_yi_share": round(vol / 1e8, 2),
-                        "amount_yuan": round(amt, 0) if amt is not None else None,
-                        "amount_yi": round(amt / 1e8, 2) if amt is not None else None,
-                    })
-                result[code] = {"name": name, "series": series}
-            except Exception as e:
-                logger.warning("index_daily_amount %s failed: %s", code, e)
-                result[code] = {"name": name, "series": [], "error": str(e)}
-
-        payload = json.dumps(result, ensure_ascii=False)
-        cache.set(cache_key, payload, TTL_DAILY)
-        return payload
+        try:
+            result = market_service.get_index_volume_compare(days=days)
+            return json.dumps(result, ensure_ascii=False)
+        except Exception as e:
+            return error_response(
+                f"获取量能对比失败: {e}", "get_index_volume_compare"
+            )
 
     @mcp.tool()
     async def get_money_flow(symbol: str) -> str:
@@ -138,55 +101,13 @@ def register(mcp: FastMCP):
             资金流向数据 (JSON)，包含日期、主力净流入、超大单净流入、
             大单净流入、中单净流入、小单净流入等。
         """
-        symbol = normalize_symbol(symbol)
-        cache_key = f"money_flow:{symbol}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
         try:
-            # SmartRouter 自动处理 fallback：em_push2(priority=1) → akshare(priority=100)
-            result, _src = _router.route(
-                "fund_flow", code=symbol, include_history=True
-            )
-            # fund_flow fetch_fn 返回 dict（含 realtime/history 列表）
-            rows = []
-            if isinstance(result, dict):
-                realtime = result.get("realtime") or []
-                history = result.get("history") or []
-                for item in realtime:
-                    rows.append({
-                        "时间": item.get("time", item.get("date", "")),
-                        "主力净流入": float(item.get("main_net", 0) or 0),
-                        "小单净流入": float(item.get("small", 0) or 0),
-                        "中单净流入": float(item.get("mid", 0) or 0),
-                        "大单净流入": float(item.get("large", 0) or 0),
-                        "超大单净流入": float(item.get("super_large", 0) or 0),
-                    })
-                if not rows:
-                    for item in history:
-                        rows.append({
-                            "日期": item.get("date", item.get("time", "")),
-                            "主力净流入": float(item.get("main_net", 0) or 0),
-                            "小单净流入": float(item.get("small", 0) or 0),
-                            "中单净流入": float(item.get("mid", 0) or 0),
-                            "大单净流入": float(item.get("large", 0) or 0),
-                            "超大单净流入": float(item.get("super_large", 0) or 0),
-                        })
-            if not rows:
-                return df_to_json(pd.DataFrame([{
-                    "代码": symbol,
-                    "提示": "该股票暂无资金流向数据",
-                }]))
-            df = pd.DataFrame(rows)
-            result_json = df_to_json(df, max_rows=30)
-            cache.set(cache_key, result_json, TTL_DAILY)
-            return result_json
+            result = market_service.get_money_flow(symbol=symbol)
+            return json.dumps(result, ensure_ascii=False)
         except Exception as e:
-            return df_to_json(pd.DataFrame([{
-                "代码": symbol,
-                "提示": f"资金流向暂时不可用: {e}",
-            }]))
+            return error_response(
+                f"资金流向暂时不可用: {e}", "get_money_flow"
+            )
 
     @mcp.tool()
     async def get_north_bound_flow() -> str:
@@ -200,54 +121,9 @@ def register(mcp: FastMCP):
             北向资金流入时间序列 (JSON)，包含日期、沪股通净流入、
             深股通净流入、北向资金合计净流入等。
         """
-        cache_key = "north_bound_flow"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
         try:
-            result, _src = _router.route("northbound", include_history=True)
-            # ths_hsgt 源返回 dict；akshare 源返回 DataFrame
-            if isinstance(result, pd.DataFrame):
-                df = result
-            elif isinstance(result, dict):
-                # 停更检测（v3.3.2）：数值冻结时明确标注，不喂假数
-                if result.get("discontinued"):
-                    note = result.get("note", "北向资金已停更")
-                    realtime = result.get("realtime") or {}
-                    df = pd.DataFrame([{
-                        "状态": "已停更",
-                        "说明": note,
-                        "最近合计(亿)": realtime.get("total"),
-                        "来源": result.get("source"),
-                    }])
-                    result_json = df_to_json(df, max_rows=5)
-                    cache.set(cache_key, result_json, TTL_DAILY)
-                    return result_json
-                # 同花顺返回的 dict 含 history 列表
-                history = result.get("history") or []
-                if not history:
-                    return error_response(
-                        "北向资金数据为空", "get_north_bound_flow"
-                    )
-                df = pd.DataFrame(history)
-            else:
-                return error_response(
-                    "北向资金数据为空", "get_north_bound_flow"
-                )
-
-            if df is None or df.empty:
-                return error_response(
-                    "北向资金数据为空", "get_north_bound_flow"
-                )
-            for col in ["日期", "date", "时间", "time"]:
-                if col in df.columns:
-                    df = df.sort_values(col, ascending=False)
-                    break
-            df = slim_df(df)
-            result_json = df_to_json(df, max_rows=30)
-            cache.set(cache_key, result_json, TTL_DAILY)
-            return result_json
+            result = market_service.get_north_bound_flow()
+            return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             return error_response(
                 f"获取北向资金失败: {e}", "get_north_bound_flow"
@@ -265,16 +141,9 @@ def register(mcp: FastMCP):
             涨停/跌停股票列表 (JSON)，包含代码、名称、涨跌幅、封单额、
             首次涨停/跌停时间、最后涨停/跌停时间、连板天数等。
         """
-        cache_key = f"limit_pool:{direction}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
         try:
-            df, _src = _router.route("hot_stocks", direction=direction)
-            result = df_to_json(df)
-            cache.set(cache_key, result, TTL_DAILY)
-            return result
+            result = market_service.get_limit_up_down(direction=direction)
+            return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             return error_response(
                 f"获取{direction}板数据失败: {e}", "get_limit_up_down"
@@ -297,27 +166,9 @@ def register(mcp: FastMCP):
             龙虎榜数据 (JSON)，包含股票代码、名称、上榜原因、
             买入额、卖出额、净买入额、买方营业部等。
         """
-        cache_key = f"dragon_tiger:{num_days}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
         try:
-            # code="" → 返回全市场龙虎榜明细 DataFrame（akshare 源）
-            result, _src = _router.route(
-                "dragon_tiger", code="", look_back_days=num_days * 2
-            )
-            # dragon_tiger with code="" 返回原始 DataFrame
-            if isinstance(result, pd.DataFrame):
-                df = result
-            else:
-                return error_response(
-                    "龙虎榜数据格式异常", "get_dragon_tiger"
-                )
-            df = slim_df(df)
-            result_json = df_to_json(df, max_rows=30)
-            cache.set(cache_key, result_json, TTL_DAILY)
-            return result_json
+            result = market_service.get_dragon_tiger(num_days=num_days)
+            return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             return error_response(
                 f"获取龙虎榜失败: {e}", "get_dragon_tiger"
@@ -338,22 +189,9 @@ def register(mcp: FastMCP):
         Returns:
             全球市场行情 (JSON)，包含代码、名称、类别、最新价、涨跌额、涨跌幅等。
         """
-        cache_key = f"global_market_quote:{category}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
         try:
-            df, _src = _router.route("global_market_quote")
-            if df is None or df.empty:
-                return df_to_json(pd.DataFrame())
-
-            if category:
-                df = df[df["类别"] == category]
-
-            result = df_to_json(df, max_rows=50)
-            cache.set(cache_key, result, TTL_REALTIME)
-            return result
+            result = market_service.get_global_market_quote(category=category)
+            return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             return error_response(
                 f"获取全球行情失败: {e}", "get_global_market_quote"

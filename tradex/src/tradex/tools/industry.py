@@ -12,21 +12,25 @@ Data source routing (via SmartRouter):
   行业数据: akshare industry_data (endpoints: board_industry_name_em/board_industry_name_ths/
            board_industry_cons_em/board_concept_name_em/board_concept_name_ths/
            sector_fund_flow_rank/board_industry_hist_em)
+
+v3.4.0 工单 07：业务逻辑已抽到 service/industry_service.py，本文件保留薄包装。
 """
 
 from __future__ import annotations
 
+import json
+
 from mcp.server.fastmcp import FastMCP
 
-from ..data_sources import get_router
-from ..utils.cache import TTL_DAILY, cache
-from ..utils.formatter import df_to_json, error_response, slim_df
-
-_router = get_router()
+from ..service import industry_service
+from ..utils.formatter import error_response
 
 
 def register(mcp: FastMCP):
-    """Register industry sector tools with the MCP server."""
+    """Register industry sector tools with the MCP server.
+
+    v3.4.0：业务逻辑在 service/industry_service.py，本函数只做 MCP 薄包装。
+    """
 
     @mcp.tool()
     async def get_industry_list() -> str:
@@ -37,25 +41,13 @@ def register(mcp: FastMCP):
             行业板块列表 (JSON)，包含板块名称、涨跌幅、总市值、
             换手率、领涨股等信息。
         """
-        cache_key = "industry_list"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
-        # Primary: 东方财富, Fallback: 同花顺
-        for ep in ["board_industry_name_em", "board_industry_name_ths"]:
-            try:
-                df, _src = _router.route("industry_data", endpoint=ep)
-                if df is not None and not df.empty:
-                    result = df_to_json(df)
-                    cache.set(cache_key, result, TTL_DAILY)
-                    return result
-            except Exception:
-                continue
-
-        return error_response(
-            "获取行业板块列表失败: 所有数据源均不可用", "get_industry_list"
-        )
+        try:
+            result = industry_service.get_industry_list()
+            return json.dumps(result, ensure_ascii=False)
+        except Exception as e:
+            return error_response(
+                f"获取行业板块列表失败: {e}", "get_industry_list"
+            )
 
     @mcp.tool()
     async def get_industry_stocks(industry: str) -> str:
@@ -69,19 +61,9 @@ def register(mcp: FastMCP):
             该行业所有成分股 (JSON)，包含代码、名称、最新价、涨跌幅、
             市盈率、市净率等。
         """
-        cache_key = f"industry_stocks:{industry}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
         try:
-            df, _src = _router.route(
-                "industry_data", endpoint="board_industry_cons_em", industry=industry
-            )
-            df = slim_df(df)
-            result = df_to_json(df)
-            cache.set(cache_key, result, TTL_DAILY)
-            return result
+            result = industry_service.get_industry_stocks(industry=industry)
+            return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             return error_response(
                 f"获取行业成分股失败 ({industry}): {e}", "get_industry_stocks"
@@ -98,25 +80,13 @@ def register(mcp: FastMCP):
             概念板块列表 (JSON)，包含板块名称、涨跌幅、总市值、
             换手率、领涨股等信息。
         """
-        cache_key = "concept_list"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
-        # Primary: 东方财富, Fallback: 同花顺
-        for ep in ["board_concept_name_em", "board_concept_name_ths"]:
-            try:
-                df, _src = _router.route("industry_data", endpoint=ep)
-                if df is not None and not df.empty:
-                    result = df_to_json(df)
-                    cache.set(cache_key, result, TTL_DAILY)
-                    return result
-            except Exception:
-                continue
-
-        return error_response(
-            "获取概念板块列表失败: 所有数据源均不可用", "get_concept_list"
-        )
+        try:
+            result = industry_service.get_concept_list()
+            return json.dumps(result, ensure_ascii=False)
+        except Exception as e:
+            return error_response(
+                f"获取概念板块列表失败: {e}", "get_concept_list"
+            )
 
     @mcp.tool()
     async def get_sector_fund_flow(
@@ -137,52 +107,11 @@ def register(mcp: FastMCP):
             板块资金流向排名 (JSON)，包含板块名称、今日主力净流入、
             今日超大单净流入、今日大单净流入等。
         """
-        cache_key = f"sector_fund_flow:{sector_type}:{indicator}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
         try:
-            # Primary: 东方财富资金流向排名
-            df = None
-            try:
-                df, _src = _router.route(
-                    "industry_data",
-                    endpoint="sector_fund_flow_rank",
-                    sector_type=sector_type,
-                    indicator=indicator,
-                )
-            except Exception:
-                pass
-
-            if df is None or df.empty:
-                # Fallback: 新浪板块行情（不含资金流明细，但提供板块涨跌/成交额/涨跌停数）
-                try:
-                    import akshare as ak
-                    sina_df = ak.stock_sector_spot()
-                    if sina_df is not None and not sina_df.empty:
-                        # 保留所有可用字段，映射中文名
-                        _col_map = {
-                            "板块": "板块", "涨跌幅": "涨跌幅", "涨跌额": "涨跌额",
-                            "总成交额": "总成交额", "总成交量": "总成交量",
-                            "公司家数": "公司家数", "平均价格": "平均价格",
-                        }
-                        keep = [c for c in _col_map if c in sina_df.columns]
-                        df = sina_df[keep].rename(columns={k: v for k, v in _col_map.items() if k in keep})
-                        df["数据源"] = "新浪财经（备源-无资金流明细）"
-                        df["说明"] = "主源东方财富资金流向排名不可用，新浪备源仅提供板块涨跌和成交额"
-                except Exception:
-                    pass
-
-            if df is None or df.empty:
-                return df_to_json(pd.DataFrame([{
-                    "提示": f"板块资金流向暂不可用 ({sector_type})",
-                    "说明": "东方财富数据源连接失败，新浪备源不可用",
-                }]))
-            # 直接返回原始数据，保留所有字段
-            result = df_to_json(df, max_rows=30)
-            cache.set(cache_key, result, TTL_DAILY)
-            return result
+            result = industry_service.get_sector_fund_flow(
+                sector_type=sector_type, indicator=indicator
+            )
+            return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             return error_response(
                 f"获取板块资金流向失败 ({sector_type}): {e}",
@@ -207,23 +136,11 @@ def register(mcp: FastMCP):
             行业板块历史行情 (JSON)，包含日期、开盘价、收盘价、最高价、
             最低价、成交量、成交额、振幅、涨跌幅等。
         """
-        cache_key = f"industry_pe:{industry}:{start_date}:{end_date}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
         try:
-            df, _src = _router.route(
-                "industry_data",
-                endpoint="board_industry_hist_em",
-                industry=industry,
-                period="日k",
-                start_date=start_date,
-                end_date=end_date,
+            result = industry_service.get_industry_pe(
+                industry=industry, start_date=start_date, end_date=end_date
             )
-            result = df_to_json(df, max_rows=250)
-            cache.set(cache_key, result, TTL_DAILY)
-            return result
+            return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             return error_response(
                 f"获取行业历史行情失败 ({industry}): {e}", "get_industry_pe"

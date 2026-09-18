@@ -9,22 +9,26 @@ Tools:
 
 Data source routing (via SmartRouter):
   公司信息: akshare company_info (endpoints: code_name/individual_info/profile/industry_cons)
+
+v3.4.0 工单 05：业务逻辑已抽到 service/company_service.py，本文件保留薄包装
+（MCP 工具层），调用 service 并用 json.dumps 转 MCP 协议字符串。
 """
 
 from __future__ import annotations
 
+import json
+
 from mcp.server.fastmcp import FastMCP
 
-from ..data_sources import get_router
-from ..utils.cache import TTL_COMPANY, cache
-from ..utils.formatter import df_to_json, dict_to_json, error_response, slim_df
-from ..utils.symbol import normalize_symbol
-
-_router = get_router()
+from ..service import company_service
+from ..utils.formatter import error_response
 
 
 def register(mcp: FastMCP):
-    """Register company information tools with the MCP server."""
+    """Register company information tools with the MCP server.
+
+    v3.4.0：业务逻辑在 service/company_service.py，本函数只做 MCP 薄包装。
+    """
 
     @mcp.tool()
     async def search_stock(keyword: str) -> str:
@@ -37,21 +41,9 @@ def register(mcp: FastMCP):
         Returns:
             匹配的股票列表 (JSON)，包含代码(code)和名称(name)字段，最多返回20条。
         """
-        cache_key = f"search_stock:{keyword}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
         try:
-            df, _src = _router.route("company_info", endpoint="code_name")
-            # Search in both code and name columns
-            mask = df["code"].str.contains(keyword, case=False, na=False) | df[
-                "name"
-            ].str.contains(keyword, case=False, na=False)
-            matched = df[mask].head(20)
-            result = df_to_json(matched)
-            cache.set(cache_key, result, TTL_COMPANY)
-            return result
+            result = company_service.search_stock(keyword=keyword)
+            return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             return error_response(f"搜索股票失败: {e}", "search_stock")
 
@@ -66,40 +58,9 @@ def register(mcp: FastMCP):
         Returns:
             公司基本信息 (JSON)，包含总市值、流通市值、行业、上市日期等。
         """
-        symbol = normalize_symbol(symbol)
-        cache_key = f"company_info:{symbol}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
         try:
-            # Primary: 东方财富个股信息
-            try:
-                df, _src = _router.route(
-                    "company_info", endpoint="individual_info", symbol=symbol
-                )
-                if df is not None and not df.empty:
-                    info = {}
-                    for _, row in df.iterrows():
-                        info[row.iloc[0]] = row.iloc[1]
-                    if info:
-                        result = dict_to_json(info)
-                        cache.set(cache_key, result, TTL_COMPANY)
-                        return result
-            except Exception:
-                pass
-
-            # Fallback: 从 A 股全量行情列表中提取基本信息
-            df, _src = _router.route("realtime_quote", symbol="")
-            code_col = _find_code_col(df)
-            row = df[df[code_col].astype(str).str.strip() == symbol]
-            if row.empty:
-                return error_response(
-                    f"未找到股票 {symbol} 的公司信息", "get_company_info"
-                )
-            result = df_to_json(row)
-            cache.set(cache_key, result, TTL_COMPANY)
-            return result
+            result = company_service.get_company_info(symbol=symbol)
+            return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             return error_response(
                 f"获取公司信息失败 ({symbol}): {e}", "get_company_info"
@@ -116,19 +77,9 @@ def register(mcp: FastMCP):
         Returns:
             公司主营业务构成 (JSON)，包含各业务的营收占比、毛利率等。
         """
-        symbol = normalize_symbol(symbol)
-        cache_key = f"company_profile:{symbol}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
         try:
-            df, _src = _router.route(
-                "company_info", endpoint="profile", symbol=symbol
-            )
-            result = df_to_json(df)
-            cache.set(cache_key, result, TTL_COMPANY)
-            return result
+            result = company_service.get_company_profile(symbol=symbol)
+            return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             return error_response(
                 f"获取公司主营构成失败 ({symbol}): {e}", "get_company_profile"
@@ -151,74 +102,11 @@ def register(mcp: FastMCP):
         Returns:
             同行业公司列表 (JSON)，包含代码、名称、最新价、涨跌幅等。
         """
-        symbol = normalize_symbol(symbol)
-        cache_key = f"competitors:{symbol}:{industry}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
         try:
-            # If no industry provided, look it up from company info
-            if not industry:
-                try:
-                    df, _src = _router.route(
-                        "company_info", endpoint="individual_info", symbol=symbol
-                    )
-                    if df is not None and not df.empty:
-                        for _, row in df.iterrows():
-                            key = str(row.iloc[0])
-                            if "行业" in key:
-                                industry = str(row.iloc[1])
-                                break
-                except Exception:
-                    pass
-
-            # Fallback: try to find industry from board industry list
-            if not industry:
-                try:
-                    board_df, _src = _router.route(
-                        "industry_data", endpoint="board_industry_name_em"
-                    )
-                    if board_df is not None and not board_df.empty:
-                        # look up stock in A-share spot to find the industry name
-                        spot_df, _src2 = _router.route("realtime_quote", symbol="")
-                        if spot_df is not None and not spot_df.empty:
-                            code_col = _find_code_col(spot_df)
-                            row = spot_df[spot_df[code_col].astype(str).str.strip() == symbol]
-                            if not row.empty:
-                                for c in row.columns:
-                                    if "行业" in c or "板块" in c:
-                                        industry = str(row.iloc[0][c])
-                                        break
-                except Exception:
-                    pass
-
-            if not industry:
-                return error_response(
-                    f"无法确定 {symbol} 所属行业，请手动传入 industry 参数",
-                    "get_competitors",
-                )
-
-            # 东方财富行业成分股
-            df, _src = _router.route(
-                "industry_data", endpoint="board_industry_cons_em", industry=industry
-            )
-            df = slim_df(df)
-            result = df_to_json(df, max_rows=30)
-            cache.set(cache_key, result, TTL_COMPANY)
-            return result
+            result = company_service.get_competitors(symbol=symbol, industry=industry)
+            return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             return error_response(
                 f"获取竞争对手列表失败 ({symbol}, {industry}): {e}",
                 "get_competitors",
             )
-
-
-def _find_code_col(df) -> str:
-    """Find the stock code column in a DataFrame (varies by data source)."""
-    for c in df.columns:
-        if c in ("代码", "code", "symbol"):
-            return c
-        if "代码" in c or "code" in c.lower() or "symbol" in c.lower():
-            return c
-    return df.columns[0]

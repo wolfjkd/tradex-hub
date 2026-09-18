@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/License-Apache--2.0-yellow.svg" alt="License"/>
   <img src="https://img.shields.io/badge/Data-A股-red.svg" alt="Data Scope"/>
   <img src="https://img.shields.io/badge/Tools-129-orange.svg" alt="MCP Tools"/>
-  <img src="https://img.shields.io/badge/Version-3.3.18-blue.svg" alt="Version"/>
+  <img src="https://img.shields.io/badge/Version-3.4.0-blue.svg" alt="Version"/>
 </p>
 
 ---
@@ -368,6 +368,103 @@ URL: http://<服务器IP或域名>:8000/mcp
 
 ---
 
+## REST API（v3.4.0+）
+
+v3.4.0 起，tradex-hub 提供 **双协议并存**：原有的 129 个 MCP 工具 + 新增 44 个 REST 端点，两者共享同一 service 层（契约一致性）。
+
+### 快速开始
+
+启动网关后（`python -m tradex --http`），REST 端点默认监听 `/api/v1/*`：
+
+```bash
+# 行情
+curl http://127.0.0.1:8000/api/v1/market/overview
+curl http://127.0.0.1:8000/api/v1/price/quote?symbol=600519
+
+# 技术指标（自动取 K 线）
+curl http://127.0.0.1:8000/api/v1/indicator/macd?symbol=600519
+curl http://127.0.0.1:8000/api/v1/indicator/rsi?symbol=600519
+
+# 综合诊断
+curl http://127.0.0.1:8000/api/v1/diagnostic/stock?symbol=600519
+curl http://127.0.0.1:8000/api/v1/diagnostic/market
+
+# 写操作（策略 + 自选股）
+curl -X POST http://127.0.0.1:8000/api/v1/write/strategy \
+  -H "Content-Type: application/json" \
+  -d '{"name":"双均线","content":"MA5 上穿 MA20 买入","tags":["momentum"]}'
+
+# 监控
+curl http://127.0.0.1:8000/metrics              # Prometheus 文本格式
+curl http://127.0.0.1:8000/api/v1/metrics/json  # JSON 快照
+```
+
+Python 示例：
+
+```python
+import requests
+r = requests.get("http://127.0.0.1:8000/api/v1/company/info", params={"symbol": "600519"})
+body = r.json()
+if body["code"] == 0:
+    company = body["data"]
+    print(company["info"]["行业"])
+```
+
+### 统一响应包裹
+
+所有 `/api/v1/*` 端点返回统一包裹格式：
+
+```json
+{"code": 0, "data": <业务对象>, "msg": "ok"}      // 成功
+{"code": 40001, "data": null, "msg": "..."}       // 失败
+```
+
+### 错误码
+
+| code | HTTP | 含义 |
+|------|------|------|
+| 0 | 200 | 成功 |
+| 40001 | 400/422 | 参数错误（含 Pydantic 校验失败） |
+| 40401 | 404 | 资源不存在 |
+| 50001 | 502 | 数据源不可达 |
+| 50002 | 502 | 数据源返回异常 |
+| 50003 | 500 | 网关内部错误 |
+
+### 端点清单（44 个）
+
+| 类别 | 端点 |
+|------|------|
+| 行情 | `/market/overview`、`/market/global`、`/market/limit-up-down`、`/market/dragon-tiger` |
+| 资金 | `/fund/flow`、`/fund/northbound` |
+| 价格 | `/price/quote`、`/price/kline`、`/price/intraday` |
+| 公司 | `/company/search`、`/company/info`、`/company/profile`、`/company/competitors` |
+| 财务 | `/financial/income`、`/financial/balance`、`/financial/cashflow`、`/financial/line-item`、`/financial/indicators`、`/financial/growth`、`/financial/per-share`、`/financial/segments` |
+| 新闻 | `/news/stock`、`/news/announcements`、`/news/search` |
+| 板块 | `/industry/list`、`/industry/stocks`、`/industry/concepts`、`/industry/fund-flow`、`/industry/pe` |
+| 指标 | `/indicator/macd`、`/indicator/kdj`、`/indicator/rsi`、`/indicator/boll` |
+| 诊断 | `/diagnostic/stock`、`/diagnostic/market`、`/diagnostic/technical` |
+| 写操作 | `POST /write/strategy`、`GET /write/strategy/list`、`GET/DELETE /write/strategy/{id}`、`POST /write/watchlist`、`GET /write/watchlist/list`、`DELETE /write/watchlist/{symbol}` |
+| 指标导出 | `/metrics`（Prometheus）、`/metrics/json`（包裹式 JSON） |
+| 监控 | `/dashboard`（HTML 看板，30 秒自动刷新） |
+
+### 监控
+
+- `GET /metrics` 输出 Prometheus 文本格式（10 个指标：requests_total / request_duration_seconds / errors_total / data_source_health / slow_queries_total / gateway_uptime_seconds / tools_registered / cache_hits_total / cache_misses_total）
+- `GET /dashboard` 浏览器打开监控看板（商务风格、暗色模式、响应式、手机竖屏友好）
+- 慢查询日志：超过 `TRADEX_SLOW_QUERY_MS`（默认 800ms）的请求写 `tradex_slow_query.log`
+
+### 架构决策（Direction B 双协议并存）
+
+- **共享 service 层**：每个业务领域抽出纯函数到 `service/<domain>_service.py`，MCP 工具与 REST 路由都是薄包装
+- **MCP 零回归**：129 个 MCP 工具行为不变（这是红线）
+- **契约一致性**：MCP 与 REST 走同一执行路径，返回同一数据结构（仅序列化差异：MCP 为 JSON 字符串、REST 为包裹 dict）
+
+### OpenAPI 文档
+
+启动网关后访问 `http://127.0.0.1:8000/docs` 查看自动生成的 OpenAPI 交互式文档，覆盖所有 `/api/v1/*` 端点。
+
+---
+
 ## 配置到 AI Agent
 
 编辑 MCP 配置文件（如 `~/.trae-cn/mcp.json` 或对应 AI Agent 的配置文件）：
@@ -417,6 +514,7 @@ AI 会调用 `mcp__tradex__eltdx_get_kline`，返回 100 根日 K 线。
 
 | 版本 | 日期 | 内容 |
 |------|------|------|
+| v3.4.0 | 2026-09-19 | **REST API 层上线（阶段一）**：双协议并存（MCP + REST 共享同一 service 层），新增 44 个 `/api/v1/*` REST 端点 + `/metrics` Prometheus + `/dashboard` 监控页。核心改动：①抽出 service 层（market/fund/price/company/financial/news/industry/indicator/diagnostic/write/metrics），MCP 工具改为薄包装（129 个零回归）；②REST 统一 `{code,data,msg}` 包裹；③Prometheus 指标采集（10 个指标 + 中间件自动计数 + 慢查询日志）；④写操作（策略/自选股本地文件 CRUD）；⑤监控看板 HTML（30 秒自动刷新、暗色模式、响应式）；⑥全量测试覆盖（每工单独立测试套件）。REST 端点覆盖：行情/资金/价格/公司/财务/新闻/板块/指标/诊断/写操作/指标导出。错误码：40001 参数错误 / 40401 资源不存在 / 50001 数据源不可达 / 50002 数据源异常 / 50003 内部错误 |
 | v3.3.18 | 2026-09-18 | **根因修复 MCP 频繁断连**：eltdx 3.x Rust 内核（pyo3 native）panic 抛 `PanicException`（继承 `BaseException`，不被 `except Exception` 捕获）穿透 `route()`/`_safe_call` 杀穿事件循环 → server 进程干净退出 → WorkBuddy 报 `-32000` 且永不重连。触发：v3.3.2 的 8 线程池并发 × v3.3.13 的 eltdx Rust 内核单例。三层防御（不降级 eltdx）：L1 `route()` 加 `except BaseException` 按源降级（KI/SE/CancelledError 放行）；L2 `_NativePanicShield` 互斥锁序列化所有 native 调用 + `BaseException→RuntimeError`（`_get_client()` 返代理，40+ 调用点零改动）；L2b `eltdx_stream` 第二裸 client 同包盾；L3 `_safe_call` BaseException 双保险。新增 14 条回归测试，测试 471 passed |
 | v3.3.17 | 2026-09-15 | 依赖声明与健壮性修复：`mcp>=1.0.0,<2` 锁上限（mcp 2.x 移除 v1 `FastMCP` API，15 个工具模块在用，新环境解析到 2.x 直接 ImportError，pyproject+requirements 两处同修）；`WS_PORT` 环境变量非数字改容错回退默认（原在 import 期 ValueError 崩服务）；requirements.txt 补齐 `requests`/`stockstats`/`python-dotenv` 3 个运行时依赖；降级链 10 处静默吞错补 `logger.debug` 留痕（`get_market_capitalization` Tier1/2 + `news_events` 8 源，多源全挂时可排查各路死因）；pytest class-scoped fixture 迁模块级（pytest 10 兼容，消 2 条弃用警告）；删除 V2.5.0 时代无引用死脚本 `verify_v250.py`。测试 457 passed，MCP stdio 握手 129 工具验证通过 |
 | v3.3.16 | 2026-09-15 | 修复机构持仓数据正确性与超时：`fetch_fund_hold_data` 因 akshare 按位置映射列而上游行序漂移 → **整列语义全错**（行数正常故长期漏检，1.18.91/1.18.94 同样错位、非升级引入），改为新增 `fetch_fund_hold_direct` **直取东财 + 按上游字段名映射**并加「代码列必须全 6 位数字」错位守卫，列名沿用 akshare 原 9 名（只追加 `持股占流通股比`）、`fund_hold` 升为双源（`em_zlsj_direct` 主 + akshare 备）；`get_fund_hold()` 默认 `基金持仓` 因全量翻页 11 页 ≈17s 超路由 12s 上限而**无参调用必挂**，新增 `_FUND_HOLD_ROUTE_TIMEOUT=40.0` 单独放宽；退役已永久失效的 `index_news_sentiment` 旧主源（chinascope 返回 HTML 非 JSON），`legu_activity` 提为主源 + 补同花顺 `ths_distribution` 跨上游备源。数据源 101→102（去重 36→37），新增 7 项回归测试，测试 457 passed |
