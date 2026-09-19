@@ -140,6 +140,12 @@ _DASHBOARD_HTML = """<!DOCTYPE html>
           <div class="metric-row"><span class="metric-label">文件缓存</span><span class="metric-value" id="cache-file">--</span></div>
         </div>
       </div>
+      <div class="card">
+        <div class="card-title">端点性能（按 P95 降序）</div>
+        <div id="endpoint-breakdown">
+          <p style="color: var(--text-muted); font-size: 12px;">暂无端点数据</p>
+        </div>
+      </div>
     </div>
     <div>
       <div class="card">
@@ -158,6 +164,7 @@ _DASHBOARD_HTML = """<!DOCTYPE html>
   </div>
 <script>
 const METRICS_URL = '/api/v1/metrics/json';
+const SLOW_QUERIES_URL = '/api/v1/metrics/slow-queries?limit=10';
 const REFRESH_INTERVAL = 30000;
 
 function formatUptime(seconds) {
@@ -175,6 +182,65 @@ function setError(msg) {
     banner.textContent = '⚠️ 指标拉取失败: ' + msg;
   } else {
     banner.style.display = 'none';
+  }
+}
+
+function renderSlowQueries(items) {
+  const container = document.getElementById('slow-query-list');
+  if (!items || items.length === 0) {
+    container.innerHTML = '<p style="color: var(--text-muted); font-size: 12px;">暂无慢查询记录</p>';
+    return;
+  }
+  const rows = items.map(it => {
+    const durCls = it.duration_ms >= 2000 ? 'danger' : it.duration_ms >= 1000 ? 'warning' : '';
+    const durBadge = durCls
+      ? `<span class="badge ${durCls}">${it.duration_ms}ms</span>`
+      : `<span>${it.duration_ms}ms</span>`;
+    return `<tr><td>${it.timestamp}</td><td>${it.method}</td><td>${it.path}</td><td>${durBadge}</td></tr>`;
+  }).join('');
+  container.innerHTML = `<table><thead><tr><th>时间</th><th>方法</th><th>路径</th><th>耗时</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function renderEndpointBreakdown(breakdown) {
+  const container = document.getElementById('endpoint-breakdown');
+  if (!breakdown || Object.keys(breakdown).length === 0) {
+    container.innerHTML = '<p style="color: var(--text-muted); font-size: 12px;">暂无端点数据</p>';
+    return;
+  }
+  // 收集所有 (path, method, stats) 并按 p95_ms 降序
+  const items = [];
+  for (const [path, methods] of Object.entries(breakdown)) {
+    for (const [method, stats] of Object.entries(methods)) {
+      items.push({ path, method, ...stats });
+    }
+  }
+  items.sort((a, b) => b.p95_ms - a.p95_ms);
+
+  const rows = items.map(it => {
+    const p95Cls = it.p95_ms >= 1000 ? 'danger' : it.p95_ms >= 500 ? 'warning' : 'success';
+    const errCls = it.error_rate >= 0.1 ? 'danger' : it.error_rate > 0 ? 'warning' : '';
+    return `<tr>
+      <td>${it.method}</td>
+      <td>${it.path}</td>
+      <td>${it.count}</td>
+      <td><span class="badge ${p95Cls}">${it.p95_ms}ms</span></td>
+      <td>${it.p50_ms}ms</td>
+      <td>${it.p99_ms}ms</td>
+      <td>${errCls ? `<span class="badge ${errCls}">${(it.error_rate*100).toFixed(1)}%</span>` : '0%'}</td>
+    </tr>`;
+  }).join('');
+  container.innerHTML = `<table><thead><tr><th>方法</th><th>路径</th><th>次数</th><th>P95</th><th>P50</th><th>P99</th><th>错误率</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+async function fetchSlowQueries() {
+  try {
+    const r = await fetch(SLOW_QUERIES_URL);
+    if (!r.ok) return;
+    const body = await r.json();
+    if (body.code !== 0) return;
+    renderSlowQueries(body.data || []);
+  } catch (e) {
+    // 慢查询拉取失败不影响主指标展示，静默忽略
   }
 }
 
@@ -207,6 +273,9 @@ async function fetchMetrics() {
     document.getElementById('cache-file').textContent = c.file_enabled ? '启用' : '关闭';
     document.getElementById('slow-threshold').textContent = (data.slow_query_threshold_ms || 800) + 'ms';
 
+    // 工单 16：渲染端点性能表
+    renderEndpointBreakdown(data.endpoint_breakdown || {});
+
     document.getElementById('refresh-info').textContent =
       '更新于 ' + new Date().toLocaleTimeString('zh-CN');
 
@@ -216,7 +285,9 @@ async function fetchMetrics() {
 }
 
 fetchMetrics();
+fetchSlowQueries();
 setInterval(fetchMetrics, REFRESH_INTERVAL);
+setInterval(fetchSlowQueries, REFRESH_INTERVAL);
 </script>
 </body>
 </html>"""

@@ -243,7 +243,9 @@ class SmartRouter:
                     try:
                         result = fut.result(timeout=timeout)
                     except concurrent.futures.TimeoutError:
+                        latency_ms = (time.time() - t0) * 1000
                         health.record_failure()
+                        _record_data_source_metric(source_name, latency_ms / 1000.0, healthy=False)
                         errors.append(f"{source_name}: timeout({timeout}s)")
                         logger.warning(
                             "SmartRouter: %s via %s TIMEOUT after %.1fs",
@@ -260,6 +262,12 @@ class SmartRouter:
                     result = fetch_fn(**kwargs)
                 latency_ms = (time.time() - t0) * 1000
                 health.record_success(latency_ms)
+                # 工单 14：把状态推送到 Prometheus 指标
+                _record_data_source_metric(
+                    source_name,
+                    latency_ms / 1000.0,
+                    healthy=bool(result is not None),
+                )
                 logger.debug(
                     "SmartRouter: %s via %s OK (%.0fms)", data_type, source_name, latency_ms
                 )
@@ -277,7 +285,9 @@ class SmartRouter:
                 # 避免吞掉协程取消语义（客户端断开/超时取消场景）。
                 if isinstance(e, (KeyboardInterrupt, SystemExit, asyncio.CancelledError)):
                     raise
+                latency_ms = (time.time() - t0) * 1000
                 health.record_failure()
+                _record_data_source_metric(source_name, latency_ms / 1000.0, healthy=False)
                 errors.append(f"{source_name}: {type(e).__name__}: {e}")
                 logger.warning(
                     "SmartRouter: %s via %s FAILED: %s: %s",
@@ -350,3 +360,19 @@ def get_router() -> SmartRouter:
     if _global_router is None:
         _global_router = SmartRouter()
     return _global_router
+
+
+# ───────────────────────── 工单 14：数据源指标埋点 ─────────────────────────
+
+def _record_data_source_metric(source: str, latency_s: float, healthy: bool) -> None:
+    """把单次数据源调用的健康/延迟推送到 tradex.metrics 指标。
+
+    工单 14 新增：smart_router 已自带 SourceHealth 记账，本函数仅做指标外推，
+    供 /metrics 和 /api/v1/metrics/json 暴露。失败安全：metrics 模块不可用时静默忽略，
+    绝不影响路由主流程（阶段二红线：smart_router 改动零回归）。
+    """
+    try:
+        from tradex.metrics import record_data_source
+        record_data_source(source=source, latency_s=latency_s, healthy=healthy)
+    except Exception as _e:
+        logger.debug("metrics 埋点失败（不影响路由）: %s", _e)

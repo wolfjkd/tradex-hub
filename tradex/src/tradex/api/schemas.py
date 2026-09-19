@@ -21,6 +21,7 @@ ERR_NOT_FOUND = 40401            # 资源不存在
 ERR_DATA_SOURCE_UNREACHABLE = 50001   # 数据源不可达
 ERR_DATA_SOURCE_ABNORMAL = 50002      # 数据源返回异常
 ERR_INTERNAL = 50003             # 网关内部错误
+ERR_RATE_LIMIT = 42901           # 限流（工单 20）
 
 
 class Envelope(BaseModel, Generic[T]):

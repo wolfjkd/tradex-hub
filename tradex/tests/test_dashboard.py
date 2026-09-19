@@ -129,3 +129,32 @@ class TestDashboardFullApp:
         body = response.body.decode("utf-8")
         assert 'id="status-card"' in body
         assert 'id="metrics-table"' in body
+
+
+# ────────────────────── 工单 15：慢查询展示 ──────────────────────────
+
+class TestDashboardSlowQueries:
+    """验证 dashboard HTML 含慢查询区域 + JS 拉取逻辑。"""
+
+    def test_dashboard_has_slow_query_list_id(self):
+        """HTML 应含 id='slow-query-list'。"""
+        app = _build_dashboard_app()
+        client = TestClient(app)
+        html = client.get("/dashboard").text
+        assert 'id="slow-query-list"' in html
+
+    def test_dashboard_js_fetches_slow_queries(self):
+        """JS 应包含 /api/v1/metrics/slow-queries URL。"""
+        app = _build_dashboard_app()
+        client = TestClient(app)
+        html = client.get("/dashboard").text
+        assert "/api/v1/metrics/slow-queries" in html
+
+    def test_dashboard_has_fetch_slow_queries_function(self):
+        """JS 应定义 fetchSlowQueries 函数。"""
+        app = _build_dashboard_app()
+        client = TestClient(app)
+        html = client.get("/dashboard").text
+        assert "fetchSlowQueries" in html
+        # 应在启动时和定时器里都被调用
+        assert html.count("fetchSlowQueries()") >= 2

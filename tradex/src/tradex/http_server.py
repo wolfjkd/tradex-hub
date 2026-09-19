@@ -351,11 +351,44 @@ def build_app(mcp, allowed_hosts: list[str] | None = None) -> FastAPI:
     # 5) Prometheus 指标采集中间件（工单 11）—— 必须在异常处理器之后注册
     _register_metrics_middleware(app)
 
+    # 6) 结构化访问日志中间件（工单 19）—— 拦截 /api/v1/* 请求双写日志
+    _register_access_log_middleware(app)
+
+    # 7) 令牌桶限流中间件（工单 20）—— 必须在访问日志之前注册（被限的请求也要记录）
+    # Starlette 中间件执行顺序：后注册的先执行（洋葱模型）；故注册顺序与执行顺序相反
+    _register_rate_limit_middleware(app)
+
     return app
 
 
+def _register_access_log_middleware(app: FastAPI) -> None:
+    """挂载访问日志中间件（工单 19）。
+
+    拦截 /api/v1/* 请求，把结构化日志双写到 JSON Lines 文件和 SQLite。
+    """
+    try:
+        from tradex.middleware.access_log import AccessLogMiddleware
+        app.add_middleware(AccessLogMiddleware)
+    except ImportError as e:
+        logger.warning("访问日志中间件加载失败（不阻断启动）: %s", e)
+
+
+def _register_rate_limit_middleware(app: FastAPI) -> None:
+    """挂载令牌桶限流中间件（工单 20）。
+
+    Starlette 中间件执行顺序：后注册的先执行（洋葱模型）。
+    限流应在访问日志之前执行——被限的请求也应记录到访问日志。
+    故这里在访问日志之后注册（实际执行时先于访问日志）。
+    """
+    try:
+        from tradex.middleware.rate_limit import RateLimitMiddleware
+        app.add_middleware(RateLimitMiddleware)
+    except ImportError as e:
+        logger.warning("限流中间件加载失败（不阻断启动）: %s", e)
+
+
 def _register_metrics_middleware(app: FastAPI) -> None:
-    """注册请求指标采集中间件（工单 11）。
+    """注册请求指标采集中间件（工单 11 + 工单 16）。
 
     自动记录：
     - requests_total（含 method/path/code 标签）
@@ -363,9 +396,11 @@ def _register_metrics_middleware(app: FastAPI) -> None:
     - errors_total（status >= 400）
     - slow_queries_total（超过阈值的请求）
     - gateway_uptime_seconds（每次请求时刷新）
+    - endpoint_breakdown 内存结构（工单 16，供 P50/P95/P99 计算）
     """
     from tradex.metrics import (
         record_request, update_uptime, set_tools_registered,
+        record_endpoint_call,
     )
 
     # 启动后定期同步工具数到指标（在第一个请求时设置）
@@ -388,6 +423,11 @@ def _register_metrics_middleware(app: FastAPI) -> None:
         method = request.method
         try:
             record_request(method, path, response.status_code, duration)
+            # 工单 16：同时写入内存滑动窗口供 P50/P95/P99 计算
+            record_endpoint_call(
+                method, path, duration,
+                is_error=response.status_code >= 400,
+            )
         except Exception as exc:  # noqa: BLE001
             logger.debug("metrics collect failed: %s", exc)
         return response

@@ -4,6 +4,46 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
 
+## [Unreleased] — REST API 阶段二（工单 14-23）
+
+阶段二围绕 **可观测性、并发安全、接入友好** 三条主线交付，版本号维持 v3.4.0（按老板 2026-09-14 阶段性发版纪律，阶段成果合并到下个正式版一起发）。
+
+### Added
+
+- **数据源健康指标实时化**（工单 14）：SmartRouter 在每次路由成功/超时/异常时自动调用 `record_data_source()`，将数据源名称、延迟、健康度上报到 Prometheus（`tradex_data_source_health{source=...}` / `tradex_data_source_latency_seconds{source=...}`）；埋点失败安全（异常不影响路由）。
+- **慢查询日志读取端点** `GET /api/v1/metrics/slow-queries`（工单 15）：返回结构化数组 `{timestamp, method, path, duration_ms}`；边界处理 —— 文件不存在返空、超 10MB 只读尾部 100KB、非法行静默跳过。
+- **端点性能聚合（QPS / P50 / P95 / P99）**（工单 16）：内存滑动窗口（默认 1000 条）+ 纯 Python 最近秩线性插值（不依赖 numpy）；`GET /api/v1/metrics/json` 新增 `endpoint_breakdown` 字段；Dashboard 新增「端点性能表」（按 P95 降序）。
+- **Dashboard 三新区域**（工单 15+16）：数据源健康表、慢查询日志区、端点性能表全部上线。
+- **访问日志查询端点** `GET /api/v1/access-log`（工单 19）：支持 `limit` / `path` 前缀过滤；数据源是中间件双写后的 SQLite `access_log` 表。
+- **访问日志中间件（双写）** `AccessLogMiddleware`（工单 19）：每个请求同时写 SQLite（结构化查询）+ 文件 `logs/access-YYYY-MM-DD.log`（JSON Lines 审计）；建 `access_log` 表 + 2 索引；中间件注册顺序保证被限流请求仍经访问日志。
+- **令牌桶三层限流**（工单 20）：全局 600 / 单 IP 60 / 单端点 120 req/min；超阈值返 HTTP 429 + envelope `code=42901` + `Retry-After` header；本机回环（127.0.0.1 / ::1）白名单。
+- **错误码 42901**（工单 20）：新增到 schemas 与 README 错误码表。
+- **TypeScript + Python 双语言 SDK**（工单 21+22，降级方案）：精简生成器 `scripts/generate_sdk.py` 从 `/openapi.json` 解析端点，自动生成 `sdk/typescript/index.ts` + `sdk/python/tradex_client/__init__.py` + `sdk/README.md`（双语言对照）。降级原因：本机无 Java/Docker，openapi-generator-cli 跑不起来。
+
+### Changed
+
+- **写操作存储从 JSON 切换为 SQLite（WAL 模式）**（工单 17+18）：
+  - 表：`strategies` / `watchlist`，主键格式 `{毫秒时间戳}-{线程ID}-{随机4位}` 杜绝高并发冲突
+  - 写入用 `BEGIN IMMEDIATE` 立即获取写锁；连接管理改用 `_cursor()` 上下文管理器显式 close（修 Python sqlite3 `with conn` 只 commit 不关闭导致 WAL 锁文件未释放的坑）
+  - **首次启动自动迁移**：发现旧 JSON 文件自动导入 SQLite，原文件改名为 `.migrated`，过程写 `data/migration.log`（幂等）
+  - `_bootstrap()` 改为惰性 + 模块级锁 + 标志位，避免模块加载时污染真实数据（测试 fixture 可重置）
+- **Prometheus 指标 `record_endpoint_call()` 与中间件集成**（工单 16）：`_collect_metrics` 中间件每次请求都调 `record_endpoint_call(method, path, duration, is_error=status>=400)`，给 `endpoint_breakdown` 喂数据。
+- **错误码 `record_request` 也记录 429**：被限流请求计入 `requests_total{code="429"}`，方便监控看到限流命中情况。
+
+### Fixed
+
+- **Windows 临时目录清理 PermissionError**（工单 18 测试期发现）：sqlite3 `with conn` 上下文管理器只 commit 不 close，导致 WAL 文件 (`-wal` / `-shm`) 在 fixture 清理时仍被占用。新增 `_cursor()` contextmanager 显式 close；测试 fixture 加 `gc.collect()` + 清理 WAL/SHM 文件。
+- **SQLite "database is locked"**（工单 18 测试期发现）：`init_schema()` 在每次 `_connect()` 内执行 `PRAGMA journal_mode=WAL` 会并发争锁。改为独立 `setup_conn` 只在 `init_schema()` 一次性设置。
+- **迁移 "no such table: watchlist"**（工单 18）：`migrate_from_json` 函数开头漏调 `init_schema()`，导致表还没建就尝试插入。已修复为先建表再迁移。
+- **并发 UNIQUE 冲突**（工单 18）：毫秒时间戳在高并发下同毫秒会撞主键，ID 加 `-{threading.get_ident()}-{random.randint(0,9999)}` 后缀彻底解决。
+- **TS SDK README 生成时 f-string 花括号被误解析**（工单 21）：TypeScript `{ TradexClient }` 字符串被 Python f-string 当表达式。改用字符串拼接 parts 列表规避。
+
+### Notes
+
+- **MCP 零回归**：129 个 MCP 工具行为完全不变；全量回归测试 703 通过 / 3 失败（test_industry_rest 联网波动，单独跑全过）/ 7 skipped（async 缺插件，既有现象）。
+- **测试新增 ~70 条**：阶段二共新增 70 余条单元测试（数据源指标 6 + 慢查询端点 5 + 端点性能 8 + 写操作 SQLite 12 + 迁移 3 + 并发 5 + 访问日志 7 + 限流 13 + SDK 生成 15），全部通过。
+- **不发版**：本阶段所有改动只 commit + push 到 master，不打 tag、不发 GitHub Release。等阶段三完成或下次正式发版时合并发版。
+
 ## [3.4.0] - 2026-09-19
 
 ### Added — REST API 层（阶段一工单 01-12 全量交付）

@@ -426,11 +426,14 @@ if body["code"] == 0:
 | 0 | 200 | 成功 |
 | 40001 | 400/422 | 参数错误（含 Pydantic 校验失败） |
 | 40401 | 404 | 资源不存在 |
+| 42901 | 429 | 限流触发（请求过快，见下方「限流」章节） |
 | 50001 | 502 | 数据源不可达 |
 | 50002 | 502 | 数据源返回异常 |
 | 50003 | 500 | 网关内部错误 |
 
-### 端点清单（44 个）
+### 端点清单
+
+阶段一 44 端点 + 阶段二新增端点：
 
 | 类别 | 端点 |
 |------|------|
@@ -444,14 +447,125 @@ if body["code"] == 0:
 | 指标 | `/indicator/macd`、`/indicator/kdj`、`/indicator/rsi`、`/indicator/boll` |
 | 诊断 | `/diagnostic/stock`、`/diagnostic/market`、`/diagnostic/technical` |
 | 写操作 | `POST /write/strategy`、`GET /write/strategy/list`、`GET/DELETE /write/strategy/{id}`、`POST /write/watchlist`、`GET /write/watchlist/list`、`DELETE /write/watchlist/{symbol}` |
-| 指标导出 | `/metrics`（Prometheus）、`/metrics/json`（包裹式 JSON） |
-| 监控 | `/dashboard`（HTML 看板，30 秒自动刷新） |
+| 指标导出 | `/metrics`（Prometheus）、`/metrics/json`（包裹式 JSON）、`/metrics/slow-queries`（慢查询日志，阶段二） |
+| 访问日志 | `/access-log`（阶段二，含 limit/path 过滤参数） |
+| 监控看板 | `/dashboard`（HTML 看板，30 秒自动刷新；阶段二新增数据源健康表、慢查询区、端点性能表三个区域） |
 
 ### 监控
 
-- `GET /metrics` 输出 Prometheus 文本格式（10 个指标：requests_total / request_duration_seconds / errors_total / data_source_health / slow_queries_total / gateway_uptime_seconds / tools_registered / cache_hits_total / cache_misses_total）
+- `GET /metrics` 输出 Prometheus 文本格式（10 个指标：requests_total / request_duration_seconds / errors_total / data_source_health / data_source_latency_seconds / slow_queries_total / gateway_uptime_seconds / tools_registered / cache_hits_total / cache_misses_total）
 - `GET /dashboard` 浏览器打开监控看板（商务风格、暗色模式、响应式、手机竖屏友好）
 - 慢查询日志：超过 `TRADEX_SLOW_QUERY_MS`（默认 800ms）的请求写 `tradex_slow_query.log`
+
+#### 数据源健康（v3.4.0 阶段二）
+
+SmartRouter 在每次路由成功/超时/异常时自动上报数据源指标到 Prometheus：
+
+| 指标 | 类型 | 说明 |
+|------|------|------|
+| `tradex_data_source_health{source=...}` | Gauge | 数据源健康度（1=健康，0=不健康），按近 N 次调用量计算 |
+| `tradex_data_source_latency_seconds{source=...}` | Gauge | 该数据源最近一次响应延迟（秒） |
+
+Dashboard 新增「数据源健康表」区域，按 health 降序、latency 升序展示每个数据源的实时状态。
+
+#### 慢查询展示（v3.4.0 阶段二）
+
+`GET /api/v1/metrics/slow-queries?limit=N` 读取最近 N 条慢查询日志，返回结构化数组：
+
+```json
+{"code": 0, "data": [
+  {"timestamp": "2026-09-19 11:34:54", "method": "GET", "path": "/api/v1/price/quote", "duration_ms": 1754},
+  ...
+]}
+```
+
+Dashboard 新增「慢查询日志」区域，按 duration_ms 分级 badge（≥1000ms 红色、≥500ms 橙色、其余绿色）。
+
+#### 端点 QPS / P95 性能（v3.4.0 阶段二）
+
+`GET /api/v1/metrics/json` 的 JSON 快照新增 `endpoint_breakdown` 字段，聚合每个端点的请求数、延迟分位数、错误率：
+
+```json
+{"endpoint_breakdown": {
+  "/api/v1/price/quote": {
+    "GET": {"count": 42, "p50_ms": 35.2, "p95_ms": 120.5, "p99_ms": 180.0,
+            "error_count": 0, "error_rate": 0.0}
+  },
+  ...
+}}
+```
+
+延迟分位数用纯 Python 最近秩线性插值实现（不依赖 numpy），滑动窗口默认保留 1000 条耗时记录。Dashboard 新增「端点性能表」（按 P95 降序），便于快速识别瓶颈端点。
+
+### 访问日志与限流（v3.4.0 阶段二）
+
+#### 访问日志（双写）
+
+每个 REST 请求会被中间件双写到两处：
+
+| 存储 | 路径 | 用途 |
+|------|------|------|
+| SQLite 表 | `data/access.db` 的 `access_log` 表（带 2 个索引） | 结构化查询、聚合统计 |
+| 文件 | `logs/access-YYYY-MM-DD.log`（JSON Lines） | 审计归档、外部工具消费 |
+
+`GET /api/v1/access-log?limit=50&path=/api/v1/price` 查询最近 N 条访问记录，支持按路径前缀过滤。
+
+#### 限流（令牌桶三层）
+
+| 桶 | 阈值 | 说明 |
+|----|------|------|
+| 全局 | 600 req/min | 整个网关的总闸 |
+| 单 IP | 60 req/min | 按 client_ip 聚合 |
+| 单端点 | 120 req/min | 按 path 聚合 |
+
+超阈值返回 HTTP 429 + envelope `code=42901` + `Retry-After` header（建议重试等待秒数）：
+
+```json
+{"code": 42901, "data": null, "msg": "rate limit exceeded, retry after 12s"}
+```
+
+**本机回环白名单**：`127.0.0.1` / `::1` 不受限流（保证本地 AI Agent 调用与监控探针不被误伤）。
+
+### 写操作存储（v3.4.0 阶段二）
+
+阶段一起步时写操作（策略 / 自选股）用 JSON 文件存储，阶段二切换为 **SQLite（WAL 模式）** 以支持并发写入与查询：
+
+| 文件 | 用途 |
+|------|------|
+| `data/written.db` | 主库（表：`strategies`、`watchlist`） |
+
+**首次启动迁移**：发现旧 JSON 文件（`written/*.json`、`watchlist.json`、`strategy_*.json`）时自动导入 SQLite，原 JSON 文件改名为 `.migrated` 留底，迁移过程写 `data/migration.log`。迁移幂等，已迁移不会重复。
+
+**并发安全**：写入用 `BEGIN IMMEDIATE` 立即获取写锁；主键格式 `{毫秒时间戳}-{线程ID}-{随机4位}` 杜绝高并发冲突；WAL 模式保证读写不互斥。
+
+### 客户端 SDK（v3.4.0 阶段二）
+
+为方便第三方快速接入，提供 **TypeScript 与 Python 双语言 SDK**，由精简生成器从 `/openapi.json` 自动生成（详见 `sdk/README.md`）：
+
+```
+sdk/
+├── typescript/index.ts        # TypeScript 客户端（基于 fetch）
+├── python/tradex_client/      # Python 客户端（基于 requests）
+└── README.md                  # 双语言对照、安装、示例
+```
+
+快速示例：
+
+```python
+# Python
+from tradex_client import TradexClient
+c = TradexClient("http://127.0.0.1:8000")
+quote = c.quote(query={"symbol": "600519"})
+```
+
+```typescript
+// TypeScript
+import { TradexClient } from "./typescript";
+const c = new TradexClient("http://127.0.0.1:8000");
+const quote = await c.quote({ query: { symbol: "600519" } });
+```
+
+重新生成（修改端点后）：`python scripts/generate_sdk.py`
 
 ### 架构决策（Direction B 双协议并存）
 

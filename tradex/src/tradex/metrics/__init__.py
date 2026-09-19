@@ -55,6 +55,87 @@ SLOW_QUERY_THRESHOLD_MS = int(os.environ.get("TRADEX_SLOW_QUERY_MS", "800"))
 _HUB_ROOT = Path(__file__).resolve().parents[3]
 _SLOW_QUERY_LOG = _HUB_ROOT / "tradex_slow_query.log"
 
+# ───────────────────────── 工单 16：端点统计 ─────────────────────────
+# 内存结构：path -> method -> {durations: deque, count, error_count}
+# 滑动窗口默认保留 1000 条耗时记录，用于算 P50/P95/P99
+_ENDPOINT_WINDOW = 1000
+_endpoint_stats: dict[str, dict[str, dict[str, Any]]] = {}
+
+
+def record_endpoint_call(method: str, path: str, duration_s: float, is_error: bool = False) -> None:
+    """记录一次端点调用到内存统计结构（工单 16）。
+
+    与 record_request 互补 —— record_request 写 Prometheus Counter/Histogram，
+    本函数写内存滑动窗口用于算 P50/P95/P99 分位数（Prometheus Histogram 只给
+    预定义 bucket，P95 需额外计算）。失败安全：异常绝不影响主请求。
+    """
+    try:
+        path_stats = _endpoint_stats.setdefault(path, {})
+        method_stats = path_stats.setdefault(method, {
+            "durations": deque(maxlen=_ENDPOINT_WINDOW),
+            "count": 0,
+            "error_count": 0,
+        })
+        method_stats["durations"].append(duration_s * 1000.0)  # 存 ms
+        method_stats["count"] += 1
+        if is_error:
+            method_stats["error_count"] += 1
+    except Exception as e:
+        logger.debug("record_endpoint_call 失败（不影响主流程）: %s", e)
+
+
+def _percentile(sorted_values: list[float], p: float) -> float:
+    """纯 Python 百分位计算（不依赖 numpy）。
+
+    Args:
+        sorted_values: 已升序排列的数值列表
+        p: 百分位（0-100）
+    Returns:
+        对应百分位的值
+    """
+    if not sorted_values:
+        return 0.0
+    if len(sorted_values) == 1:
+        return sorted_values[0]
+    # 最近秩方法（与 numpy.percentile 默认 linear 插值一致）
+    k = (len(sorted_values) - 1) * (p / 100.0)
+    lo = int(k)
+    hi = min(lo + 1, len(sorted_values) - 1)
+    frac = k - lo
+    return sorted_values[lo] + (sorted_values[hi] - sorted_values[lo]) * frac
+
+
+def get_endpoint_breakdown() -> dict[str, dict[str, dict[str, float]]]:
+    """聚合端点统计，返回供 /metrics/json 消费的结构（工单 16）。
+
+    输出格式：
+        {
+          "/api/v1/price/quote": {
+            "GET": {
+              "count": 42, "p50_ms": 35.2, "p95_ms": 120.5, "p99_ms": 180.0,
+              "error_count": 0, "error_rate": 0.0
+            }
+          }
+        }
+    """
+    breakdown: dict[str, dict[str, dict[str, float]]] = {}
+    for path, methods in _endpoint_stats.items():
+        path_entry: dict[str, dict[str, float]] = {}
+        for method, stats in methods.items():
+            durations = sorted(stats["durations"])
+            count = stats["count"]
+            error_count = stats["error_count"]
+            path_entry[method] = {
+                "count": count,
+                "p50_ms": round(_percentile(durations, 50), 2),
+                "p95_ms": round(_percentile(durations, 95), 2),
+                "p99_ms": round(_percentile(durations, 99), 2),
+                "error_count": error_count,
+                "error_rate": round(error_count / count, 4) if count else 0.0,
+            }
+        breakdown[path] = path_entry
+    return breakdown
+
 # ───────────────────────── 指标定义 ─────────────────────────
 
 requests_total = Counter(
@@ -209,6 +290,7 @@ def render_json_snapshot() -> dict[str, Any]:
         },
         "cache": cache_snap,
         "slow_query_threshold_ms": SLOW_QUERY_THRESHOLD_MS,
+        "endpoint_breakdown": get_endpoint_breakdown(),  # 工单 16
         "timestamp": time.time(),
     }
 

@@ -50,6 +50,7 @@ data/
 # REST 层工单草稿与运行时日志（v3.4.0+）
 .scratch/
 tradex_slow_query.log
+logs/
 
 # Temp verification scripts
 _verify_*.py

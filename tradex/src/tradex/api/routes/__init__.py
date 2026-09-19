@@ -90,3 +90,8 @@ router.include_router(_write_routes.router)
 from . import metrics as _metrics_routes  # noqa: E402
 
 router.include_router(_metrics_routes.router)
+
+# 工单 19：访问日志查询端点（/access-log）
+from . import access_log as _access_log_routes  # noqa: E402
+
+router.include_router(_access_log_routes.router)
