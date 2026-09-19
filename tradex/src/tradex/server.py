@@ -45,6 +45,12 @@ mcp = FastMCP(
         "(e.g., '000001' for Ping An Bank, '600519' for Kweichow Moutai)."
     ),
     lifespan=_server_lifespan,
+    # 2026-09-19: HTTP 传输改为无状态——每个 /mcp 请求独立处理, 不依赖内存 session-id。
+    # 根因: 网关因健康检查误杀/崩溃而重启时, 内存 session 表清空, 有状态客户端持有的
+    # session-id 立即失效 → 报 "Session not found" → 表现为「时断时连」。改为无状态后,
+    # 网关任意重启客户端均可继续调用, 从协议层根除该故障。
+    # 仅影响 HTTP 模式; stdio 传输(本地 WorkBuddy/Claude Code)不受影响。
+    stateless_http=True,
 )
 
 # v3.3.9+：工具注册幂等守卫——importlib.reload(server) 或重复 import 时
