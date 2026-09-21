@@ -205,7 +205,48 @@ def fetch_index_daily_amount(symbol: str = "", code: str = "", days: int = 6, **
             "volume": vol,          # 成交量(手)
             "amount": amt,         # 成交额(元)，东财源才有；腾讯源为 None
         })
+
+    # 兜底：腾讯/东财备源仅返回成交量时，用新浪实时补齐「今日成交额(元)」，
+    # 保证盘后复盘量能对比可用「亿元」口径而非仅成交量。
+    if all(d.get("amount") is None for d in out):
+        try:
+            today_amt = _fetch_sina_index_amount_today(sym)
+            if today_amt is not None and out:
+                out[-1]["amount"] = today_amt
+                out[-1]["_amount_source"] = "sina_realtime"
+        except Exception as e_today:
+            logger.debug("sina index amount(%s) backfill failed: %s", sym, e_today)
+
     return out
+
+
+def _fetch_sina_index_amount_today(sym: str):
+    """新浪实时行情（hq.sinajs.cn）取指数当日成交额(元)。
+
+    sym: sh000001 / sz399001 / sz399006 等。
+    新浪指数行情字段：…, 成交量(手), 成交额(元), …（上证/深证的额在第10位）。返回整数成交额(元)或 None。
+    """
+    import urllib.request
+    url = f"https://hq.sinajs.cn/list={sym}"
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120",
+        "Referer": "https://finance.sina.com.cn",
+    })
+    resp = urllib.request.urlopen(req, timeout=8)
+    raw = resp.read().decode("gbk", "ignore")
+    quotes = raw.split("=", 1)[-1].strip(";").strip('"')
+    if not quotes:
+        return None
+    parts = quotes.split(",")
+    # 指数格式: 名称,今开,昨收,现价,最高,最低,买一?,卖一?,成交量(手),成交额(元),...
+    # 兼容两侧字段偏移——成交额在成交量之后。
+    try:
+        vol_idx = 8
+        amt_idx = 9
+        amount = float(parts[amt_idx]) if len(parts) > amt_idx else None
+        return amount
+    except (ValueError, IndexError):
+        return None
 
 
 def _fetch_index_daily_from_push2his(sym: str, days: int) -> list:

@@ -285,10 +285,24 @@ def _df_to_records(df: pd.DataFrame, max_rows: int | None = None) -> list[dict]:
     """DataFrame → list of dict（供 service 函数复用）。
 
     处理 NaN → None（JSON 友好），可选截断行数。
+    此外把 datetime.date / datetime.datetime / pd.Timestamp 统一转 ISO 字符串，
+    修复「Object of type date is not JSON serializable」序列化崩溃（曾导致 get_dragon_tiger 报错）。
     """
     if df is None or df.empty:
         return []
     if max_rows is not None:
         df = df.head(max_rows)
-    # NaN → None（JSON 序列化友好）
-    return df.where(pd.notnull(df), None).to_dict(orient="records")
+    # NaN → None；日期/时间对象 → ISO 字符串
+    def _norm(v):
+        if v is None or pd.isna(v):
+            return None
+        if isinstance(v, pd.Timestamp):
+            return v.isoformat()
+        if hasattr(v, "isoformat") and not isinstance(v, (str, int, float)):
+            return v.isoformat()
+        return v
+    out = df.where(pd.notnull(df), None).to_dict(orient="records")
+    for row in out:
+        for k, v in list(row.items()):
+            row[k] = _norm(v)
+    return out
