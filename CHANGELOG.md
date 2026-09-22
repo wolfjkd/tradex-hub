@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ---
 
+## [3.5.1] - 2026-09-22
+
+**Bug fix**：修复 stdio 模式 MCP 启动崩溃。
+
+### Fixed
+
+- `__main__.py` 在 stdio 模式无条件 import `http_server`（其依赖 fastapi，属 http 可选依赖），
+  该环境未安装 fastapi 导致 `ModuleNotFoundError`、MCP server 一启动即崩。
+  现将 `parse_allowed_hosts` 的导入延迟到 `--http` 分支内加载，stdio 模式不再触碰 http 依赖。
+
+---
+
 ## [3.5.0] - 2026-09-19
 
 **正式发版**：REST API 阶段一（工单 01-13）+ 阶段二（工单 14-23）合并发版。

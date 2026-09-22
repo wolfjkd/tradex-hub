@@ -11,11 +11,11 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.13+-blue.svg" alt="Python"/>
   <img src="https://img.shields.io/badge/MCP-1.0-green.svg" alt="MCP"/>
-  <img src="https://img.shields.io/badge/REST-v3.5.0-orange.svg" alt="REST"/>
+  <img src="https://img.shields.io/badge/REST-v3.5.1-orange.svg" alt="REST"/>
   <img src="https://img.shields.io/badge/Tools-129-orange.svg" alt="MCP Tools"/>
   <img src="https://img.shields.io/badge/Endpoints-48-orange.svg" alt="REST Endpoints"/>
   <img src="https://img.shields.io/badge/License-Apache--2.0-yellow.svg" alt="License"/>
-  <img src="https://img.shields.io/badge/Version-3.5.0-blue.svg" alt="Version"/>
+  <img src="https://img.shields.io/badge/Version-3.5.1-blue.svg" alt="Version"/>
 </p>
 
 ---
@@ -166,7 +166,7 @@ flowchart TD
 
 | 梯队 | 数据源 | 特征 |
 |------|--------|------|
-| **第一梯队** | eltdx（通达信协议） / 腾讯财经 HTTP / 本地 vipdoc | 不封 IP，可高频调用 |
+| **第一梯队** | eltdx（通达信协议） / **tdx_mcp（通达信官方 MCP，可选）** / 腾讯财经 HTTP / 本地 vipdoc | 不封 IP，可高频调用 |
 | **第二梯队** | 同花顺 / 新浪 / 巨潮 / 财联社 | 低风险，正常调用即可 |
 | **第三梯队** | 东财 push2 / push2ex / slist | 高封禁风险，仅用于独有数据，自动限流（间隔 ≥1s + 随机抖动） |
 
@@ -202,6 +202,28 @@ python -m tradex --http
 - REST 接口文档：http://127.0.0.1:8000/docs
 - Prometheus 指标：http://127.0.0.1:8000/metrics
 - 健康检查：http://127.0.0.1:8000/health
+
+### 可选：通达信官方 MCP（tdx_mcp）
+
+`tdx_mcp` 与 eltdx 同属第一梯队、互为备份、互为兜底，提供 eltdx 没有的**纯增量能力**：
+自然语言条件选股（`natural_lang_screener`）、券商研报（`research_report`）、
+宏观数据增强（`query_macro_indicator`）。
+
+它**可选**：不配置 `TDX_MCP_TOKEN` 也能正常运行——缺 token 时该源自动标记不可用，
+`realtime_quote` / `historical_kline` 无缝回落到 eltdx（健康分互备，用户无感）。
+
+配置（复制 `tradex/.env.example` 为 `.env`）：
+
+```bash
+# 在通达信官方 MCP 控制台获取访问 token，填入
+TDX_MCP_TOKEN=你的token
+# 端点与限流（通常无需改动）
+TDX_MCP_ENDPOINT=https://txmcp.tdx.com.cn:3001/txmcp
+TDX_MCP_MIN_INTERVAL=0.8
+```
+
+> ⚠️ 开源分发时请勿提交真实 token。token 冲突、泄漏或失效都只会让该源降级到
+> eltdx，不会导致服务不可用——这正是"平级互备"的设计意图。
 
 ---
 
@@ -468,6 +490,7 @@ curl http://127.0.0.1:8000/mcp -X POST \
 
 | 版本 | 日期 | 关键里程碑 |
 |------|------|-----------|
+| **v3.5.1** | 2026-09-22 | 修复 stdio 模式 MCP 启动崩溃：`parse_allowed_hosts` 的 http 依赖延迟到 `--http` 分支加载，无 fastapi 也可正常启动 |
 | **v3.5.0** | 2026-09-19 | REST API 阶段二：可观测性（数据源健康实时埋点 + 端点 QPS/P95 + 慢查询日志）+ 并发安全（写操作切 SQLite + WAL + 自动迁移）+ 接入友好（三层限流 + 双语言 SDK + 访问日志双写） |
 | **v3.4.0** | 2026-09-19 | REST API 上线：双协议并存（44 端点 + 129 MCP 工具），11 个 service 模块抽出共享业务逻辑，Prometheus 指标 + 监控看板，统一响应包裹 `{code, data, msg}` |
 | **v3.3.18** | 2026-09-18 | 根因修复 MCP 频繁断连（pyo3 PanicException 穿透杀进程） |

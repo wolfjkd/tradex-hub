@@ -108,7 +108,6 @@ def main():
 
     from .server import mcp
     from .config import config
-    from .http_server import parse_allowed_hosts
 
     # 可选：启动 WebSocket 推送服务（WS_SERVER_ENABLED=true 时启用）
     if config.WS_SERVER_ENABLED:
@@ -117,7 +116,7 @@ def main():
     if args.http:
         # v3.3.12+: 统一 HTTP 网关（/mcp + /sse + /health），原生支持免 supergateway。
         # host/port 优先级：CLI 显式值 > MCP_HOST/MCP_PORT 环境变量 > 默认值。
-        from .http_server import run as run_http_gateway
+        from .http_server import run as run_http_gateway, parse_allowed_hosts
 
         host = args.host if args.host is not None else config.MCP_HOST
         port = args.port if args.port is not None else config.MCP_PORT
