@@ -26,7 +26,21 @@ from typing import Any
 
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    # 顺序查找 .env：CWD → 项目根（tradex-hub/） → tradex/ 子目录
+    # 兼容多种启动方式：从根启动 / cd tradex 启动 / uvicorn 直接拉起
+    from pathlib import Path
+    _here = Path(__file__).resolve().parent            # tradex/src/tradex/
+    _candidates = [
+        Path.cwd() / ".env",                            # 当前工作目录
+        _here.parents[3] / ".env",                      # tradex-hub/.env
+        _here.parents[2] / ".env",                      # tradex-hub/tradex/.env
+    ]
+    for _p in _candidates:
+        if _p.is_file():
+            load_dotenv(_p, override=True)
+            break
+    else:
+        load_dotenv()  # 兜底：让 dotenv 用默认查找逻辑
 except ImportError:
     # python-dotenv 未安装时忽略，直接读取环境变量
     pass

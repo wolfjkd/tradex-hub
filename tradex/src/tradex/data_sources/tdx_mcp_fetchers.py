@@ -81,6 +81,7 @@ class TDXMCPClient:
 
     def __post_init__(self):
         self._client = httpx.Client(timeout=self.timeout)
+        self._initialized = False  # initialize 握手只做一次的标志
 
     @property
     def headers(self) -> dict:
@@ -94,6 +95,41 @@ class TDXMCPClient:
             headers["Mcp-Session-Id"] = self.session_id
         return headers
 
+    def _ensure_initialized(self) -> None:
+        """首次调用前做一次 MCP initialize 握手，拿 Mcp-Session-Id。
+
+        官方 streamable-HTTP 端点要求先 initialize 再 tools/call，
+        否则返回 400 "No valid session ID provided"。
+        session_id 过期或失效时自动重做一次（单飞：锁内 double-check）。
+        """
+        if self._initialized and self.session_id:
+            return
+        init_payload = {
+            "jsonrpc": "2.0",
+            "id": str(uuid.uuid4()),
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "tradex-hub", "version": "0.1.0"},
+            },
+        }
+        # initialize 不走限流（只跑一次）；session_id 在 _post_json 里被自动捕获
+        try:
+            resp = self._client.post(self.endpoint, json=init_payload, headers=self.headers)
+            if "Mcp-Session-Id" in resp.headers:
+                self.session_id = resp.headers["Mcp-Session-Id"]
+            # 解析验证 result 存在
+            data = _parse_mcp_response(resp.text)
+            if data.get("error"):
+                raise TDXSourceUnavailable(f"tdx_mcp initialize 失败: {data['error']}")
+            self._initialized = True
+            logger.info("tdx_mcp initialize 成功, session=%s", self.session_id[:8] + "..." if self.session_id else "N/A")
+        except TDXSourceUnavailable:
+            raise
+        except Exception as e:
+            raise TDXSourceUnavailable(f"tdx_mcp initialize 网络错误: {e}") from e
+
     def _post_json(self, payload: dict) -> dict:
         """发 JSON-RPC 请求，解出 result；HTTP/协议错误归为源不可用。"""
         # 限流：串行节流防官方风控；检查-等待-发出在同一把锁内，多线程并发安全。
@@ -104,6 +140,13 @@ class TDXMCPClient:
                 time.sleep(wait + random.uniform(0.05, 0.2))
             try:
                 resp = self._client.post(self.endpoint, json=payload, headers=self.headers)
+                # 401/403：认证失败；400 + "session" 提示：session 失效，强制重 init
+                if resp.status_code in (401, 403):
+                    raise TDXSourceUnavailable(f"tdx_mcp 认证失败 HTTP {resp.status_code}")
+                if resp.status_code == 400 and "session" in resp.text.lower():
+                    self._initialized = False
+                    self.session_id = None
+                    raise TDXSourceUnavailable("tdx_mcp session 失效，下次调用将重 init")
                 if "Mcp-Session-Id" in resp.headers:
                     self.session_id = resp.headers["Mcp-Session-Id"]
                 # httpx.Response.text 是 str；此处读出来交给解析器，
@@ -126,6 +169,7 @@ class TDXMCPClient:
         """MCP tools/call。返回工具结果（list[dict]）。"""
         if not tool_name:
             raise TDXSourceUnavailable("tdx_mcp: 空工具名")
+        self._ensure_initialized()  # 首次或 session 失效时握手
         payload = {
             "jsonrpc": "2.0",
             "id": str(uuid.uuid4()),
@@ -174,6 +218,49 @@ def _normalize_symbol_code(symbol: str = "", code: str = "") -> str:
     return symbol or code or ""
 
 
+def _infer_setcode(code: str) -> str:
+    """根据 A 股代码前缀推断官方 setcode（市场代码）。
+
+    官方约定：
+      '1' => 沪市（6/68 开头）  如 600519 / 688318
+      '0' => 深市（00/30 开头）  如 000001 / 300750
+      '2' => 北交所（83/87/92/4 开头）  如 830799
+    指数约定（来自官方 schema）：
+      '1' => 沪指（000开头指数，如 000300 沪深300）  实际官方映射较复杂，
+              此处仅处理个股常见场景；指数调用由调用方显式传 setcode。
+    无法判断时回退 '1'（沪市，覆盖最大体量）。
+    """
+    code = (code or "").strip().lstrip("shSHszSZbjBJ")  # 去掉可能的 sh/sz/bj 前缀
+    if not code or not code[0].isdigit():
+        return "1"
+    if code.startswith(("6", "68")):
+        return "1"  # 沪市
+    if code.startswith(("00", "30")):
+        return "0"  # 深市
+    if code.startswith(("83", "87", "92", "43")):
+        return "2"  # 北交所
+    return "1"  # 兜底
+
+
+def _to_period_code(period: str) -> str:
+    """将常用周期别名映射成官方 tdx_kline period 数字字符串。
+
+    官方：'0'=5分 | '1'=15分 | '2'=30分 | '3'=1小时
+          '4'=日线 | '5'=周线 | '6'=月线 | '7'=年线
+    """
+    p = (period or "").lower().strip()
+    return {
+        "5min": "0", "5m": "0", "m5": "0",
+        "15min": "1", "15m": "1", "m15": "1",
+        "30min": "2", "30m": "2", "m30": "2",
+        "1h": "3", "60min": "3", "h": "3",
+        "day": "4", "d": "4", "daily": "4", "日线": "4",
+        "week": "5", "w": "5", "weekly": "5", "周线": "5",
+        "month": "6", "m": "6", "monthly": "6", "月线": "6",
+        "year": "7", "y": "7", "yearly": "7", "年线": "7",
+    }.get(p, "4")  # 兜底日线
+
+
 # ============================================================================
 # 供 SmartRouter 注册的 fetch_fn（统一签名：兼容 symbol/code）
 # ============================================================================
@@ -184,7 +271,15 @@ def fetch_realtime_quote(code: str = "", symbol: str = "", **kwargs) -> Any:
     norm = _normalize_symbol_code(symbol, code)
     if not norm:
         raise TDXSourceUnavailable("tdx_mcp: 缺少证券代码")
-    result = cli.call_tool("tdx_quotes", {"codes": [norm]})
+    setcode = kwargs.get("setcode") or _infer_setcode(norm)
+    result = cli.call_tool("tdx_quotes", {
+        "code": norm,
+        "setcode": setcode,
+        # 一键全开基础+扩展+计算+财务，覆盖 eltdx 等价字段（hasCalcInfo=1 连带开启其余）
+        "hasCalcInfo": "1",
+        "hasCwInfo": "1",
+        "bspNum": "5",  # 五档买卖盘
+    })
     return result
 
 
@@ -194,10 +289,14 @@ def fetch_historical_kline(code: str = "", symbol: str = "", period: str = "day"
     norm = _normalize_symbol_code(symbol, code)
     if not norm:
         raise TDXSourceUnavailable("tdx_mcp: 缺少代码")
-    result = cli.call_tool(
-        "tdx_kline",
-        {"code": norm, "period": period, "count": count},
-    )
+    setcode = kwargs.get("setcode") or _infer_setcode(norm)
+    result = cli.call_tool("tdx_kline", {
+        "code": norm,
+        "setcode": setcode,
+        "period": _to_period_code(period),
+        "wantNum": str(max(1, min(int(count or 100), 1000))),
+        "tqFlag": "1",  # 前复权（默认）
+    })
     return result
 
 
@@ -205,18 +304,30 @@ def fetch_research_report(code: str = "", symbol: str = "", keyword: str = "", l
     """券商研报（纯增量类型）：调用 wenda_report_query。"""
     cli = _get_client()
     norm = _normalize_symbol_code(symbol, code)
-    args: dict = {"limit": limit}
+    args: dict = {}
     if norm:
-        args["code"] = norm
+        args["symbol"] = norm
     if keyword:
-        args["keyword"] = keyword
+        args["keywords"] = keyword
+    # 用 query 字段拼接主体+关键词，兼容纯关键词检索
+    args["query"] = " ".join(filter(None, [norm, keyword])) or "最新研报"
     return cli.call_tool("wenda_report_query", args)
 
 
 def fetch_macro_data(indicator: str = "CPI", **kwargs) -> Any:
-    """宏观数据（增强）：调用 wenda_macro_query。"""
+    """宏观数据（增强）：调用 wenda_macro_query。
+
+    官方要求 query 字段为管道格式：主题|起始日期|截止日期|关键词|描述。
+    本封装做轻量包装，调用方只需传 indicator 即可。
+    """
     cli = _get_client()
-    return cli.call_tool("wenda_macro_query", {"indicator": indicator})
+    ind = (indicator or "CPI").strip()
+    # 管道格式：主题 | 起始(近5年) | 截止(今日) | 关键词 | 描述
+    from datetime import date
+    today = date.today().strftime("%Y%m%d")
+    start = f"{date.today().year - 5}0101"
+    pipe_query = f"{ind}|{start}|{today}||{ind}历史数据"
+    return cli.call_tool("wenda_macro_query", {"query": pipe_query})
 
 
 def fetch_screener(query: str = "", limit: int = 20, **kwargs) -> Any:
@@ -224,7 +335,13 @@ def fetch_screener(query: str = "", limit: int = 20, **kwargs) -> Any:
     cli = _get_client()
     if not query:
         raise TDXSourceUnavailable("tdx_mcp: screener 缺 query")
-    return cli.call_tool("tdx_screener", {"query": query, "limit": limit})
+    rang = kwargs.get("rang", "AG")  # 默认 A 股
+    return cli.call_tool("tdx_screener", {
+        "message": query,
+        "rang": rang,
+        "pageNo": "1",
+        "pageSize": str(max(1, min(int(limit or 10), 50))),
+    })
 
 
 # 供 registry 导入的命名空间（对齐 eltdx/akshare 惯例）
