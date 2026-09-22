@@ -1,14 +1,17 @@
 """
 数据源注册中心 — register_all_sources()。
 
-注册全部 38 个数据类型到 SmartRouter，按数据源矩阵定义优先级与独占标记。
+注册全部 40 个数据类型到 SmartRouter，按数据源矩阵定义优先级与独占标记。
 
-数据源矩阵（39 个数据类型，v3.3.1 新增 global_market_quote）：
-  | data_type            | priority=1        | priority=100  | priority=200  | exclusive |
-  |----------------------|-------------------|---------------|---------------|-----------|
-  | realtime_quote       | eltdx             | akshare       | tencent_http  |           |
-  | historical_kline     | eltdx             | akshare       |               |           |
-  | minute_data          | eltdx             | akshare       |               |           |
+数据源矩阵（40 个数据类型，v3.3.1 新增 global_market_quote；v0.1.0-DEV tdx_mcp 平级互备）：
+  | data_type            | priority=1          | priority=100  | priority=200  | exclusive |
+  |----------------------|---------------------|---------------|---------------|-----------|
+  | realtime_quote       | eltdx, tdx_mcp      | akshare       | tencent_http  |           |
+  | historical_kline     | eltdx, tdx_mcp      | akshare       |               |           |
+  | screener (增量)      | tdx_mcp             |               |               |           |
+  | research_report(增量)| tdx_mcp             |               |               |           |
+  | macro_data           | akshare             | tdx_mcp       |               |           |
+  | minute_data          | eltdx               | akshare       |               |           |
   | call_auction         | eltdx             |               |               | 是        |
   | tick_data            | eltdx             |               |               | 是        |
   | f10_profile          | eltdx             |               |               | 是        |
@@ -62,6 +65,7 @@ from . import wencai_fetchers as wf
 from . import em_client as emc
 from . import ths_fetchers as ths
 from . import tdx_local as tdx
+from . import tdx_mcp_fetchers as tdxm  # 通达信官方 MCP（与 eltdx 平级互备，v0.1.0-DEV）
 
 logger = logging.getLogger("tradex.data_sources")
 
@@ -72,7 +76,7 @@ _register_lock = threading.Lock()
 
 
 def register_all_sources() -> None:
-    """注册全部 38 个数据类型到 SmartRouter 全局单例。
+    """注册全部 40 个数据类型到 SmartRouter 全局单例。
 
     幂等：重复调用不会重复注册。
     """
@@ -132,6 +136,24 @@ def _do_register() -> None:
     router.register("capital_changes", "eltdx", ef.fetch_capital_changes, priority=1, exclusive=True)
     router.register("special_limits_scan", "eltdx", ef.fetch_special_limits_scan, priority=1, exclusive=True)
     router.register("f10_extra", "eltdx", ef.fetch_f10_extra, priority=1, exclusive=True)
+
+    # ── 通达信官方 MCP（tdx_mcp，v0.1.0-DEV，SP-2026-09-21-001） ──
+    # 与 eltdx 同属 priority=1 第一梯队，互为备份、互为兜底。
+    # SmartRouter 机制：同 priority=1 时健康分高者优先 → 日常 eltdx 胜出；
+    # eltdx 连续失败健康分归零后自动切到本源，恢复后自动切回（非独占 + 自动降级）。
+    # token 走独立 env TDX_MCP_TOKEN，缺失时空闲（fetch_fn 抛 TDXSourceUnavailable），
+    # 不影响注册，也不影响 eltdx 正常服务。
+    router.register("realtime_quote", "tdx_mcp", tdxm.fetch_realtime_quote, priority=1)
+    router.register("historical_kline", "tdx_mcp", tdxm.fetch_historical_kline, priority=1)
+
+    # ── 通达信官方 MCP 纯增量类型（eltdx 无法提供的增量能力，独立 data_type）──
+    # 这些不属于"与 eltdx 互备"，而是官方 MCP 的额外能力，经 registry 统一暴露：
+    #   - screener：自然语言条件选股（L3 独立工具 natural_lang_screener 消费）
+    #   - research_report：券商研报（wenda_report_query）
+    #   - macro_data：宏观数据增强（wenda_macro_query，与 akshare 版互为交叉验证）
+    router.register("screener", "tdx_mcp", tdxm.fetch_screener, priority=1)
+    router.register("research_report", "tdx_mcp", tdxm.fetch_research_report, priority=1)
+    router.register("macro_data", "tdx_mcp", tdxm.fetch_macro_data, priority=100)
 
     # ── akshare 单源（备 tencent_http） ──
     router.register("company_info", "akshare", akf.fetch_company_info, priority=1)

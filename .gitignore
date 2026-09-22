@@ -32,6 +32,11 @@ Thumbs.db
 config/local.json
 *.key
 *.pem
+.env
+tradex/.env
+
+# WorkBuddy workspace metadata（含会话产物、记忆、本地脚本缓存
+.workbuddy/
 
 # Test outputs
 test_output/

@@ -241,13 +241,15 @@ class TestBackupSourceRegistration:
     """
 
     def test_total_data_types(self, router):
-        # 数据类型数不变（仍 78 个）
-        assert len(router._sources) == 78
+        # 数据类型数：78（基线）→ 80（v0.1.0-DEV tdx_mcp 新增 screener / research_report 两类型；
+        #   macro_data 为既有类型加源，不计入）
+        assert len(router._sources) == 80
 
     def test_total_registrations(self, router):
         # 总注册数演进：90 → 94（v3.3.14）→ 101（v3.3.15）
-        #   → 102（本次：fund_hold 由单源升为 em_zlsj_direct + akshare 双源）
-        assert sum(len(v) for v in router._sources.values()) == 102
+        #   → 102（fund_hold 由单源升为 em_zlsj_direct + akshare 双源）
+        #   → 107（v0.1.0-DEV tdx_mcp 新增 5 源：realtime/kline/screener/research/macro）
+        assert sum(len(v) for v in router._sources.values()) == 107
 
     def test_new_sources_registered_with_priority(self, router):
         for data_type, name, prio in NEW_SOURCES:

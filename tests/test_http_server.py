@@ -47,7 +47,7 @@ def test_health_ok():
     assert body["status"] == "ok"
     assert body["service"] == "tradex-mcp"
     assert body["version"]  # 非空即满足（版本由 VERSION 单一事实源驱动）
-    assert body["tools"] == 129
+    assert body["tools"] == 132  # 129 存量 + tdx_mcp 3 工具（v0.1.0-DEV）
     assert body["uptime_seconds"] >= 0
 
 
