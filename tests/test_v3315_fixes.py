@@ -243,13 +243,19 @@ class TestBackupSourceRegistration:
     def test_total_data_types(self, router):
         # 数据类型数：78（基线）→ 80（v0.1.0-DEV tdx_mcp 新增 screener / research_report 两类型；
         #   macro_data 为既有类型加源，不计入）
-        assert len(router._sources) == 80
+        # 2026-09-23 东财 push2 族退役：5 个类型因此变裸类型（无源）被 SmartRouter
+        # 自动从 _sources 移除 → 80 - 5 = 75：
+        #   industry_quotes / concept_attribution / market_breadth /
+        #   limit_up_board / stock_boards
+        assert len(router._sources) == 75
 
     def test_total_registrations(self, router):
         # 总注册数演进：90 → 94（v3.3.14）→ 101（v3.3.15）
         #   → 102（fund_hold 由单源升为 em_zlsj_direct + akshare 双源）
         #   → 107（v0.1.0-DEV tdx_mcp 新增 5 源：realtime/kline/screener/research/macro）
-        assert sum(len(v) for v in router._sources.values()) == 107
+        #   → 100（2026-09-23 东财 push2 族退役：删 7 个注册点；
+        #          news_data:em_news_direct 由 P1 改 P999 保留，算 1 个）
+        assert sum(len(v) for v in router._sources.values()) == 100
 
     def test_new_sources_registered_with_priority(self, router):
         for data_type, name, prio in NEW_SOURCES:

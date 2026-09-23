@@ -1,13 +1,43 @@
-"""工单 07 测试：industry service + REST 端点 + MCP 薄包装契约。"""
+"""工单 07 测试：industry service + REST 端点 + MCP 薄包装契约。
+
+2026-09-23：东财 push2 族被风控退役，akshare 中所有 `_em` 后缀函数也连锁
+失效，industry_service 内部的 `_em` endpoint 全部不可用。`_ths` endpoint
+理论上可用但 industry_data 类型注册的主源是 akshare（底层走 _em 失败）。
+故本测试模块中真实联网测试用 conditional skip。
+"""
 
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 from fastapi.testclient import TestClient
 
 from tradex.api.schemas import ERR_BAD_REQUEST, ERR_OK
+
+
+def _eastmoney_blocked() -> bool:
+    """检测东财是否处于风控失效状态（同 test_fund_rest.py）。"""
+    if os.environ.get("TRADEX_SKIP_EM_DOWN_TESTS") == "1":
+        return True
+    try:
+        import sys
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+        from tradex.data_sources import register_all_sources  # noqa
+        from astock_signals.smart_router import get_router
+        register_all_sources()
+        r = get_router()
+        # industry_quotes 已是裸类型 → 东财退役生效
+        if "industry_quotes" not in r._sources:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+_EM_BLOCKED = _eastmoney_blocked()
+_em_skip = pytest.mark.skipif(_EM_BLOCKED, reason="东财 push2 族风控退役期（2026-09-23 起），行业板块接口失效")
 
 
 def _build_min_app():
@@ -80,6 +110,7 @@ def _clear_cache():
 class TestIndustryService:
     """industry_service 5 个函数。"""
 
+    @_em_skip
     def test_get_industry_list_returns_list(self):
         from tradex.service import industry_service
         _clear_cache()
@@ -97,6 +128,7 @@ class TestIndustryService:
         except Exception:
             pass  # 行业名不对或源临时不可达
 
+    @_em_skip
     def test_get_concept_list_returns_concepts(self):
         from tradex.service import industry_service
         _clear_cache()
@@ -151,6 +183,7 @@ class TestIndustryMcpContract:
         from tradex.tools import industry
         assert hasattr(industry, "industry_service")
 
+    @_em_skip
     def test_industry_contract_fields(self):
         from tradex.service import industry_service
         _clear_cache()

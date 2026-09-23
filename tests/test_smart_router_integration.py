@@ -61,8 +61,13 @@ class TestSignalDataFlowRegistration:
     """
 
     def test_six_sources_registered(self):
-        """register_all_sources() 后全局 router 注册 6 个资金流类源（3 类型 × 2 源）。"""
-        # v3.1.0：数据源注册集中在 data_sources/registry.py
+        """register_all_sources() 后资金流类源验证。
+
+        2026-09-23 东财 push2 族被风控退役：
+          - fund_flow:em_push2 删除 → 只剩 akshare
+          - industry_comparison:em_push2 删除 → akshare + ths_flow 双备
+          - dragon_tiger:em_datacenter 保留但降级 P999
+        """
         from tradex.data_sources import register_all_sources
         register_all_sources()
 
@@ -70,31 +75,39 @@ class TestSignalDataFlowRegistration:
         report = router.get_health_report()
         source_keys = {entry["source"] for entry in report}
 
+        # 东财 push2 族已删，断言新的源集合
         expected_keys = {
-            "fund_flow:em_push2",
             "fund_flow:akshare",
             "dragon_tiger:em_datacenter",
             "dragon_tiger:akshare",
-            "industry_comparison:em_push2",
             "industry_comparison:akshare",
+            "industry_comparison:ths_flow",
         }
         assert expected_keys.issubset(source_keys), (
             f"Missing sources: {expected_keys - source_keys}"
         )
+        # 反向断言：em_push2 不应该再存在
+        assert "fund_flow:em_push2" not in source_keys, "东财 push2 应已退役"
+        assert "industry_comparison:em_push2" not in source_keys, "东财 push2 应已退役"
 
     def test_data_types_have_two_sources_each(self):
-        """这些类型至少各有 2 个源（一主一备）。
+        """这些类型源数量验证。
 
-        v3.3.15 起 industry_comparison 有 3 源（em_push2 / akshare / ths_flow：
-        前两源同属东财 push2 族会一起失效，故补同花顺 ths_flow 作跨上游兜底）。
-        断言由 `== 2` 放宽为 `>= 2` —— 本测试的语义是「至少一主一备」，
-        不设上限，后续再补源不会弄坏它。
+        2026-09-23 东财 push2 退役后：
+          - fund_flow: 只剩 akshare 1 个源（push2 已删，akshare 自身底层抓
+            push2his 也连带失效，但保留 akshare 注册等上游恢复）
+          - dragon_tiger: 2 个源（akshare P100 + em_datacenter P999）
+          - industry_comparison: 2 个源（akshare P100 + ths_flow P200，
+            原东财 push2 主源已删）
         """
         from tradex.data_sources import register_all_sources
         register_all_sources()
 
         router = get_router()
-        for data_type in ("fund_flow", "dragon_tiger", "industry_comparison"):
+        # fund_flow 接受 1 个源（东财退役后无备源；akshare 自身底层也走东财但保留注册）
+        assert len(router._sources.get("fund_flow", [])) >= 1, "fund_flow 至少 1 个源"
+        # dragon_tiger 与 industry_comparison 各保留 2 源
+        for data_type in ("dragon_tiger", "industry_comparison"):
             sources = router._sources.get(data_type, [])
             assert len(sources) >= 2, (
                 f"{data_type} expected >=2 sources, got {len(sources)}"
