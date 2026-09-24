@@ -78,6 +78,19 @@ from . import em_client as emc
 from . import ths_fetchers as ths
 from . import tdx_local as tdx
 from . import tdx_mcp_fetchers as tdxm  # 通达信官方 MCP（与 eltdx 平级互备，v0.1.0-DEV）
+# ── 数据源大扩充（SP-2026-09-23-001）：新增 11 个 fetcher 模块 ──
+from . import sina_fetchers as sina          # 新浪研报/资金流/期权
+from . import baidu_fetchers as baidu        # 百度股市通 K 线
+from . import baostock_fetchers as baostock  # baostock 估值/退市/ST
+from . import exchange_official_fetchers as exchg  # 沪深交易所官方
+from . import event_driven_fetchers as evtd  # 事件驱动 6 件套
+from . import index_constituents_fetchers as idxcons  # 中证/国证指数
+from . import macro_official_fetchers as macro_off    # 人行/统计局/中债/货币网
+from . import interaction_fetchers as interact        # 互动易/e互动
+from . import wallstreetcn_fetchers as wscn           # 华尔街见闻
+from . import cctv_news_fetchers as cctv              # 央视新闻联播
+from . import sw_industry_fetchers as swind           # 申万行业变迁
+from . import industry_news_fetchers as indnews       # 产业链资讯 RSS
 
 logger = logging.getLogger("tradex.data_sources")
 
@@ -309,6 +322,79 @@ def _do_register() -> None:
     # ── v3.3.0 新增：同花顺问财数据源（可选依赖） ──
     router.register("wencai_query", "pywencai", wf.fetch_wencai_query, priority=1)
     router.register("wencai_news", "iwencai_openapi", wf.fetch_wencai_news, priority=1)
+
+    # ════════════════════════════════════════════════════════════════════
+    # SP-2026-09-23-001 数据源大扩充：一次性注册全部新类型 + 备源
+    # 设计原则：
+    #   - 全新类型：主源 priority=1，备源 priority=100/200
+    #   - 已有类型加备源：作为 priority=100/200 加入（不打乱原有梯队）
+    #   - 上游独立性验证：每条备源都与主源不同上游（避免假双源）
+    # ════════════════════════════════════════════════════════════════════
+
+    # ── P0 三件套：ETF 期权 + 业绩预告 + 机构调研（全新类型） ──
+    router.register("etf_option_tquote", "sina_option", sina.fetch_sina_option_tquote, priority=1)
+    router.register("etf_option_greeks", "sina_option", sina.fetch_sina_option_greeks, priority=1)
+    router.register("earnings_forecast", "em_datacenter", evtd.fetch_earnings_forecast, priority=999)
+    router.register("institution_survey", "em_datacenter", evtd.fetch_institution_survey, priority=999)
+
+    # ── 事件驱动其余 4 件套 ──
+    router.register("holder_trades", "em_datacenter", evtd.fetch_holder_trades, priority=999)
+    router.register("share_buyback", "em_datacenter", evtd.fetch_share_buyback, priority=999)
+    router.register("equity_pledge", "em_datacenter", evtd.fetch_equity_pledge, priority=999)
+    router.register("ipo_calendar", "em_datacenter", evtd.fetch_ipo_calendar, priority=999)
+
+    # ── 指数追踪 3 件套（中证一手 + 国证备） ──
+    router.register("index_constituents", "csi_official", idxcons.fetch_csi_index_constituents, priority=1)
+    router.register("index_constituents", "cnindex_official", idxcons.fetch_cnindex_constituents, priority=100)
+    router.register("index_weights", "csi_official", idxcons.fetch_csi_index_weights, priority=1)
+    router.register("index_weights", "cnindex_official", idxcons.fetch_cnindex_weights, priority=100)
+    router.register("index_valuation", "csi_official", idxcons.fetch_csi_index_valuation, priority=1)
+
+    # ── 宏观 5 件套（官方一手 + akshare 备） ──
+    router.register("social_financing", "pboc_official", macro_off.fetch_pboc_social_financing, priority=1)
+    router.register("pmi_data", "nbs_official", macro_off.fetch_nbs_pmi, priority=1)
+    router.register("bond_yield_curve", "chinabond_official", macro_off.fetch_chinabond_yield_curve, priority=1)
+    router.register("repo_fixing_rate", "chinamoney_official", macro_off.fetch_repo_fixing_rates, priority=1)
+    router.register("lpr_history", "chinamoney_official", macro_off.fetch_lpr_history, priority=1)
+
+    # ── 投资者互动 2 件套 ──
+    router.register("cninfo_irm", "cninfo_irm_official", interact.fetch_cninfo_irm, priority=1)
+    router.register("sse_e_interaction", "sse_einteract_official", interact.fetch_sse_e_interaction, priority=1)
+
+    # ── 全球新闻 3 件套 ──
+    router.register("wallstreetcn_lives", "wscn_api", wscn.fetch_wallstreetcn_lives, priority=1)
+    router.register("macro_calendar", "wscn_api", wscn.fetch_macro_calendar, priority=1)
+    router.register("cctv_news_main", "cctv_official", cctv.fetch_cctv_news, priority=1)
+
+    # ── 申万行业历史 2 件套 ──
+    router.register("sw_industry_history", "sw_official", swind.fetch_sw_industry_history, priority=1)
+    router.register("sw_industry_as_of", "sw_official", swind.fetch_sw_industry_as_of, priority=1)
+
+    # ── 产业链资讯：1 类型聚合 12 赛道 ──
+    router.register("industry_news", "rss_direct", indnews.fetch_industry_news, priority=1)
+
+    # ── 给已有类型加独立备源（一主一备 / 一主二备） ──
+    # historical_kline 第四备源：百度股市通（与 eltdx/akshare/tdx_mcp 完全独立）
+    router.register("historical_kline", "baidu_http", baidu.fetch_baidu_kline_with_ma, priority=200)
+    # research_report 第二备源：新浪研报（与 tdx_mcp 独立）
+    router.register("research_report", "sina_research", sina.fetch_sina_research_reports, priority=100)
+    # fund_flow 解决裸源：新浪日度资金流（与 akshare 独立）
+    router.register("fund_flow", "sina_fund_flow", sina.fetch_sina_fund_flow, priority=100)
+    # valuation 第三备源：baostock TCP（独立通道）
+    router.register("valuation", "baostock_tcp", baostock.fetch_baostock_valuation_history, priority=200)
+    # dragon_tiger 官方备源：沪深交易所一手（含营业部席位）
+    router.register("dragon_tiger", "sse_official", exchg.fetch_sse_dragon_tiger, priority=50)
+    router.register("dragon_tiger", "szse_official", exchg.fetch_szse_dragon_tiger, priority=60)
+    # 退市日 + ST 名单：baostock 兜底
+    router.register("delisting_date", "baostock_tcp", baostock.fetch_baostock_delisting_date, priority=100)
+    router.register("st_stock_list", "baostock_tcp", baostock.fetch_baostock_st_list, priority=100)
+    # 交易日历：深交所官方替换 eltdx 兜底
+    router.register("trading_calendar", "szse_official", exchg.fetch_szse_trading_calendar, priority=50)
+    # 深市公告：官方备源（与巨潮独立）
+    router.register("cninfo_announcement", "szse_official", exchg.fetch_szse_announcement, priority=100)
+    # 两融明细：交易所官方一手
+    router.register("margin_trading", "sse_official", exchg.fetch_sse_margin_trading, priority=50)
+    router.register("margin_trading", "szse_official", exchg.fetch_szse_margin_trading, priority=60)
 
     report = router.get_registry_report()
     data_types = sorted({x["data_type"] for x in report})

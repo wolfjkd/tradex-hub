@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ---
 
+## [Unreleased] - 2026-09-23 数据源大扩充（代码已合入 master，版本号待阶段批处理时 bump 到 3.6.0）
+
+**核心目标**：参考 simonlin1212/investment-news 与 simonlin1212/a-stock-data 两个项目，
+把 tradex-hub 的数据源覆盖度从"够用"升级到"全市场覆盖 + 一主一备 + 独立上游交叉验证"。
+
+### Added — 数据源基础设施（12 个新 fetcher 模块，36 个新源）
+
+- **新浪财经（独立于东财）**：研报列表 / 日度资金流 / ETF 期权 T 型报价 / ETF 期权希腊字母（4 个 fetcher）。
+- **百度股市通（独立第四备源）**：带 MA5/10/20/30 的 K 线（1 个 fetcher）。
+- **baostock（TCP 协议独立通道）**：估值历史 / 退市日期 / ST 名单（3 个 fetcher，可选依赖优雅降级）。
+- **沪深交易所官方（独立于东财聚合）**：上交所龙虎榜 / 深交所龙虎榜 / 两所融资融券 / 深交所交易日历 / 深交所公告（5 个 fetcher）。
+- **东财 datacenter 事件驱动**：业绩预告 / 机构调研 / 股东增减持 / 股票回购 / 股权质押 / 新股日历（6 个 fetcher）。
+- **指数官方成分**：中证指数 + 国证指数的成分股 / 权重 / 估值（5 个 fetcher）。
+- **人行 / 统计局 / 中债 / 中国货币网宏观**：社融 / PMI / 收益率曲线 / 回购定盘 / LPR（5 个 fetcher）。
+- **互动易 + 上证 e 互动**：深沪两市投资者问答（2 个 fetcher）。
+- **华尔街见闻 + 央视新闻联播**：全球快讯 + 宏观日历 + 央视联播（3 个 fetcher）。
+- **申万行业变迁史**：含内存缓存 + threading.Lock，避免未来函数（2 个 fetcher）。
+- **产业链资讯（106 源冻结版）**：12 赛道 / 106 个海外英文 RSS 直连（OpenAI/DeepMind/arXiv 等），
+  对应 A 股 12 板块，纯 Python 标准库抓取，零第三方依赖，合规过滤剔除博彩/加密货币/色情。
+
+### Added — 服务与端点（7 service + 22 REST + 33 MCP 工具）
+
+- **7 个新 service 模块**：option / event / index / macro / interaction / global_news / sw_industry。
+- **6 个 REST 路由文件**：option / event / index / macro / interaction / industry_news，共 **22 个新 REST 端点**。
+- **10 个新 MCP 工具模块**：etf_option / event_driven / index_tracking / macro_official /
+  investor_interaction / global_market_news / sw_industry_history / backup_source_tools /
+  exchange_official / industry_news，共 **33 个新 MCP 工具**。
+
+### Changed
+
+- **SmartRouter 注册表**：数据类型从 78 增至 **103**（+25 新类型），源实例从 102 增至 **138**（+36 新源）。
+- **MCP 工具总数**：从 132 增至 **165**（+33 新工具，无重名冲突）。
+- **已有类型加备源**：historical_kline / research_report / fund_flow / valuation /
+  dragon_tiger / cninfo_announcement / margin_trading 共 7 类新增独立上游备源。
+- **REST 工具数断言**：测试 `test_server.py` 中 132 → 165 同步更新。
+
+### Fixed
+
+- **industry_news_fetchers.py 拼写错误**：`_SOURCES_PATH` 在加载处误写成 `_sources_PATH`，导致 sources.json 加载失败 → 修复后正常加载 106 源。
+- **9 处工具调用错误**：`df_to_json(df, source=src)` 误传不存在的关键字参数（formatter 无 source 参数）→ 改为 `df_to_json(df)`。
+
+### Test Coverage
+
+- **新增 5 个测试文件 / 110 个新测试用例**（全部通过）：
+  - `test_new_sources_registration.py`（9 用例）：数据类型与源实例完整性 + 备源链。
+  - `test_fetchers_smoke.py`（61 用例，含参数化）：每个 fetcher 的 import / 签名 / `**kwargs` 检查。
+  - `test_new_tools_contract.py`（6 用例）：33 个新工具全部注册到 mcp + 工具契约（mock）。
+  - `test_smart_router_failover.py`（8 用例）：源 tuple 结构 + 优先级排序 + 降级可用性。
+  - `test_new_routes_rest.py`（25 用例）：22 个新 REST 端点契约 + 参数校验 + 真实数据源连通性。
+- **回归测试**：379 通过 / 5 跳过（network mark）/ 2 已修正（工具数断言同步）。
+
+---
+
 ## [3.5.1] - 2026-09-22
 
 **Bug fix**：修复 stdio 模式 MCP 启动崩溃。

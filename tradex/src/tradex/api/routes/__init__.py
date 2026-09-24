@@ -95,3 +95,33 @@ router.include_router(_metrics_routes.router)
 from . import access_log as _access_log_routes  # noqa: E402
 
 router.include_router(_access_log_routes.router)
+
+# 工单 T34（2026-09-23 数据源扩充）：ETF 期权端点（/option/tquote, /option/greeks）
+from . import option as _option_routes  # noqa: E402
+
+router.include_router(_option_routes.router)
+
+# 工单 T34：事件驱动端点（/event/earnings-forecast 等 6 个）
+from . import event as _event_routes  # noqa: E402
+
+router.include_router(_event_routes.router)
+
+# 工单 T34：指数追踪端点（/index/constituents 等 3 个）
+from . import index as _index_routes  # noqa: E402
+
+router.include_router(_index_routes.router)
+
+# 工单 T34：官方宏观端点（/macro/social-financing 等 5 个 + 申万行业 2 个）
+from . import macro as _macro_routes  # noqa: E402
+
+router.include_router(_macro_routes.router)
+
+# 工单 T34：投资者互动端点（/interaction/cninfo-irm, /interaction/sse-e-interaction）
+from . import interaction as _interaction_routes  # noqa: E402
+
+router.include_router(_interaction_routes.router)
+
+# 工单 T34：产业链资讯端点（/industry-news/get, /industry-news/tracks）
+from . import industry_news as _industry_news_routes  # noqa: E402
+
+router.include_router(_industry_news_routes.router)
