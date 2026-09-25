@@ -1,10 +1,12 @@
 """工单 T35 测试：数据源注册与降级（registry 层）。
 
 验证：
-- 新数据类型已注册（103 类型 / 138 源实例）
+- 新数据类型已注册（114 类型 / 156 源实例）
 - 各类型至少有 1 个源
 - 关键类型支持主备双源（如 historical_kline 应有 ≥3 个源）
 - 已注册类型的优先级字段合法
+
+2026-09-25 更新：新增 dt_branch_rank 类型（akshare 独占）+ 7 个 akshare_em 备源
 """
 
 from __future__ import annotations
@@ -45,6 +47,8 @@ class TestRegistryCompleteness:
         # 龙虎榜扩展族（2026-09-25 借鉴 stock-sdk dragonTiger.ts）
         "dt_detail", "dt_stock_stats", "dt_institution",
         "dt_seat_detail",
+        # dt_branch_rank（2026-09-25 akshare 独占源补回，主源 em_datacenter 无对应 report）
+        "dt_branch_rank",
         # 融资融券扩展族（2026-09-25 借鉴 stock-sdk margin.ts）
         "margin_account_info", "margin_target_list",
         # 大宗交易族（2026-09-25 借鉴 stock-sdk blockTrade.ts）
@@ -57,16 +61,16 @@ class TestRegistryCompleteness:
         missing = [t for t in self.NEW_TYPES if t not in r._sources]
         assert not missing, f"未注册的数据类型: {missing}"
 
-    def test_total_data_types_at_least_113(self):
+    def test_total_data_types_at_least_114(self):
         from tradex.data_sources import get_router
         r = get_router()
-        assert len(r._sources) >= 113, f"数据类型数 {len(r._sources)} < 113"
+        assert len(r._sources) >= 114, f"数据类型数 {len(r._sources)} < 114"
 
-    def test_total_source_instances_at_least_148(self):
+    def test_total_source_instances_at_least_156(self):
         from tradex.data_sources import get_router
         r = get_router()
         total = sum(len(v) for v in r._sources.values())
-        assert total >= 148, f"源实例数 {total} < 148"
+        assert total >= 156, f"源实例数 {total} < 156"
 
 
 class TestBackupSourceChains:
@@ -80,6 +84,14 @@ class TestBackupSourceChains:
         "dragon_tiger",              # 东财 + sse_official + szse_official
         "cninfo_announcement",       # 主 + szse_official
         "margin_trading",            # 主 + sse_official + szse_official
+        # 2026-09-25 akshare_em 包装层加入（em_datacenter 主 + akshare_em 备）
+        "dt_detail",
+        "dt_stock_stats",
+        "dt_institution",
+        "margin_account_info",
+        "block_trade_market_stat",
+        "block_trade_detail",
+        "block_trade_daily_stat",
     ]
 
     # baostock 独家提供的新类型（主源就是 baostock，不算"主+备"链）

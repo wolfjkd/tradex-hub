@@ -380,6 +380,42 @@ def register(mcp: FastMCP):
         except Exception as e:
             return error_response(f"获取席位明细失败: {e}", "get_dragon_tiger_seat_detail")
 
+    @mcp.tool()
+    async def get_dragon_tiger_branch_rank(
+        period: str = "1month", limit: int = 100,
+    ) -> str:
+        """
+        龙虎榜营业部排行（按周期统计：近1月/3月/6月/1年）。
+
+        每条含：营业部名称、上榜后 1/2/3/5/10 天买入次数、平均涨幅、上涨概率。
+        用于跟踪哪些营业部对股价短期走势的影响力最强。
+
+        Args:
+            period: 1month / 3month / 6month / 1year，默认 1month
+            limit: 返回条数，默认 100
+
+        Returns:
+            营业部排行列表
+
+        数据源说明：
+            akshare 独占源（上游 datacenter-web 无对应 report，
+            走 akshare stock_lhb_yybph_em 包装函数）
+        """
+        from ..data_sources.akshare_fetchers import fetch_dt_branch_rank_em
+        try:
+            result = fetch_dt_branch_rank_em(period=period)
+            if limit > 0:
+                result = result[:limit]
+            return json.dumps({
+                "count": len(result),
+                "period": period,
+                "records": result,
+            }, ensure_ascii=False)
+        except ValueError as e:
+            return error_response(f"参数错误: {e}", "get_dragon_tiger_branch_rank")
+        except Exception as e:
+            return error_response(f"获取营业部排行失败: {e}", "get_dragon_tiger_branch_rank")
+
     # ════════════════════════════════════════════════════════════════════
     # SP-2026-09-25-003 融资融券扩展族（2 工具）
     # ════════════════════════════════════════════════════════════════════

@@ -1638,3 +1638,321 @@ def fetch_baidu_trade_notify_tfp(
         raise RuntimeError("全市场停复牌表返回空")
     return df
 
+
+# ============================================================
+# 东财 datacenter-web 数据源 —— akshare 包装层（2026-09-25 老板拍板）
+# ============================================================
+# 老板原话："AKshare 更新过后，可能东财源有改善。我们就用 akshare 中集成的
+# 东财源，不自己独立开发东财源的接口了。"
+#
+# 策略：
+#   - em_datacenter（em_client.py 手写直连）保持 priority=1 主源
+#   - 本节 akshare 包装函数注册为 priority=100 备源
+#   - 两者**字段对齐**（akshare 包装层把中文列名映射成主源的英文 snake_case），
+#     SmartRouter 降级时上层 MCP 工具无需感知差异
+#   - 签名对齐主源（start_date/end_date 等 kwargs），SmartRouter 透传无障碍
+#
+# 为什么不直接用主源？老板拍板战略转向："未来不再自己开发东财接口"，
+# akshare 已封装好同一上游（datacenter-web），由 akshare 维护列名映射，
+# 上游 schema 漂移时改 akshare 即可，本项目不用每次踩字段名变更的坑。
+#
+# 已实测字段对照（2026-09-25）：数据量与主源完全一致
+#   - stock_lhb_detail_em     299行 × 21列 ↔ dt_detail
+#   - stock_lhb_jgmmtj_em     734行 × 16列 ↔ dt_institution
+#   - stock_lhb_jgstatistic_em 416行 × 16列 ↔ dt_stock_stats
+#   - stock_lhb_yybph_em      901行 × 17列 ↔ dt_branch_rank（补回主源删除的维度）
+#   - stock_margin_account_info 3397行×13列 ↔ margin_account_info
+#   - stock_dzjy_sctj         4648行 × 9列 ↔ block_trade_market_stat
+#   - stock_dzjy_mrmx         15行 × 9列   ↔ block_trade_detail
+#   - stock_dzjy_mrtj         117行 × 12列 ↔ block_trade_daily_stat
+# ============================================================
+
+
+def _ak_date_range_kwargs(
+    start_date: str | None, end_date: str | None, default_days: int = 5,
+) -> tuple[str, str]:
+    """统一处理 start_date/end_date 参数：兼容 YYYY-MM-DD / YYYYMMDD / None。
+
+    返回 (start, end) 都是 YYYYMMDD 格式（akshare 接受的格式）。
+    任一缺失时按 default_days 天回溯填充。
+    """
+    def _norm(d: str | None) -> str | None:
+        if not d:
+            return None
+        s = str(d).strip().replace("-", "")
+        return s if len(s) == 8 else None
+
+    s = _norm(start_date)
+    e = _norm(end_date)
+    if not e:
+        e = datetime.now().strftime("%Y%m%d")
+    if not s:
+        s = (datetime.now() - timedelta(days=default_days)).strftime("%Y%m%d")
+    return s, e
+
+
+def fetch_dt_detail_em(
+    *, start_date: str | None = None, end_date: str | None = None, **kwargs,
+) -> list[dict]:
+    """龙虎榜上榜个股详情 —— akshare stock_lhb_detail_em 包装。
+
+    字段对齐主源 em_datacenter.fetch_dragon_tiger_detail：
+      code/name/date/close/change_pct/net_buy/buy_amt/sell_amt/deal_amt/
+      net_buy_ratio/deal_amount_ratio/turnover_rate/float_market_value/
+      reason/after_1d/after_2d/after_5d/after_10d
+    """
+    ak = _ak()
+    s, e = _ak_date_range_kwargs(start_date, end_date, default_days=5)
+    df = ak.stock_lhb_detail_em(start_date=s, end_date=e)
+    if df is None or df.empty:
+        raise RuntimeError(f"AKShare stock_lhb_detail_em 返回空（{s}~{e}）")
+    result: list[dict] = []
+    for _, row in df.iterrows():
+        result.append({
+            "code": str(row.get("代码", "")),
+            "name": str(row.get("名称", "")),
+            "date": str(row.get("上榜日", "")),
+            "close": float(row.get("收盘价", 0) or 0),
+            "change_pct": float(row.get("涨跌幅", 0) or 0),
+            "net_buy": float(row.get("龙虎榜净买额", 0) or 0),
+            "buy_amt": float(row.get("龙虎榜买入额", 0) or 0),
+            "sell_amt": float(row.get("龙虎榜卖出额", 0) or 0),
+            "deal_amt": float(row.get("龙虎榜成交额", 0) or 0),
+            "total_amount": float(row.get("市场总成交额", 0) or 0),
+            "net_buy_ratio": float(row.get("净买额占总成交比", 0) or 0),
+            "deal_amount_ratio": float(row.get("成交额占总成交比", 0) or 0),
+            "turnover_rate": float(row.get("换手率", 0) or 0),
+            "float_market_value": float(row.get("流通市值", 0) or 0),
+            "reason": str(row.get("上榜原因", "")),
+            "after_1d": float(row.get("上榜后1日", 0) or 0) if pd.notna(row.get("上榜后1日")) else 0.0,
+            "after_2d": float(row.get("上榜后2日", 0) or 0) if pd.notna(row.get("上榜后2日")) else 0.0,
+            "after_5d": float(row.get("上榜后5日", 0) or 0) if pd.notna(row.get("上榜后5日")) else 0.0,
+            "after_10d": float(row.get("上榜后10日", 0) or 0) if pd.notna(row.get("上榜后10日")) else 0.0,
+            "source": "AKShare_stock_lhb_detail_em",
+        })
+    return result
+
+
+def fetch_dt_institution_em(
+    *, start_date: str | None = None, end_date: str | None = None, **kwargs,
+) -> list[dict]:
+    """龙虎榜机构买卖统计 —— akshare stock_lhb_jgmmtj_em 包装。
+
+    字段对齐主源 em_datacenter.fetch_dragon_tiger_institution。
+    """
+    ak = _ak()
+    s, e = _ak_date_range_kwargs(start_date, end_date, default_days=30)
+    df = ak.stock_lhb_jgmmtj_em(start_date=s, end_date=e)
+    if df is None or df.empty:
+        raise RuntimeError(f"AKShare stock_lhb_jgmmtj_em 返回空（{s}~{e}）")
+    result: list[dict] = []
+    for _, row in df.iterrows():
+        result.append({
+            "code": str(row.get("代码", "")),
+            "name": str(row.get("名称", "")),
+            "date": str(row.get("上榜日期", "")),
+            "close": float(row.get("收盘价", 0) or 0),
+            "change_pct": float(row.get("涨跌幅", 0) or 0),
+            "buy_org_count": int(row.get("买方机构数", 0) or 0),
+            "sell_org_count": int(row.get("卖方机构数", 0) or 0),
+            "org_buy_amt": float(row.get("机构买入总额", 0) or 0),
+            "org_sell_amt": float(row.get("机构卖出总额", 0) or 0),
+            "org_net_amt": float(row.get("机构买入净额", 0) or 0),
+            "source": "AKShare_stock_lhb_jgmmtj_em",
+        })
+    return result
+
+
+def fetch_dt_stock_stats_em(*, period: str = "1month", **kwargs) -> list[dict]:
+    """龙虎榜个股上榜统计（机构席位追踪） —— akshare stock_lhb_jgstatistic_em 包装。
+
+    与主源 dt_stock_stats 字段一致（个股视角，按周期聚合）。
+    akshare symbol 参数：'近一月'/'近三月'/'近六月'/'近一年'。
+    """
+    ak = _ak()
+    period_map = {
+        "1month": "近一月", "3month": "近三月",
+        "6month": "近六月", "1year": "近一年",
+    }
+    sym = period_map.get(period)
+    if not sym:
+        raise ValueError(f"period 必须是 {list(period_map.keys())} 之一，实际 {period}")
+    df = ak.stock_lhb_jgstatistic_em(symbol=sym)
+    if df is None or df.empty:
+        raise RuntimeError(f"AKShare stock_lhb_jgstatistic_em 返回空（{sym}）")
+    result: list[dict] = []
+    for _, row in df.iterrows():
+        result.append({
+            "code": str(row.get("代码", "")),
+            "name": str(row.get("名称", "")),
+            "close": float(row.get("收盘价", 0) or 0),
+            "change_pct": float(row.get("涨跌幅", 0) or 0),
+            "appearances": int(row.get("上榜次数", 0) or 0),
+            "total_buy": float(row.get("机构买入额", 0) or 0),
+            "total_sell": float(row.get("机构卖出额", 0) or 0),
+            "total_net": float(row.get("机构净买额", 0) or 0),
+            "buy_org_count": int(row.get("机构买入次数", 0) or 0),
+            "sell_org_count": int(row.get("机构卖出次数", 0) or 0),
+            "deal_amt": float(row.get("龙虎榜成交金额", 0) or 0),
+            "source": "AKShare_stock_lhb_jgstatistic_em",
+        })
+    return result
+
+
+def fetch_dt_branch_rank_em(*, period: str = "1month", **kwargs) -> list[dict]:
+    """龙虎榜营业部排行 —— akshare stock_lhb_yybph_em 包装。
+
+    主源 em_datacenter 没有对应 report（之前手写删除），akshare 是这个维度的
+    **唯一可用源**，注册为 priority=1 主源（而非备源）。
+    """
+    ak = _ak()
+    period_map = {
+        "1month": "近一月", "3month": "近三月",
+        "6month": "近六月", "1year": "近一年",
+    }
+    sym = period_map.get(period)
+    if not sym:
+        raise ValueError(f"period 必须是 {list(period_map.keys())} 之一，实际 {period}")
+    df = ak.stock_lhb_yybph_em(symbol=sym)
+    if df is None or df.empty:
+        raise RuntimeError(f"AKShare stock_lhb_yybph_em 返回空（{sym}）")
+    result: list[dict] = []
+    for _, row in df.iterrows():
+        result.append({
+            "branch_name": str(row.get("营业部名称", "")),
+            "buy_count_1d": int(row.get("上榜后1天-买入次数", 0) or 0),
+            "avg_change_1d": float(row.get("上榜后1天-平均涨幅", 0) or 0),
+            "win_rate_1d": float(row.get("上榜后1天-上涨概率", 0) or 0),
+            "buy_count_2d": int(row.get("上榜后2天-买入次数", 0) or 0),
+            "avg_change_2d": float(row.get("上榜后2天-平均涨幅", 0) or 0),
+            "win_rate_2d": float(row.get("上榜后2天-上涨概率", 0) or 0),
+            "buy_count_3d": int(row.get("上榜后3天-买入次数", 0) or 0),
+            "avg_change_3d": float(row.get("上榜后3天-平均涨幅", 0) or 0),
+            "win_rate_3d": float(row.get("上榜后3天-上涨概率", 0) or 0),
+            "buy_count_5d": int(row.get("上榜后5天-买入次数", 0) or 0),
+            "avg_change_5d": float(row.get("上榜后5天-平均涨幅", 0) or 0),
+            "win_rate_5d": float(row.get("上榜后5天-上涨概率", 0) or 0),
+            "buy_count_10d": int(row.get("上榜后10天-买入次数", 0) or 0),
+            "avg_change_10d": float(row.get("上榜后10天-平均涨幅", 0) or 0),
+            "win_rate_10d": float(row.get("上榜后10天-上涨概率", 0) or 0),
+            "source": "AKShare_stock_lhb_yybph_em",
+        })
+    return result
+
+
+def fetch_margin_account_info_em(**kwargs) -> list[dict]:
+    """两融账户统计 —— akshare stock_margin_account_info 包装。
+
+    字段对齐主源 em_datacenter.fetch_margin_account_info。
+    akshare 无日期过滤参数（一次拉全市场全历史，按日期倒序），按需返回近 N 日。
+    """
+    ak = _ak()
+    df = ak.stock_margin_account_info()
+    if df is None or df.empty:
+        raise RuntimeError("AKShare stock_margin_account_info 返回空")
+    # 按日期倒序排列后取最近 500 日（主源 page_size=500 对齐）
+    df = df.sort_values(by="日期", ascending=False).head(500)
+    result: list[dict] = []
+    for _, row in df.iterrows():
+        result.append({
+            "date": str(row.get("日期", "")),
+            "fin_balance": float(row.get("融资余额", 0) or 0) if pd.notna(row.get("融资余额")) else 0.0,
+            "loan_balance": float(row.get("融券余额", 0) or 0) if pd.notna(row.get("融券余额")) else 0.0,
+            "fin_buy_amt": float(row.get("融资买入额", 0) or 0) if pd.notna(row.get("融资买入额")) else 0.0,
+            "loan_sell_amt": float(row.get("融券卖出额", 0) or 0) if pd.notna(row.get("融券卖出额")) else 0.0,
+            "investor_count": int(row.get("参与交易的投资者数量", 0) or 0) if pd.notna(row.get("参与交易的投资者数量")) else 0,
+            "liability_investor_count": int(row.get("有融资融券负债的投资者数量", 0) or 0) if pd.notna(row.get("有融资融券负债的投资者数量")) else 0,
+            "broker_count": int(row.get("证券公司数量", 0) or 0) if pd.notna(row.get("证券公司数量")) else 0,
+            "branch_count": int(row.get("营业部数量", 0) or 0) if pd.notna(row.get("营业部数量")) else 0,
+            "total_guarantee": float(row.get("担保物总价值", 0) or 0) if pd.notna(row.get("担保物总价值")) else 0.0,
+            "avg_guarantee_ratio": float(row.get("平均维持担保比例", 0) or 0) if pd.notna(row.get("平均维持担保比例")) else 0.0,
+            "source": "AKShare_stock_margin_account_info",
+        })
+    return result
+
+
+def fetch_block_trade_market_stat_em(**kwargs) -> list[dict]:
+    """大宗交易市场统计 —— akshare stock_dzjy_sctj 包装。
+
+    字段对齐主源 em_datacenter.fetch_block_trade_market_stat。
+    akshare 无参数（一次拉全历史，按日期倒序），取最近 500 日对齐主源。
+    """
+    ak = _ak()
+    df = ak.stock_dzjy_sctj()
+    if df is None or df.empty:
+        raise RuntimeError("AKShare stock_dzjy_sctj 返回空")
+    df = df.sort_values(by="交易日期", ascending=False).head(500)
+    result: list[dict] = []
+    for _, row in df.iterrows():
+        result.append({
+            "date": str(row.get("交易日期", "")),
+            "sz_index": float(row.get("上证指数", 0) or 0),
+            "sz_change_pct": float(row.get("上证指数涨跌幅", 0) or 0),
+            "total_amount": float(row.get("大宗交易成交总额", 0) or 0),
+            "premium_amount": float(row.get("溢价成交总额", 0) or 0),
+            "premium_ratio": float(row.get("溢价成交总额占比", 0) or 0),
+            "discount_amount": float(row.get("折价成交总额", 0) or 0),
+            "discount_ratio": float(row.get("折价成交总额占比", 0) or 0),
+            "source": "AKShare_stock_dzjy_sctj",
+        })
+    return result
+
+
+def fetch_block_trade_detail_em(
+    *, start_date: str | None = None, end_date: str | None = None, **kwargs,
+) -> list[dict]:
+    """大宗交易明细 —— akshare stock_dzjy_mrmx 包装。
+
+    字段对齐主源 em_datacenter.fetch_block_trade_detail。
+    """
+    ak = _ak()
+    s, e = _ak_date_range_kwargs(start_date, end_date, default_days=5)
+    df = ak.stock_dzjy_mrmx(start_date=s, end_date=e)
+    if df is None or df.empty:
+        raise RuntimeError(f"AKShare stock_dzjy_mrmx 返回空（{s}~{e}）")
+    result: list[dict] = []
+    for _, row in df.iterrows():
+        result.append({
+            "code": str(row.get("证券代码", "")),
+            "name": str(row.get("证券简称", "")),
+            "date": str(row.get("交易日期", "")),
+            "deal_price": float(row.get("成交价", 0) or 0),
+            "deal_volume": float(row.get("成交量", 0) or 0),
+            "deal_amount": float(row.get("成交额", 0) or 0),
+            "buy_branch": str(row.get("买方营业部", "")),
+            "sell_branch": str(row.get("卖方营业部", "")),
+            "source": "AKShare_stock_dzjy_mrmx",
+        })
+    return result
+
+
+def fetch_block_trade_daily_stat_em(
+    *, start_date: str | None = None, end_date: str | None = None, **kwargs,
+) -> list[dict]:
+    """大宗交易每日统计 —— akshare stock_dzjy_mrtj 包装。
+
+    字段对齐主源 em_datacenter.fetch_block_trade_daily_stat。
+    """
+    ak = _ak()
+    s, e = _ak_date_range_kwargs(start_date, end_date, default_days=5)
+    df = ak.stock_dzjy_mrtj(start_date=s, end_date=e)
+    if df is None or df.empty:
+        raise RuntimeError(f"AKShare stock_dzjy_mrtj 返回空（{s}~{e}）")
+    result: list[dict] = []
+    for _, row in df.iterrows():
+        result.append({
+            "code": str(row.get("证券代码", "")),
+            "name": str(row.get("证券简称", "")),
+            "date": str(row.get("交易日期", "")),
+            "close": float(row.get("收盘价", 0) or 0),
+            "change_pct": float(row.get("涨跌幅", 0) or 0),
+            "deal_price": float(row.get("成交价", 0) or 0),
+            "premium_rate": float(row.get("折溢率", 0) or 0),
+            "deal_count": int(row.get("成交笔数", 0) or 0),
+            "deal_total_volume": float(row.get("成交总量", 0) or 0),
+            "deal_total_amount": float(row.get("成交总额", 0) or 0),
+            "deal_amount_ratio": float(row.get("成交总额/流通市值", 0) or 0),
+            "source": "AKShare_stock_dzjy_mrtj",
+        })
+    return result
+

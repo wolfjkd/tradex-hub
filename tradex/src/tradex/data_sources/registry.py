@@ -387,36 +387,61 @@ def _do_register() -> None:
     #   - dt_stock_stats：个股上榜次数统计（按周期聚合）
     #   - dt_institution：机构席位买卖统计
     #   - dt_seat_detail：个股某日买卖营业部席位明细（注意上游不接受组合 filter，只按 SECURITY_CODE 过滤再按 TRADE_DATE 倒序取最新）
-    # 注：dt_branch_rank 营业部排行未接入——上游 datacenter-web 没有对应 report，
-    #     该数据走 datapc.eastmoney.com/emdatacenter/ranking/department 页面。
-    # 2026-09-25 30 连续调用压测零封禁零限流，从 P999 提到 P1 主源（老板拍板）
+    #   - dt_branch_rank：营业部排行（**akshare 独占源** —— 上游 datacenter-web 无对应 report，
+    #     走 akshare 包装的 stock_lhb_yybph_em，2026-09-25 老板拍板战略转向后唯一接入路径）
+    # 2026-09-25 30 连续调用压测零封禁零限流，em_datacenter 主源从 P999 提到 P1
+    # 2026-09-25 老板拍板新增 akshare 包装层作 priority=100 备源（字段对齐主源）
     router.register("dt_detail", "em_datacenter",
                     emc.fetch_dragon_tiger_detail, priority=1)
+    router.register("dt_detail", "akshare_em",
+                    akf.fetch_dt_detail_em, priority=100)
     router.register("dt_stock_stats", "em_datacenter",
                     emc.fetch_dragon_tiger_stock_stats, priority=1)
+    router.register("dt_stock_stats", "akshare_em",
+                    akf.fetch_dt_stock_stats_em, priority=100)
     router.register("dt_institution", "em_datacenter",
                     emc.fetch_dragon_tiger_institution, priority=1)
+    router.register("dt_institution", "akshare_em",
+                    akf.fetch_dt_institution_em, priority=100)
     router.register("dt_seat_detail", "em_datacenter",
                     emc.fetch_dragon_tiger_seat_detail, priority=1)
+    # dt_seat_detail 不加 akshare 备源：akshare 的 stock_lhb_stock_detail_date_em
+    # 只给上榜日期列表，不提供买卖席位明细；席位明细主源只有 datacenter-web 一路
+    # dt_branch_rank：akshare 独占主源（上游 datacenter-web 无对应 report）
+    router.register("dt_branch_rank", "akshare_em",
+                    akf.fetch_dt_branch_rank_em, priority=1)
 
     # ── 融资融券扩展族（借鉴 stock-sdk margin.ts，ISC license）──
     # tradex-hub 已有交易所官方两融明细（sse/szse_official），
     # 补「账户统计 + 标的列表」两个新维度，走 datacenter-web。
-    # 2026-09-25 30 连续调用压测零封禁零限流，从 P999 提到 P1 主源（老板拍板）
+    # 2026-09-25 30 连续调用压测零封禁零限流，em_datacenter 主源从 P999 提到 P1
+    # 2026-09-25 老板拍板新增 akshare 包装层作 priority=100 备源
     router.register("margin_account_info", "em_datacenter",
                     emc.fetch_margin_account_info, priority=1)
+    router.register("margin_account_info", "akshare_em",
+                    akf.fetch_margin_account_info_em, priority=100)
     router.register("margin_target_list", "em_datacenter",
                     emc.fetch_margin_target_list, priority=1)
+    # margin_target_list 不加 akshare 备源：akshare 无等价单函数包装
+    # （东财 RPTA_WEB_RZRQ_GGMX 数据由 stock_margin_account_info 汇总层级提供，
+    # 个股明细层级需要单独接口，akshare 当前未集成）
 
     # ── 大宗交易族（借鉴 stock-sdk blockTrade.ts，ISC license）──
     # tradex-hub 之前完全没有大宗交易能力，本次一次性补齐 3 个维度。
-    # 2026-09-25 30 连续调用压测零封禁零限流，从 P999 提到 P1 主源（老板拍板）
+    # 2026-09-25 30 连续调用压测零封禁零限流，em_datacenter 主源从 P999 提到 P1
+    # 2026-09-25 老板拍板新增 akshare 包装层作 priority=100 备源
     router.register("block_trade_market_stat", "em_datacenter",
                     emc.fetch_block_trade_market_stat, priority=1)
+    router.register("block_trade_market_stat", "akshare_em",
+                    akf.fetch_block_trade_market_stat_em, priority=100)
     router.register("block_trade_detail", "em_datacenter",
                     emc.fetch_block_trade_detail, priority=1)
+    router.register("block_trade_detail", "akshare_em",
+                    akf.fetch_block_trade_detail_em, priority=100)
     router.register("block_trade_daily_stat", "em_datacenter",
                     emc.fetch_block_trade_daily_stat, priority=1)
+    router.register("block_trade_daily_stat", "akshare_em",
+                    akf.fetch_block_trade_daily_stat_em, priority=100)
 
     # ── 给已有类型加独立备源（一主一备 / 一主二备） ──
     # historical_kline 第四备源：百度股市通（与 eltdx/akshare/tdx_mcp 完全独立）
