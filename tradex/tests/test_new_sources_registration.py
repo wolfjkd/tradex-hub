@@ -40,6 +40,8 @@ class TestRegistryCompleteness:
         "sw_industry_history", "sw_industry_as_of",
         # 产业链资讯
         "industry_news",
+        # 监管异动（2026-09-25 借鉴 stock-sdk 新增）
+        "regulatory_anomaly",
     ]
 
     def test_all_new_types_registered(self):
@@ -48,16 +50,16 @@ class TestRegistryCompleteness:
         missing = [t for t in self.NEW_TYPES if t not in r._sources]
         assert not missing, f"未注册的数据类型: {missing}"
 
-    def test_total_data_types_at_least_103(self):
+    def test_total_data_types_at_least_104(self):
         from tradex.data_sources import get_router
         r = get_router()
-        assert len(r._sources) >= 103, f"数据类型数 {len(r._sources)} < 103"
+        assert len(r._sources) >= 104, f"数据类型数 {len(r._sources)} < 104"
 
-    def test_total_source_instances_at_least_138(self):
+    def test_total_source_instances_at_least_139(self):
         from tradex.data_sources import get_router
         r = get_router()
         total = sum(len(v) for v in r._sources.values())
-        assert total >= 138, f"源实例数 {total} < 138"
+        assert total >= 139, f"源实例数 {total} < 139"
 
 
 class TestBackupSourceChains:

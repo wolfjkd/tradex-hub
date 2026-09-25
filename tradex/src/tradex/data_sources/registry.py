@@ -373,6 +373,13 @@ def _do_register() -> None:
     # ── 产业链资讯：1 类型聚合 12 赛道 ──
     router.register("industry_news", "rss_direct", indnews.fetch_industry_news, priority=1)
 
+    # ── 监管异动（交易所股票交易异常波动预警） ──
+    # 借鉴 chengzuopeng/stock-sdk 的 getUnusualFluctuation 实现（ISC license）
+    # 数据源：datacenter-web RPT_WATCH_UNUSUAL_FLUCTUATE（P999 降级源，老板批准）
+    # 实测约 4038 条历史，自带两个月滚动窗口；IS_HAPPEN=1 已触发 / =0 逼近未达
+    router.register("regulatory_anomaly", "em_datacenter",
+                    emc.fetch_unusual_fluctuation, priority=999)
+
     # ── 给已有类型加独立备源（一主一备 / 一主二备） ──
     # historical_kline 第四备源：百度股市通（与 eltdx/akshare/tdx_mcp 完全独立）
     router.register("historical_kline", "baidu_http", baidu.fetch_baidu_kline_with_ma, priority=200)

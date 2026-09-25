@@ -189,3 +189,67 @@ def register(mcp: FastMCP):
             return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             return error_response(f"获取新股日历失败: {e}", "get_ipo_calendar")
+
+    # ── 监管异动（交易所股票交易异常波动预警） ──
+    # 借鉴 chengzuopeng/stock-sdk 的 getUnusualFluctuation 实现（ISC license）
+    # 直接调用 em_client.fetch_unusual_fluctuation，不经过 SmartRouter（P999 单源，
+    # 健康分降级机制对其无意义）。返回 list[dict]，不是 DataFrame。
+
+    @mcp.tool()
+    async def get_unusual_fluctuation(
+        trade_date: str = "",
+        start_date: str = "",
+        end_date: str = "",
+        triggered: bool = False,
+        limit: int = 200,
+    ) -> str:
+        """
+        获取交易所「股票交易异常波动」监管预警列表（监管异动）。
+
+        哪些个股已触发异常波动公告、哪些正在逼近阈值。数据来自东财 datacenter
+        的 RPT_WATCH_UNUSUAL_FLUCTUATE 报表，自带约两个月历史滚动窗口。
+
+        Args:
+            trade_date: 单日过滤 YYYY-MM-DD（如 2026-09-25），与 start_date/end_date 互斥
+            start_date: 区间起始（含），与 trade_date 互斥
+            end_date: 区间结束（含），与 trade_date 互斥
+            triggered: True 仅返回已触发公告（IS_HAPPEN=1）；False 不过滤（默认）
+            limit: 返回条数上限，默认 200
+
+        Returns:
+            监管异动列表 (JSON)，每条含：
+            - code/name: 证券代码/简称
+            - date: 触发日期
+            - rule: 触发规则（中文原文）
+            - triggered: 是否已正式公告
+            - deviation_value: 偏离值（规则阈值通常 100）
+            - change_pct: 区间累计涨跌幅
+            - direction: up 上涨偏离 / down 下跌偏离
+        """
+        try:
+            from ..data_sources.em_client import fetch_unusual_fluctuation
+            result = fetch_unusual_fluctuation(
+                trade_date=trade_date or None,
+                start_date=start_date or None,
+                end_date=end_date or None,
+                triggered=triggered if triggered else None,
+                max_pages=max(1, (limit + 499) // 500),
+            )
+            if limit > 0:
+                result = result[:limit]
+            return json.dumps({
+                "count": len(result),
+                "filter": {
+                    "trade_date": trade_date or None,
+                    "start_date": start_date or None,
+                    "end_date": end_date or None,
+                    "triggered": triggered if triggered else None,
+                },
+                "records": result,
+            }, ensure_ascii=False)
+        except ValueError as e:
+            return error_response(f"参数错误: {e}", "get_unusual_fluctuation")
+        except Exception as e:
+            return error_response(
+                f"获取监管异动失败: {e}", "get_unusual_fluctuation"
+            )
