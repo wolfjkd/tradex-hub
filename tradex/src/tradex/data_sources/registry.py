@@ -375,44 +375,48 @@ def _do_register() -> None:
 
     # ── 监管异动（交易所股票交易异常波动预警） ──
     # 借鉴 chengzuopeng/stock-sdk 的 getUnusualFluctuation 实现（ISC license）
-    # 数据源：datacenter-web RPT_WATCH_UNUSUAL_FLUCTUATE（P999 降级源，老板批准）
+    # 数据源：datacenter-web RPT_WATCH_UNUSUAL_FLUCTUATE
     # 实测约 4038 条历史，自带两个月滚动窗口；IS_HAPPEN=1 已触发 / =0 逼近未达
+    # 2026-09-25 30 连续调用压测零封禁零限流，从 P999 提到 P1 主源（老板拍板）
     router.register("regulatory_anomaly", "em_datacenter",
-                    emc.fetch_unusual_fluctuation, priority=999)
+                    emc.fetch_unusual_fluctuation, priority=1)
 
     # ── 龙虎榜扩展族（借鉴 stock-sdk dragonTiger.ts，ISC license）──
-    # 全部走 datacenter-web 子域，P999 降级源。补全 tradex-hub 龙虎榜缺失维度：
+    # 全部走 datacenter-web 子域。补全 tradex-hub 龙虎榜缺失维度：
     #   - dt_detail：上榜个股详情（含 D1/D2/D5/D10 上榜后股价跟踪）
     #   - dt_stock_stats：个股上榜次数统计（按周期聚合）
     #   - dt_institution：机构席位买卖统计
-    #   - dt_seat_detail：个股某日买卖营业部席位明细
+    #   - dt_seat_detail：个股某日买卖营业部席位明细（注意上游不接受组合 filter，只按 SECURITY_CODE 过滤再按 TRADE_DATE 倒序取最新）
     # 注：dt_branch_rank 营业部排行未接入——上游 datacenter-web 没有对应 report，
-    #     该数据走 datapc.eastmoney.com/emdatacenter/ranking/department 页面，不在 P999 降级源范围内。
+    #     该数据走 datapc.eastmoney.com/emdatacenter/ranking/department 页面。
+    # 2026-09-25 30 连续调用压测零封禁零限流，从 P999 提到 P1 主源（老板拍板）
     router.register("dt_detail", "em_datacenter",
-                    emc.fetch_dragon_tiger_detail, priority=999)
+                    emc.fetch_dragon_tiger_detail, priority=1)
     router.register("dt_stock_stats", "em_datacenter",
-                    emc.fetch_dragon_tiger_stock_stats, priority=999)
+                    emc.fetch_dragon_tiger_stock_stats, priority=1)
     router.register("dt_institution", "em_datacenter",
-                    emc.fetch_dragon_tiger_institution, priority=999)
+                    emc.fetch_dragon_tiger_institution, priority=1)
     router.register("dt_seat_detail", "em_datacenter",
-                    emc.fetch_dragon_tiger_seat_detail, priority=999)
+                    emc.fetch_dragon_tiger_seat_detail, priority=1)
 
     # ── 融资融券扩展族（借鉴 stock-sdk margin.ts，ISC license）──
     # tradex-hub 已有交易所官方两融明细（sse/szse_official），
-    # 补「账户统计 + 标的列表」两个新维度，走 datacenter-web P999 降级源。
+    # 补「账户统计 + 标的列表」两个新维度，走 datacenter-web。
+    # 2026-09-25 30 连续调用压测零封禁零限流，从 P999 提到 P1 主源（老板拍板）
     router.register("margin_account_info", "em_datacenter",
-                    emc.fetch_margin_account_info, priority=999)
+                    emc.fetch_margin_account_info, priority=1)
     router.register("margin_target_list", "em_datacenter",
-                    emc.fetch_margin_target_list, priority=999)
+                    emc.fetch_margin_target_list, priority=1)
 
     # ── 大宗交易族（借鉴 stock-sdk blockTrade.ts，ISC license）──
     # tradex-hub 之前完全没有大宗交易能力，本次一次性补齐 3 个维度。
+    # 2026-09-25 30 连续调用压测零封禁零限流，从 P999 提到 P1 主源（老板拍板）
     router.register("block_trade_market_stat", "em_datacenter",
-                    emc.fetch_block_trade_market_stat, priority=999)
+                    emc.fetch_block_trade_market_stat, priority=1)
     router.register("block_trade_detail", "em_datacenter",
-                    emc.fetch_block_trade_detail, priority=999)
+                    emc.fetch_block_trade_detail, priority=1)
     router.register("block_trade_daily_stat", "em_datacenter",
-                    emc.fetch_block_trade_daily_stat, priority=999)
+                    emc.fetch_block_trade_daily_stat, priority=1)
 
     # ── 给已有类型加独立备源（一主一备 / 一主二备） ──
     # historical_kline 第四备源：百度股市通（与 eltdx/akshare/tdx_mcp 完全独立）

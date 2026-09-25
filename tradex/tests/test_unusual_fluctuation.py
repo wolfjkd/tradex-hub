@@ -296,5 +296,6 @@ class TestRegistryIntegration:
         # SmartRouter._sources 内部结构：list[tuple[source_name, fetch_fn, priority, exclusive]]
         item = sources[0]
         assert item[0] == "em_datacenter", f"源名应为 em_datacenter，实际为 {item[0]}"
-        assert item[2] == 999, f"priority 应为 999，实际为 {item[2]}"
+        # 2026-09-25 压测零封禁后从 P999 降到 P1 主源（老板拍板）
+        assert item[2] == 1, f"priority 应为 1（压测后提到主源），实际为 {item[2]}"
         assert callable(item[1]), "fetch_fn 必须可调用"

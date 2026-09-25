@@ -162,15 +162,20 @@ class TestDragonTigerSeatDetail:
     def test_basic_buy_sell_merge(self):
         from tradex.data_sources import em_client
         # 买榜和卖榜各占一个响应
+        # 上游真实字段是 BUY/SELL/NET（不是 BUY_AMT_REAL/SELL_AMT_REAL/NET_AMT）
         _responses.append(_fake_response([{
             "RANK": "1", "OPERATEDEPT_NAME": "买方营业部A",
-            "BUY_AMT_REAL": "10000000", "SELL_AMT_REAL": "0",
-            "NET_AMT": "10000000",
+            "BUY": "10000000", "SELL": "0",
+            "NET": "10000000",
+            "TRADE_DATE": "2026-09-22", "CLOSE_PRICE": "11.5",
+            "CHANGE_RATE": "9.95", "EXPLANATION": "日涨幅偏离值 7%",
         }]))
         _responses.append(_fake_response([{
             "RANK": "1", "OPERATEDEPT_NAME": "卖方营业部B",
-            "BUY_AMT_REAL": "0", "SELL_AMT_REAL": "8000000",
-            "NET_AMT": "-8000000",
+            "BUY": "0", "SELL": "8000000",
+            "NET": "-8000000",
+            "TRADE_DATE": "2026-09-22", "CLOSE_PRICE": "11.5",
+            "CHANGE_RATE": "9.95", "EXPLANATION": "日涨幅偏离值 7%",
         }]))
         result = em_client.fetch_dragon_tiger_seat_detail(
             symbol="600519", date="2026-09-22"
@@ -178,6 +183,9 @@ class TestDragonTigerSeatDetail:
         assert len(result) == 2
         assert result[0]["side"] == "buy"
         assert result[0]["branch_name"] == "买方营业部A"
+        assert result[0]["buy_amt"] == 10000000.0
+        assert result[0]["net_amt"] == 10000000.0
+        assert result[0]["date"] == "2026-09-22"
         assert result[1]["side"] == "sell"
 
     def test_invalid_symbol_raises(self):
@@ -185,18 +193,24 @@ class TestDragonTigerSeatDetail:
         with pytest.raises(ValueError, match="无法解析"):
             em_client.fetch_dragon_tiger_seat_detail(symbol="abc", date="2026-09-22")
 
-    def test_filter_uses_pure_code(self):
+    def test_filter_uses_pure_code_without_trade_date(self):
+        """上游不接受组合 filter，必须只用 SECURITY_CODE。"""
         from tradex.data_sources import em_client
         _responses.append(_fake_response([]))
         _responses.append(_fake_response([]))
         em_client.fetch_dragon_tiger_seat_detail(
             symbol="sh600519.SH", date="20260922"
         )
+        # 两次调用（买 + 卖）的 filter 都应含 600519 但**不应含** TRADE_DATE
+        for call in em_client._test_calls:
+            flt = call["params"]["filter"]
+            assert "600519" in flt
+            assert "TRADE_DATE" not in flt
         # 两次调用（买 + 卖）的 filter 都应含 600519 与归一化日期
         for call in em_client._test_calls:
             flt = call["params"]["filter"]
             assert "600519" in flt
-            assert "2026-09-22" in flt
+            assert "TRADE_DATE" not in flt
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -353,5 +367,6 @@ class TestAllNewTypesRegistered:
             assert len(sources) >= 1, f"{t} 没有任何源"
             item = sources[0]
             assert item[0] == "em_datacenter", f"{t} 源名应为 em_datacenter"
-            assert item[2] == 999, f"{t} priority 应为 999"
+            # 2026-09-25 压测零封禁后从 P999 降到 P1 主源（老板拍板）
+            assert item[2] == 1, f"{t} priority 应为 1（压测后提到主源），实际 {item[2]}"
             assert callable(item[1]), f"{t} fetch_fn 必须可调用"

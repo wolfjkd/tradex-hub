@@ -492,19 +492,25 @@ def fetch_dragon_tiger_seat_detail(
 ) -> list[dict]:
     """个股某日龙虎榜席位明细（买入榜 + 卖出榜合并）。
 
+    上游怪癖：RPT_BILLBOARD_DAILYDETAILSBUY/SELL 不接受 (SECURITY_CODE)(TRADE_DATE)
+    组合 filter（会返回 0 条），必须只用 SECURITY_CODE 过滤、按 TRADE_DATE 倒序拿最新日。
+    2026-09-25 烟雾测试验证此行为后采用此策略。
+
     Args:
         symbol: 6 位股票代码
-        date: 上榜日期 YYYY-MM-DD / YYYYMMDD
+        date: 期望的上榜日期（实际只用于校验返回数据日期是否匹配，不强制过滤）
     """
     code = re.sub(r"\D", "", str(symbol))[:6]
     if not code:
         raise ValueError(f"symbol 无法解析为 6 位代码: {symbol}")
-    filter_expr = f'(SECURITY_CODE="{code}")(TRADE_DATE=\'{_normalize_date(date)}\')'
+    target_date = _normalize_date(date)
+    # 只按 SECURITY_CODE 过滤，按 TRADE_DATE 倒序，首页即最新交易日数据
+    filter_expr = f'(SECURITY_CODE="{code}")'
 
     buy_rows = fetch_datacenter_list(
         "RPT_BILLBOARD_DAILYDETAILSBUY",
         columns="ALL",
-        sort_columns="BUY_AMT_REAL",
+        sort_columns="TRADE_DATE",
         sort_types="-1",
         page_size=100,
         filter_expr=filter_expr,
@@ -513,23 +519,34 @@ def fetch_dragon_tiger_seat_detail(
     sell_rows = fetch_datacenter_list(
         "RPT_BILLBOARD_DAILYDETAILSSELL",
         columns="ALL",
-        sort_columns="SELL_AMT_REAL",
+        sort_columns="TRADE_DATE",
         sort_types="-1",
         page_size=100,
         filter_expr=filter_expr,
         **kwargs,
     )
+    # 如果上游返回的最新日期与目标 date 不一致，仍然返回（让调用方判断是否过期），
+    # 但日志记录差异（避免静默）
+    if buy_rows:
+        latest = _normalize_date(buy_rows[0].get("TRADE_DATE"))
+        if latest != target_date:
+            logger.warning(
+                "dt_seat_detail(%s) 目标日期 %s 但上游最新数据日期为 %s",
+                code, target_date, latest,
+            )
 
     result: list[dict] = []
     for idx, item in enumerate(buy_rows):
         result.append({
             "rank": _to_int(item.get("RANK")) or idx + 1,
             "branch_name": str(item.get("OPERATEDEPT_NAME") or ""),
-            "buy_amt": _to_float(item.get("BUY_AMT_REAL") or item.get("BUY_AMT")),
-            "buy_amt_ratio": _to_float(item.get("BUY_RATIO_TOTAL") or item.get("BUY_AMT_RATIO")),
-            "sell_amt": _to_float(item.get("SELL_AMT_REAL") or item.get("SELL_AMT")),
-            "sell_amt_ratio": _to_float(item.get("SELL_RATIO_TOTAL") or item.get("SELL_AMT_RATIO")),
-            "net_amt": _to_float(item.get("NET_AMT")),
+            "buy_amt": _to_float(item.get("BUY")),
+            "sell_amt": _to_float(item.get("SELL")),
+            "net_amt": _to_float(item.get("NET")),
+            "close": _to_float(item.get("CLOSE_PRICE")),
+            "change_pct": _to_float(item.get("CHANGE_RATE")),
+            "date": _normalize_date(item.get("TRADE_DATE")),
+            "reason": str(item.get("EXPLANATION") or ""),
             "side": "buy",
             "source": "EM_Datacenter_RPT_BILLBOARD_DAILYDETAILSBUY",
         })
@@ -537,11 +554,13 @@ def fetch_dragon_tiger_seat_detail(
         result.append({
             "rank": _to_int(item.get("RANK")) or idx + 1,
             "branch_name": str(item.get("OPERATEDEPT_NAME") or ""),
-            "buy_amt": _to_float(item.get("BUY_AMT_REAL") or item.get("BUY_AMT")),
-            "buy_amt_ratio": _to_float(item.get("BUY_RATIO_TOTAL") or item.get("BUY_AMT_RATIO")),
-            "sell_amt": _to_float(item.get("SELL_AMT_REAL") or item.get("SELL_AMT")),
-            "sell_amt_ratio": _to_float(item.get("SELL_RATIO_TOTAL") or item.get("SELL_AMT_RATIO")),
-            "net_amt": _to_float(item.get("NET_AMT")),
+            "buy_amt": _to_float(item.get("BUY")),
+            "sell_amt": _to_float(item.get("SELL")),
+            "net_amt": _to_float(item.get("NET")),
+            "close": _to_float(item.get("CLOSE_PRICE")),
+            "change_pct": _to_float(item.get("CHANGE_RATE")),
+            "date": _normalize_date(item.get("TRADE_DATE")),
+            "reason": str(item.get("EXPLANATION") or ""),
             "side": "sell",
             "source": "EM_Datacenter_RPT_BILLBOARD_DAILYDETAILSSELL",
         })
