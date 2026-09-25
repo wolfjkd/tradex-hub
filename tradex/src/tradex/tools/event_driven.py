@@ -350,35 +350,6 @@ def register(mcp: FastMCP):
             return error_response(f"获取机构统计失败: {e}", "get_dragon_tiger_institution")
 
     @mcp.tool()
-    async def get_dragon_tiger_branch_rank(
-        period: str = "1month", limit: int = 200,
-    ) -> str:
-        """
-        龙虎榜营业部排行（全市场热门营业部）。
-
-        Args:
-            period: 1month / 3month / 6month / 1year，默认 1month
-            limit: 返回条数，默认 200
-
-        Returns:
-            营业部排名（代码、名称、累计买卖额、上榜次数等）
-        """
-        from ..data_sources.em_client import fetch_dragon_tiger_branch_rank
-        try:
-            result = fetch_dragon_tiger_branch_rank(period=period)
-            if limit > 0:
-                result = result[:limit]
-            return json.dumps({
-                "count": len(result),
-                "period": period,
-                "records": result,
-            }, ensure_ascii=False)
-        except ValueError as e:
-            return error_response(f"参数错误: {e}", "get_dragon_tiger_branch_rank")
-        except Exception as e:
-            return error_response(f"获取营业部排行失败: {e}", "get_dragon_tiger_branch_rank")
-
-    @mcp.tool()
     async def get_dragon_tiger_seat_detail(
         symbol: str, date: str, limit: int = 100,
     ) -> str:

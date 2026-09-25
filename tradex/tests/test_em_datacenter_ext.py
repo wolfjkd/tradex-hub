@@ -123,7 +123,7 @@ class TestDragonTigerStockStats:
             "LATEST_TDATE": "2026-09-20", "CLOSE_PRICE": "1700",
             "CHANGE_RATE": "5.0", "BILLBOARD_TIMES": "10",
             "BILLBOARD_BUY_AMT": "1000000000", "BILLBOARD_SELL_AMT": "800000000",
-            "BILLBOARD_NET_AMT": "200000000", "BILLBOARD_DEAL_AMT": "1800000000",
+            "BILLBOARD_NET_BUY": "200000000", "BILLBOARD_DEAL_AMT": "1800000000",
             "ORG_BUY_TIMES": "5", "ORG_SELL_TIMES": "3",
         }]))
         result = em_client.fetch_dragon_tiger_stock_stats(period="3month")
@@ -149,32 +149,13 @@ class TestDragonTigerInstitution:
             "SECURITY_CODE": "000001", "SECURITY_NAME_ABBR": "平安银行",
             "TRADE_DATE": "2026-09-22", "CLOSE_PRICE": "11.5",
             "CHANGE_RATE": "9.95", "BUY_TIMES": "3", "SELL_TIMES": "2",
-            "BUY_AMT": "50000000", "SELL_AMT": "30000000", "NET_AMT": "20000000",
+            "BUY_AMT": "50000000", "SELL_AMT": "30000000", "NET_BUY_AMT": "20000000",
         }]))
         result = em_client.fetch_dragon_tiger_institution(
             start_date="2026-09-20", end_date="2026-09-25"
         )
         assert result[0]["buy_org_count"] == 3
         assert result[0]["org_net_amt"] == 20000000.0
-
-
-class TestDragonTigerBranchRank:
-    def test_basic_mapping(self):
-        from tradex.data_sources import em_client
-        _responses.append(_fake_response([{
-            "OPERATEDEPT_CODE": "12345", "OPERATEDEPT_NAME": "中信证券北京总部",
-            "TOTAL_BUYAMT": "1000000000", "TOTAL_SELLAMT": "800000000",
-            "TOTAL_BUYER_SALESTIMES": "50", "TOTAL_SELLER_SALESTIMES": "30",
-            "TOTAL_TIMES": "80",
-        }]))
-        result = em_client.fetch_dragon_tiger_branch_rank(period="6month")
-        assert result[0]["name"] == "中信证券北京总部"
-        assert result[0]["total_count"] == 80
-
-    def test_invalid_period_raises(self):
-        from tradex.data_sources import em_client
-        with pytest.raises(ValueError):
-            em_client.fetch_dragon_tiger_branch_rank(period="bad")
 
 
 class TestDragonTigerSeatDetail:
@@ -247,15 +228,22 @@ class TestMarginTargetList:
     def test_basic_mapping(self):
         from tradex.data_sources import em_client
         _responses.append(_fake_response([{
-            "SECURITY_CODE": "600519", "SECURITY_NAME_ABBR": "贵州茅台",
-            "TRADE_DATE": "2026-09-24",
-            "FIN_BALANCE": "5000000000", "FIN_BUY_AMT": "1000000000",
-            "FIN_REPAY_AMT": "800000000", "LOAN_BALANCE": "200000000",
-            "LOAN_SELL_VOLUME": "100000", "LOAN_REPAY_VOLUME": "50000",
+            "SCODE": "600519", "SECNAME": "贵州茅台",
+            "DATE": "2026-09-24", "MARKET": "融资融券_沪证",
+            "RZYE": "5000000000", "RZMRE": "1000000000",
+            "RZCHE": "800000000", "RZJME": "200000000",
+            "RQYE": "200000000", "RQYL": "100000",
+            "RQMCL": "50000", "RQJMG": "-5000",
+            "RZRQYE": "5200000000",
         }]))
         result = em_client.fetch_margin_target_list()
-        assert result[0]["fin_balance"] == 5e9
-        assert result[0]["fin_repay_amt"] == 8e8
+        r = result[0]
+        assert r["code"] == "600519"
+        assert r["name"] == "贵州茅台"
+        assert r["fin_balance"] == 5e9
+        assert r["fin_net_amt"] == 2e8
+        assert r["total_balance"] == 5.2e9
+        assert r["market"] == "融资融券_沪证"
 
     def test_date_filter_applied(self):
         from tradex.data_sources import em_client
@@ -280,14 +268,15 @@ class TestBlockTradeMarketStat:
         from tradex.data_sources import em_client
         _responses.append(_fake_response([{
             "TRADE_DATE": "2026-09-24",
-            "SH_CLOSE_PRICE": "3200", "SH_CHANGE_RATE": "0.5",
-            "TURNOVER": "50000000000", "PREMIUM_TURNOVER": "15000000000",
-            "PREMIUM_RATIO": "30.0", "DISCOUNT_TURNOVER": "35000000000",
-            "DISCOUNT_RATIO": "70.0",
+            "SZ_INDEX": "3888.37", "SZ_CHANGE_RATE": "-1.22",
+            "BLOCKTRADE_DEAL_AMT": "1087937200",
+            "PREMIUM_DEAL_AMT": "66266800", "PREMIUM_RATIO": "6.09",
+            "DISCOUNT_DEAL_AMT": "504292800", "DISCOUNT_RATIO": "46.35",
         }]))
         result = em_client.fetch_block_trade_market_stat()
-        assert result[0]["total_amount"] == 5e10
-        assert result[0]["premium_ratio"] == 30.0
+        assert result[0]["total_amount"] == 1087937200.0
+        assert result[0]["premium_ratio"] == 6.09
+        assert result[0]["sz_index"] == 3888.37
 
 
 class TestBlockTradeDetail:
@@ -298,8 +287,8 @@ class TestBlockTradeDetail:
             "TRADE_DATE": "2026-09-24", "CLOSE_PRICE": "11.5",
             "CHANGE_RATE": "1.5", "DEAL_PRICE": "11.3",
             "DEAL_VOLUME": "1000000", "DEAL_AMT": "11300000",
-            "PREMIUM_RATIO": "-1.74",
-            "BUYER_DEPT": "中信证券", "SELLER_DEPT": "国泰君安",
+            "PREMIUM_RATIO": "-1.74", "TURNOVER_RATE": "0.05",
+            "BUYER_NAME": "中信证券", "SELLER_NAME": "国泰君安",
         }]))
         result = em_client.fetch_block_trade_detail(
             start_date="2026-09-20", end_date="2026-09-25"
@@ -324,14 +313,20 @@ class TestBlockTradeDailyStat:
             "SECURITY_CODE": "000001", "SECURITY_NAME_ABBR": "平安银行",
             "TRADE_DATE": "2026-09-24", "CHANGE_RATE": "1.5",
             "CLOSE_PRICE": "11.5", "DEAL_NUM": "3",
-            "DEAL_AMT": "30000000", "DEAL_VOLUME": "2600000",
-            "PREMIUM_AMT": "10000000", "DISCOUNT_AMT": "20000000",
+            "VOLUME": "2600000", "DEAL_AMT": "30000000",
+            "AVERAGE_PRICE": "11.54", "PREMIUM_RATIO": "-1.0",
+            "PREMIUM_TIMES": "1", "DISCOUNT_TIMES": "2",
+            "D1_CLOSE_ADJCHRATE": "0.5", "D5_CLOSE_ADJCHRATE": "1.2",
         }]))
         result = em_client.fetch_block_trade_daily_stat(
             start_date="2026-09-20", end_date="2026-09-25"
         )
-        assert result[0]["deal_count"] == 3
-        assert result[0]["deal_total_amount"] == 3e7
+        r = result[0]
+        assert r["deal_count"] == 3
+        assert r["deal_total_amount"] == 3e7
+        assert r["deal_total_volume"] == 2600000.0
+        assert r["premium_times"] == 1
+        assert r["after_5d"] == 1.2
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -343,7 +338,7 @@ class TestAllNewTypesRegistered:
 
     NEW_TYPES = [
         "dt_detail", "dt_stock_stats", "dt_institution",
-        "dt_branch_rank", "dt_seat_detail",
+        "dt_seat_detail",
         "margin_account_info", "margin_target_list",
         "block_trade_market_stat", "block_trade_detail", "block_trade_daily_stat",
     ]

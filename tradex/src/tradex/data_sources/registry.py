@@ -385,16 +385,15 @@ def _do_register() -> None:
     #   - dt_detail：上榜个股详情（含 D1/D2/D5/D10 上榜后股价跟踪）
     #   - dt_stock_stats：个股上榜次数统计（按周期聚合）
     #   - dt_institution：机构席位买卖统计
-    #   - dt_branch_rank：营业部排行（全市场热门营业部）
     #   - dt_seat_detail：个股某日买卖营业部席位明细
+    # 注：dt_branch_rank 营业部排行未接入——上游 datacenter-web 没有对应 report，
+    #     该数据走 datapc.eastmoney.com/emdatacenter/ranking/department 页面，不在 P999 降级源范围内。
     router.register("dt_detail", "em_datacenter",
                     emc.fetch_dragon_tiger_detail, priority=999)
     router.register("dt_stock_stats", "em_datacenter",
                     emc.fetch_dragon_tiger_stock_stats, priority=999)
     router.register("dt_institution", "em_datacenter",
                     emc.fetch_dragon_tiger_institution, priority=999)
-    router.register("dt_branch_rank", "em_datacenter",
-                    emc.fetch_dragon_tiger_branch_rank, priority=999)
     router.register("dt_seat_detail", "em_datacenter",
                     emc.fetch_dragon_tiger_seat_detail, priority=999)
 
