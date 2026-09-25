@@ -86,6 +86,64 @@ def fetch_stock_boards(code: str, **kwargs) -> pd.DataFrame:
 
 
 # ============================================================
+# 公共辅助函数（datacenter 字段映射通用工具）
+# ============================================================
+
+def _to_float(v) -> float | None:
+    """datacenter 数值字段安全转 float（None/空字符串/无效值都返回 None）。"""
+    if v is None or v == "":
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _to_int(v) -> int | None:
+    """datacenter 数值字段安全转 int（按 float 转后再 int，避免字符串小数报错）。"""
+    f = _to_float(v)
+    return int(f) if f is not None else None
+
+
+def _normalize_date(d) -> str:
+    """日期归一化：YYYYMMDD / YYYY/MM/DD / YYYY-MM-DD[T ]HH:MM:SS → YYYY-MM-DD。
+
+    无法识别的原样返回（调用方按需处理）。
+    """
+    if not d:
+        return ""
+    s = str(d).strip()
+    if "/" in s:
+        s = s.replace("/", "-")
+    # 兼容完整日期时间："2026-09-25T00:00:00" / "2026-09-25 00:00:00"
+    m = re.match(r"^(\d{4}-\d{2}-\d{2})", s)
+    if m:
+        return m.group(1)
+    # YYYYMMDD
+    if re.match(r"^\d{8}$", s):
+        return f"{s[:4]}-{s[4:6]}-{s[6:8]}"
+    return s
+
+
+def _to_iso_date(d) -> str:
+    """alias for _normalize_date（保持与 stock-sdk 同名函数一致的语义）。"""
+    return _normalize_date(d)
+
+
+def _build_date_range_filter(
+    start_date: str | None, end_date: str | None,
+    field: str = "TRADE_DATE",
+) -> str:
+    """构造 (FIELD>='YYYY-MM-DD')(FIELD<='YYYY-MM-DD') 过滤表达式。"""
+    parts: list[str] = []
+    if start_date:
+        parts.append(f"({field}>='{_normalize_date(start_date)}')")
+    if end_date:
+        parts.append(f"({field}<='{_normalize_date(end_date)}')")
+    return "".join(parts)
+
+
+# ============================================================
 # datacenter-web 通用请求器（P999 降级源，2026-09-23 老板批准可用）
 # ============================================================
 # 上游：https://datacenter-web.eastmoney.com/api/data/v1/get
@@ -244,22 +302,18 @@ def fetch_unusual_fluctuation(
             "fetch_unusual_fluctuation: trade_date 与 start_date/end_date 不能同时指定"
         )
 
-    def _normalize_date(d: str) -> str:
-        d = str(d).strip()
-        if "/" in d:
-            d = d.replace("/", "-")
-        if re.match(r"^\d{8}$", d):
-            d = f"{d[:4]}-{d[4:6]}-{d[6:8]}"
-        return d
+    def _normalize_date_local(d: str) -> str:
+        # 保留兼容签名（与本次新增的模块级 _normalize_date 行为一致）
+        return _normalize_date(d)
 
     clauses: list[str] = []
     if trade_date:
-        clauses.append(f"(TRADE_DATE='{_normalize_date(trade_date)}')")
+        clauses.append(f"(TRADE_DATE='{_normalize_date_local(trade_date)}')")
     else:
         if start_date:
-            clauses.append(f"(TRADE_DATE>='{_normalize_date(start_date)}')")
+            clauses.append(f"(TRADE_DATE>='{_normalize_date_local(start_date)}')")
         if end_date:
-            clauses.append(f"(TRADE_DATE<='{_normalize_date(end_date)}')")
+            clauses.append(f"(TRADE_DATE<='{_normalize_date_local(end_date)}')")
     if triggered is not None:
         clauses.append(f'(IS_HAPPEN="{1 if triggered else 0}")')
 
@@ -275,18 +329,7 @@ def fetch_unusual_fluctuation(
 
     result: list[dict] = []
     for item in rows:
-        trade_date_raw = str(item.get("TRADE_DATE") or "")
-        # 兼容 "2026-09-25T00:00:00" / "2026-09-25 00:00:00" / "2026-09-25"
-        m = re.match(r"^(\d{4}-\d{2}-\d{2})", trade_date_raw)
-        date_str = m.group(1) if m else trade_date_raw
-
-        def _to_float(v) -> float | None:
-            if v is None or v == "":
-                return None
-            try:
-                return float(v)
-            except (TypeError, ValueError):
-                return None
+        date_str = _normalize_date(item.get("TRADE_DATE") or "")
 
         result.append({
             "code": str(item.get("SECURITY_CODE") or ""),
@@ -302,3 +345,417 @@ def fetch_unusual_fluctuation(
             "source": "EM_Datacenter_RPT_WATCH_UNUSUAL_FLUCTUATE",
         })
     return result
+
+
+# ============================================================
+# 龙虎榜扩展族（借鉴 stock-sdk dragonTiger.ts，ISC license）
+# ============================================================
+# 全部走 datacenter-web 子域，老板批准的 P999 降级源
+#
+# tradex-hub 现有龙虎榜能力（akshare/exchange_official）覆盖：
+#   - 单股上榜记录、沪市官方龙虎榜、深市官方龙虎榜
+# 本次借鉴补全的 5 个新维度：
+#   - 龙虎榜详情（含 D1/D2/D5/D10 上榜后股价表现跟踪）
+#   - 个股上榜次数统计（按 1/3/6/12 月聚合）
+#   - 机构买卖统计（机构席位层面）
+#   - 营业部排行（全市场热门营业部）
+#   - 个股席位明细（单股某日买卖营业部）
+
+_DT_PERIOD_MAP = {"1month": "01", "3month": "02", "6month": "03", "1year": "04"}
+
+
+def fetch_dragon_tiger_detail(
+    *, start_date: str, end_date: str, **kwargs,
+) -> list[dict]:
+    """龙虎榜上榜个股详情（含 D1/D2/D5/D10 上榜后涨跌幅跟踪）。
+
+    Args:
+        start_date: 起始日期（含），YYYY-MM-DD / YYYYMMDD
+        end_date: 结束日期（含），YYYY-MM-DD / YYYYMMDD
+        **kwargs: 透传 fetch_datacenter_list
+
+    Returns:
+        list[dict]，每条字段：
+          code/name/date/close/change_pct/net_buy/buy_amt/sell_amt/deal_amt/
+          net_buy_ratio/deal_amount_ratio/turnover_rate/float_market_value/
+          reason/after_1d/after_2d/after_5d/after_10d
+    """
+    rows = fetch_datacenter_list(
+        "RPT_DAILYBILLBOARD_DETAILSNEW",
+        columns="ALL",
+        sort_columns="SECURITY_CODE,TRADE_DATE",
+        sort_types="1,-1",
+        page_size=5000,
+        filter_expr=_build_date_range_filter(start_date, end_date),
+        **kwargs,
+    )
+    return [
+        {
+            "code": str(item.get("SECURITY_CODE") or ""),
+            "name": str(item.get("SECURITY_NAME_ABBR") or ""),
+            "date": _normalize_date(item.get("TRADE_DATE")),
+            "close": _to_float(item.get("CLOSE_PRICE")),
+            "change_pct": _to_float(item.get("CHANGE_RATE")),
+            "net_buy": _to_float(item.get("BILLBOARD_NET_AMT")),
+            "buy_amt": _to_float(item.get("BILLBOARD_BUY_AMT")),
+            "sell_amt": _to_float(item.get("BILLBOARD_SELL_AMT")),
+            "deal_amt": _to_float(item.get("BILLBOARD_DEAL_AMT")),
+            "total_amount": _to_float(item.get("ACCUM_AMOUNT")),
+            "net_buy_ratio": _to_float(item.get("DEAL_NET_RATIO")),
+            "deal_amount_ratio": _to_float(item.get("DEAL_AMOUNT_RATIO")),
+            "turnover_rate": _to_float(item.get("TURNOVERRATE")),
+            "float_market_value": _to_float(item.get("FREE_MARKET_CAP")),
+            "reason": str(item.get("EXPLANATION") or item.get("EXPLAIN") or ""),
+            "after_1d": _to_float(item.get("D1_CLOSE_ADJCHRATE")),
+            "after_2d": _to_float(item.get("D2_CLOSE_ADJCHRATE")),
+            "after_5d": _to_float(item.get("D5_CLOSE_ADJCHRATE")),
+            "after_10d": _to_float(item.get("D10_CLOSE_ADJCHRATE")),
+            "source": "EM_Datacenter_RPT_DAILYBILLBOARD_DETAILSNEW",
+        }
+        for item in rows
+    ]
+
+
+def fetch_dragon_tiger_stock_stats(*, period: str = "1month", **kwargs) -> list[dict]:
+    """龙虎榜个股上榜统计（按周期聚合：上榜次数、累计买卖额等）。
+
+    Args:
+        period: '1month' / '3month' / '6month' / '1year'，默认 '1month'
+    """
+    cycle = _DT_PERIOD_MAP.get(period)
+    if not cycle:
+        raise ValueError(f"period 必须是 {list(_DT_PERIOD_MAP.keys())} 之一，实际为 {period}")
+
+    rows = fetch_datacenter_list(
+        "RPT_BILLBOARD_TRADEALL",
+        columns="ALL",
+        sort_columns="BILLBOARD_TIMES,LATEST_TDATE,SECURITY_CODE",
+        sort_types="-1,-1,1",
+        page_size=5000,
+        filter_expr=f'(STATISTICS_CYCLE="{cycle}")',
+        **kwargs,
+    )
+    return [
+        {
+            "code": str(item.get("SECURITY_CODE") or ""),
+            "name": str(item.get("SECURITY_NAME_ABBR") or ""),
+            "latest_date": _normalize_date(item.get("LATEST_TDATE")),
+            "close": _to_float(item.get("CLOSE_PRICE")),
+            "change_pct": _to_float(item.get("CHANGE_RATE")),
+            "appearances": _to_int(item.get("BILLBOARD_TIMES")),
+            "total_buy": _to_float(item.get("BILLBOARD_BUY_AMT")),
+            "total_sell": _to_float(item.get("BILLBOARD_SELL_AMT")),
+            "total_net": _to_float(item.get("BILLBOARD_NET_AMT")),
+            "total_deal": _to_float(item.get("BILLBOARD_DEAL_AMT")),
+            "buy_org_count": _to_int(item.get("ORG_BUY_TIMES")),
+            "sell_org_count": _to_int(item.get("ORG_SELL_TIMES")),
+            "source": "EM_Datacenter_RPT_BILLBOARD_TRADEALL",
+        }
+        for item in rows
+    ]
+
+
+def fetch_dragon_tiger_institution(
+    *, start_date: str, end_date: str, **kwargs,
+) -> list[dict]:
+    """龙虎榜机构买卖统计（机构席位层面，按日期范围筛选）。
+
+    与 stock_stats 不同：这里按机构视角聚合，每行是一只个股在某日的机构席位明细。
+    """
+    rows = fetch_datacenter_list(
+        "RPT_ORGANIZATION_TRADE_DETAILS",
+        columns="ALL",
+        sort_columns="TRADE_DATE,SECURITY_CODE",
+        sort_types="-1,1",
+        page_size=5000,
+        filter_expr=_build_date_range_filter(start_date, end_date),
+        **kwargs,
+    )
+    return [
+        {
+            "code": str(item.get("SECURITY_CODE") or ""),
+            "name": str(item.get("SECURITY_NAME_ABBR") or ""),
+            "date": _normalize_date(item.get("TRADE_DATE")),
+            "close": _to_float(item.get("CLOSE_PRICE")),
+            "change_pct": _to_float(item.get("CHANGE_RATE")),
+            "buy_org_count": _to_int(item.get("BUY_TIMES")),
+            "sell_org_count": _to_int(item.get("SELL_TIMES")),
+            "org_buy_amt": _to_float(item.get("BUY_AMT")),
+            "org_sell_amt": _to_float(item.get("SELL_AMT")),
+            "org_net_amt": _to_float(item.get("NET_AMT")),
+            "source": "EM_Datacenter_RPT_ORGANIZATION_TRADE_DETAILS",
+        }
+        for item in rows
+    ]
+
+
+def fetch_dragon_tiger_branch_rank(*, period: str = "1month", **kwargs) -> list[dict]:
+    """龙虎榜营业部排行（全市场热门营业部排名）。
+
+    Args:
+        period: '1month' / '3month' / '6month' / '1year'，默认 '1month'
+    """
+    cycle = _DT_PERIOD_MAP.get(period)
+    if not cycle:
+        raise ValueError(f"period 必须是 {list(_DT_PERIOD_MAP.keys())} 之一，实际为 {period}")
+
+    rows = fetch_datacenter_list(
+        "RPT_BILLBOARD_TRADEDETAILS",
+        columns="ALL",
+        sort_columns="TOTAL_BUYER_SALESTIMES",
+        sort_types="-1",
+        page_size=5000,
+        filter_expr=f'(STATISTICS_CYCLE="{cycle}")',
+        **kwargs,
+    )
+    return [
+        {
+            "code": str(item.get("OPERATEDEPT_CODE") or ""),
+            "name": str(item.get("OPERATEDEPT_NAME") or ""),
+            "total_buy": _to_float(item.get("TOTAL_BUYAMT") or item.get("BUY_AMT")),
+            "total_sell": _to_float(item.get("TOTAL_SELLAMT") or item.get("SELL_AMT")),
+            "buy_count": _to_int(item.get("TOTAL_BUYER_SALESTIMES") or item.get("BUY_TIMES")),
+            "sell_count": _to_int(item.get("TOTAL_SELLER_SALESTIMES") or item.get("SELL_TIMES")),
+            "total_count": _to_int(item.get("TOTAL_TIMES")),
+            "source": "EM_Datacenter_RPT_BILLBOARD_TRADEDETAILS",
+        }
+        for item in rows
+    ]
+
+
+def fetch_dragon_tiger_seat_detail(
+    *, symbol: str, date: str, **kwargs,
+) -> list[dict]:
+    """个股某日龙虎榜席位明细（买入榜 + 卖出榜合并）。
+
+    Args:
+        symbol: 6 位股票代码
+        date: 上榜日期 YYYY-MM-DD / YYYYMMDD
+    """
+    code = re.sub(r"\D", "", str(symbol))[:6]
+    if not code:
+        raise ValueError(f"symbol 无法解析为 6 位代码: {symbol}")
+    filter_expr = f'(SECURITY_CODE="{code}")(TRADE_DATE=\'{_normalize_date(date)}\')'
+
+    buy_rows = fetch_datacenter_list(
+        "RPT_BILLBOARD_DAILYDETAILSBUY",
+        columns="ALL",
+        sort_columns="BUY_AMT_REAL",
+        sort_types="-1",
+        page_size=100,
+        filter_expr=filter_expr,
+        **kwargs,
+    )
+    sell_rows = fetch_datacenter_list(
+        "RPT_BILLBOARD_DAILYDETAILSSELL",
+        columns="ALL",
+        sort_columns="SELL_AMT_REAL",
+        sort_types="-1",
+        page_size=100,
+        filter_expr=filter_expr,
+        **kwargs,
+    )
+
+    result: list[dict] = []
+    for idx, item in enumerate(buy_rows):
+        result.append({
+            "rank": _to_int(item.get("RANK")) or idx + 1,
+            "branch_name": str(item.get("OPERATEDEPT_NAME") or ""),
+            "buy_amt": _to_float(item.get("BUY_AMT_REAL") or item.get("BUY_AMT")),
+            "buy_amt_ratio": _to_float(item.get("BUY_RATIO_TOTAL") or item.get("BUY_AMT_RATIO")),
+            "sell_amt": _to_float(item.get("SELL_AMT_REAL") or item.get("SELL_AMT")),
+            "sell_amt_ratio": _to_float(item.get("SELL_RATIO_TOTAL") or item.get("SELL_AMT_RATIO")),
+            "net_amt": _to_float(item.get("NET_AMT")),
+            "side": "buy",
+            "source": "EM_Datacenter_RPT_BILLBOARD_DAILYDETAILSBUY",
+        })
+    for idx, item in enumerate(sell_rows):
+        result.append({
+            "rank": _to_int(item.get("RANK")) or idx + 1,
+            "branch_name": str(item.get("OPERATEDEPT_NAME") or ""),
+            "buy_amt": _to_float(item.get("BUY_AMT_REAL") or item.get("BUY_AMT")),
+            "buy_amt_ratio": _to_float(item.get("BUY_RATIO_TOTAL") or item.get("BUY_AMT_RATIO")),
+            "sell_amt": _to_float(item.get("SELL_AMT_REAL") or item.get("SELL_AMT")),
+            "sell_amt_ratio": _to_float(item.get("SELL_RATIO_TOTAL") or item.get("SELL_AMT_RATIO")),
+            "net_amt": _to_float(item.get("NET_AMT")),
+            "side": "sell",
+            "source": "EM_Datacenter_RPT_BILLBOARD_DAILYDETAILSSELL",
+        })
+    return result
+
+
+# ============================================================
+# 融资融券族（借鉴 stock-sdk margin.ts，ISC license）
+# ============================================================
+# 走 datacenter-web 子域，老板批准的 P999 降级源
+# tradex-hub 已有交易所官方的两融明细（sse/szse_official），
+# 这里补「账户统计 + 标的列表」两个新维度。
+
+def fetch_margin_account_info(**kwargs) -> list[dict]:
+    """全市场融资融券账户统计（按日）。
+
+    Returns:
+        list[dict]，每条字段：
+          date/fin_balance（融资余额）/loan_balance（融券余额）/
+          fin_buy_amt/loan_sell_amt/investor_count/...
+    """
+    rows = fetch_datacenter_list(
+        "RPTA_WEB_MARGIN_DAILYTRADE",
+        columns="ALL",
+        sort_columns="STATISTICS_DATE",
+        sort_types="-1",
+        page_size=500,
+        **kwargs,
+    )
+    return [
+        {
+            "date": _normalize_date(item.get("STATISTICS_DATE") or item.get("TRADE_DATE")),
+            "fin_balance": _to_float(item.get("FIN_BALANCE")),
+            "loan_balance": _to_float(item.get("LOAN_BALANCE")),
+            "fin_buy_amt": _to_float(item.get("FIN_BUY_AMT")),
+            "loan_sell_amt": _to_float(item.get("LOAN_SELL_AMT")),
+            "investor_count": _to_int(item.get("OPERATE_INVESTOR_NUM") or item.get("INVESTOR_NUM")),
+            "liability_investor_count": _to_int(item.get("MARGIN_INVESTOR_NUM")),
+            "total_guarantee": _to_float(item.get("TOTAL_GUARANTEE")),
+            "avg_guarantee_ratio": _to_float(item.get("AVG_GUARANTEE_RATIO")),
+            "source": "EM_Datacenter_RPTA_WEB_MARGIN_DAILYTRADE",
+        }
+        for item in rows
+    ]
+
+
+def fetch_margin_target_list(*, trade_date: str | None = None, **kwargs) -> list[dict]:
+    """融资融券标的明细（当日可融资/可融券清单）。
+
+    Args:
+        trade_date: 交易日 YYYY-MM-DD / YYYYMMDD；不传则取最新
+    """
+    filter_expr = None
+    if trade_date:
+        filter_expr = f"(TRADE_DATE='{_normalize_date(trade_date)}')"
+
+    rows = fetch_datacenter_list(
+        "RPT_MARGIN_TRADE_DETAIL",
+        columns="ALL",
+        sort_columns="FIN_BALANCE",
+        sort_types="-1",
+        page_size=5000,
+        filter_expr=filter_expr,
+        **kwargs,
+    )
+    return [
+        {
+            "code": str(item.get("SECURITY_CODE") or ""),
+            "name": str(item.get("SECURITY_NAME_ABBR") or ""),
+            "date": _normalize_date(item.get("TRADE_DATE")),
+            "fin_balance": _to_float(item.get("FIN_BALANCE")),
+            "fin_buy_amt": _to_float(item.get("FIN_BUY_AMT")),
+            "fin_repay_amt": _to_float(item.get("FIN_REPAY_AMT")),
+            "loan_balance": _to_float(item.get("LOAN_BALANCE")),
+            "loan_sell_volume": _to_float(item.get("LOAN_SELL_VOLUME")),
+            "loan_repay_volume": _to_float(item.get("LOAN_REPAY_VOLUME")),
+            "source": "EM_Datacenter_RPT_MARGIN_TRADE_DETAIL",
+        }
+        for item in rows
+    ]
+
+
+# ============================================================
+# 大宗交易族（借鉴 stock-sdk blockTrade.ts，ISC license）
+# ============================================================
+# 走 datacenter-web 子域，老板批准的 P999 降级源
+# tradex-hub 当前完全没有大宗交易能力，本次补齐 3 个维度。
+
+def fetch_block_trade_market_stat(**kwargs) -> list[dict]:
+    """大宗交易市场每日总览（全市场汇总）。
+
+    Returns:
+        list[dict]，字段：
+          date/sh_close/sh_change_pct/total_amount/premium_amount/premium_ratio/
+          discount_amount/discount_ratio
+    """
+    rows = fetch_datacenter_list(
+        "PRT_BLOCKTRADE_MARKET_STA",
+        columns="ALL",
+        sort_columns="TRADE_DATE",
+        sort_types="-1",
+        page_size=500,
+        **kwargs,
+    )
+    return [
+        {
+            "date": _normalize_date(item.get("TRADE_DATE")),
+            "sh_close": _to_float(item.get("CLOSE_PRICE") or item.get("SH_CLOSE_PRICE")),
+            "sh_change_pct": _to_float(item.get("CHANGE_RATE") or item.get("SH_CHANGE_RATE")),
+            "total_amount": _to_float(item.get("TURNOVER") or item.get("TOTAL_AMOUNT")),
+            "premium_amount": _to_float(item.get("PREMIUM_TURNOVER") or item.get("PREMIUM_AMOUNT")),
+            "premium_ratio": _to_float(item.get("PREMIUM_RATIO")),
+            "discount_amount": _to_float(item.get("DISCOUNT_TURNOVER") or item.get("DISCOUNT_AMOUNT")),
+            "discount_ratio": _to_float(item.get("DISCOUNT_RATIO")),
+            "source": "EM_Datacenter_PRT_BLOCKTRADE_MARKET_STA",
+        }
+        for item in rows
+    ]
+
+
+def fetch_block_trade_detail(
+    *, start_date: str | None = None, end_date: str | None = None, **kwargs,
+) -> list[dict]:
+    """大宗交易明细（按日期范围筛选个股大宗交易记录）。"""
+    rows = fetch_datacenter_list(
+        "RPT_BLOCK_TRADE_DETAIL",
+        columns="ALL",
+        sort_columns="TRADE_DATE,SECURITY_CODE",
+        sort_types="-1,1",
+        page_size=5000,
+        filter_expr=_build_date_range_filter(start_date, end_date) or None,
+        **kwargs,
+    )
+    return [
+        {
+            "code": str(item.get("SECURITY_CODE") or ""),
+            "name": str(item.get("SECURITY_NAME_ABBR") or ""),
+            "date": _normalize_date(item.get("TRADE_DATE")),
+            "close": _to_float(item.get("CLOSE_PRICE")),
+            "change_pct": _to_float(item.get("CHANGE_RATE")),
+            "deal_price": _to_float(item.get("DEAL_PRICE") or item.get("PRICE")),
+            "deal_volume": _to_float(item.get("DEAL_VOLUME") or item.get("VOLUME")),
+            "deal_amount": _to_float(item.get("DEAL_AMT") or item.get("TURNOVER")),
+            "premium_rate": _to_float(item.get("PREMIUM_RATIO") or item.get("PREMIUM_RATE")),
+            "buy_branch": str(item.get("BUYER_DEPT") or item.get("BUYER_OPERATEDEPT_NAME") or ""),
+            "sell_branch": str(item.get("SELLER_DEPT") or item.get("SELLER_OPERATEDEPT_NAME") or ""),
+            "source": "EM_Datacenter_RPT_BLOCK_TRADE_DETAIL",
+        }
+        for item in rows
+    ]
+
+
+def fetch_block_trade_daily_stat(
+    *, start_date: str | None = None, end_date: str | None = None, **kwargs,
+) -> list[dict]:
+    """大宗交易每日统计（按股票汇总成交笔数、总额等）。"""
+    rows = fetch_datacenter_list(
+        "RPT_BLOCK_TRADE_STA",
+        columns="ALL",
+        sort_columns="TRADE_DATE,DEAL_AMT",
+        sort_types="-1,-1",
+        page_size=5000,
+        filter_expr=_build_date_range_filter(start_date, end_date) or None,
+        **kwargs,
+    )
+    return [
+        {
+            "code": str(item.get("SECURITY_CODE") or ""),
+            "name": str(item.get("SECURITY_NAME_ABBR") or ""),
+            "date": _normalize_date(item.get("TRADE_DATE")),
+            "change_pct": _to_float(item.get("CHANGE_RATE")),
+            "close": _to_float(item.get("CLOSE_PRICE")),
+            "deal_count": _to_int(item.get("DEAL_NUM") or item.get("DEAL_COUNT")),
+            "deal_total_amount": _to_float(item.get("DEAL_AMT") or item.get("TOTAL_AMOUNT")),
+            "deal_total_volume": _to_float(item.get("DEAL_VOLUME") or item.get("TOTAL_VOLUME")),
+            "premium_amount": _to_float(item.get("PREMIUM_AMT") or item.get("PREMIUM_AMOUNT")),
+            "discount_amount": _to_float(item.get("DISCOUNT_AMT") or item.get("DISCOUNT_AMOUNT")),
+            "source": "EM_Datacenter_RPT_BLOCK_TRADE_STA",
+        }
+        for item in rows
+    ]

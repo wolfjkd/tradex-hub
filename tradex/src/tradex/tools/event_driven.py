@@ -253,3 +253,308 @@ def register(mcp: FastMCP):
             return error_response(
                 f"获取监管异动失败: {e}", "get_unusual_fluctuation"
             )
+
+    # ════════════════════════════════════════════════════════════════════
+    # SP-2026-09-25-002 龙虎榜扩展族（5 工具）
+    # 借鉴 chengzuopeng/stock-sdk (ISC) 的 dragonTiger.ts 实现
+    # ════════════════════════════════════════════════════════════════════
+
+    @mcp.tool()
+    async def get_dragon_tiger_detail(
+        start_date: str, end_date: str, limit: int = 200,
+    ) -> str:
+        """
+        龙虎榜上榜个股详情（含 D1/D2/D5/D10 上榜后股价表现跟踪）。
+
+        Args:
+            start_date: 起始日期 YYYY-MM-DD（必填）
+            end_date: 结束日期 YYYY-MM-DD（必填）
+            limit: 返回条数，默认 200
+
+        Returns:
+            龙虎榜详情列表（含上榜后 1/2/5/10 日涨跌幅跟踪字段）
+        """
+        from ..data_sources.em_client import fetch_dragon_tiger_detail
+        try:
+            result = fetch_dragon_tiger_detail(
+                start_date=start_date, end_date=end_date,
+                max_pages=max(1, (limit + 4999) // 5000),
+            )
+            if limit > 0:
+                result = result[:limit]
+            return json.dumps({
+                "count": len(result),
+                "filter": {"start_date": start_date, "end_date": end_date},
+                "records": result,
+            }, ensure_ascii=False)
+        except Exception as e:
+            return error_response(f"获取龙虎榜详情失败: {e}", "get_dragon_tiger_detail")
+
+    @mcp.tool()
+    async def get_dragon_tiger_stock_stats(
+        period: str = "1month", limit: int = 200,
+    ) -> str:
+        """
+        个股龙虎榜上榜次数统计（按周期聚合：1月/3月/6月/1年）。
+
+        Args:
+            period: 1month / 3month / 6month / 1year，默认 1month
+            limit: 返回条数，默认 200
+
+        Returns:
+            上榜次数排行（代码、名称、上榜次数、累计买卖额等）
+        """
+        from ..data_sources.em_client import fetch_dragon_tiger_stock_stats
+        try:
+            result = fetch_dragon_tiger_stock_stats(period=period)
+            if limit > 0:
+                result = result[:limit]
+            return json.dumps({
+                "count": len(result),
+                "period": period,
+                "records": result,
+            }, ensure_ascii=False)
+        except ValueError as e:
+            return error_response(f"参数错误: {e}", "get_dragon_tiger_stock_stats")
+        except Exception as e:
+            return error_response(f"获取龙虎榜统计失败: {e}", "get_dragon_tiger_stock_stats")
+
+    @mcp.tool()
+    async def get_dragon_tiger_institution(
+        start_date: str, end_date: str, limit: int = 200,
+    ) -> str:
+        """
+        龙虎榜机构买卖统计（机构席位层面，按日期范围）。
+
+        Args:
+            start_date: 起始日期 YYYY-MM-DD（必填）
+            end_date: 结束日期 YYYY-MM-DD（必填）
+            limit: 返回条数，默认 200
+
+        Returns:
+            机构买卖明细（每行是个股某日的机构席位明细）
+        """
+        from ..data_sources.em_client import fetch_dragon_tiger_institution
+        try:
+            result = fetch_dragon_tiger_institution(
+                start_date=start_date, end_date=end_date,
+            )
+            if limit > 0:
+                result = result[:limit]
+            return json.dumps({
+                "count": len(result),
+                "filter": {"start_date": start_date, "end_date": end_date},
+                "records": result,
+            }, ensure_ascii=False)
+        except Exception as e:
+            return error_response(f"获取机构统计失败: {e}", "get_dragon_tiger_institution")
+
+    @mcp.tool()
+    async def get_dragon_tiger_branch_rank(
+        period: str = "1month", limit: int = 200,
+    ) -> str:
+        """
+        龙虎榜营业部排行（全市场热门营业部）。
+
+        Args:
+            period: 1month / 3month / 6month / 1year，默认 1month
+            limit: 返回条数，默认 200
+
+        Returns:
+            营业部排名（代码、名称、累计买卖额、上榜次数等）
+        """
+        from ..data_sources.em_client import fetch_dragon_tiger_branch_rank
+        try:
+            result = fetch_dragon_tiger_branch_rank(period=period)
+            if limit > 0:
+                result = result[:limit]
+            return json.dumps({
+                "count": len(result),
+                "period": period,
+                "records": result,
+            }, ensure_ascii=False)
+        except ValueError as e:
+            return error_response(f"参数错误: {e}", "get_dragon_tiger_branch_rank")
+        except Exception as e:
+            return error_response(f"获取营业部排行失败: {e}", "get_dragon_tiger_branch_rank")
+
+    @mcp.tool()
+    async def get_dragon_tiger_seat_detail(
+        symbol: str, date: str, limit: int = 100,
+    ) -> str:
+        """
+        个股某日龙虎榜席位明细（买入榜 + 卖出榜合并）。
+
+        Args:
+            symbol: 6 位股票代码
+            date: 上榜日期 YYYY-MM-DD / YYYYMMDD
+            limit: 返回条数，默认 100
+
+        Returns:
+            席位明细（营业部、买卖额、净额、买卖方向）
+        """
+        from ..data_sources.em_client import fetch_dragon_tiger_seat_detail
+        try:
+            result = fetch_dragon_tiger_seat_detail(symbol=symbol, date=date)
+            if limit > 0:
+                result = result[:limit]
+            return json.dumps({
+                "count": len(result),
+                "symbol": symbol,
+                "date": date,
+                "records": result,
+            }, ensure_ascii=False)
+        except ValueError as e:
+            return error_response(f"参数错误: {e}", "get_dragon_tiger_seat_detail")
+        except Exception as e:
+            return error_response(f"获取席位明细失败: {e}", "get_dragon_tiger_seat_detail")
+
+    # ════════════════════════════════════════════════════════════════════
+    # SP-2026-09-25-003 融资融券扩展族（2 工具）
+    # ════════════════════════════════════════════════════════════════════
+
+    @mcp.tool()
+    async def get_margin_account_info(limit: int = 100) -> str:
+        """
+        获取全市场融资融券账户统计（按日）。
+
+        含：融资余额、融券余额、参与账户数、总担保物等。
+        用于跟踪两融杠杆资金整体动向，是市场情绪温度计。
+
+        Args:
+            limit: 返回最近 N 天，默认 100
+
+        Returns:
+            按日倒序的两融账户统计列表
+        """
+        from ..data_sources.em_client import fetch_margin_account_info
+        try:
+            result = fetch_margin_account_info()
+            if limit > 0:
+                result = result[:limit]
+            return json.dumps({
+                "count": len(result),
+                "records": result,
+            }, ensure_ascii=False)
+        except Exception as e:
+            return error_response(f"获取两融账户统计失败: {e}", "get_margin_account_info")
+
+    @mcp.tool()
+    async def get_margin_target_list(date: str = "", limit: int = 200) -> str:
+        """
+        获取融资融券标的明细（当日可融资/可融券清单）。
+
+        Args:
+            date: 交易日 YYYY-MM-DD；不传则取最新
+            limit: 返回条数，默认 200（全市场约 2000+ 只标的）
+
+        Returns:
+            两融标的清单（代码、名称、融资余额、融券余额等）
+        """
+        from ..data_sources.em_client import fetch_margin_target_list
+        try:
+            result = fetch_margin_target_list(trade_date=date or None)
+            if limit > 0:
+                result = result[:limit]
+            return json.dumps({
+                "count": len(result),
+                "date": date or "latest",
+                "records": result,
+            }, ensure_ascii=False)
+        except Exception as e:
+            return error_response(f"获取两融标的清单失败: {e}", "get_margin_target_list")
+
+    # ════════════════════════════════════════════════════════════════════
+    # SP-2026-09-25-004 大宗交易族（3 工具）
+    # ════════════════════════════════════════════════════════════════════
+
+    @mcp.tool()
+    async def get_block_trade_market_stat(limit: int = 100) -> str:
+        """
+        获取大宗交易市场每日总览（全市场汇总）。
+
+        含：当日总成交额、溢价/折价成交额及占比、上证收盘价等。
+        用于跟踪全市场大宗交易整体活跃度。
+
+        Args:
+            limit: 返回最近 N 天，默认 100
+
+        Returns:
+            按日倒序的大宗交易市场统计
+        """
+        from ..data_sources.em_client import fetch_block_trade_market_stat
+        try:
+            result = fetch_block_trade_market_stat()
+            if limit > 0:
+                result = result[:limit]
+            return json.dumps({
+                "count": len(result),
+                "records": result,
+            }, ensure_ascii=False)
+        except Exception as e:
+            return error_response(f"获取大宗交易市场统计失败: {e}", "get_block_trade_market_stat")
+
+    @mcp.tool()
+    async def get_block_trade_detail(
+        start_date: str = "", end_date: str = "", limit: int = 200,
+    ) -> str:
+        """
+        获取大宗交易明细（按日期范围筛选个股大宗交易记录）。
+
+        每条含：成交价、成交量、买卖营业部、溢价率等。
+        省略日期则默认拉取最近一段时间。
+
+        Args:
+            start_date: 起始日期 YYYY-MM-DD
+            end_date: 结束日期 YYYY-MM-DD
+            limit: 返回条数，默认 200
+
+        Returns:
+            大宗交易明细列表
+        """
+        from ..data_sources.em_client import fetch_block_trade_detail
+        try:
+            result = fetch_block_trade_detail(
+                start_date=start_date or None, end_date=end_date or None,
+            )
+            if limit > 0:
+                result = result[:limit]
+            return json.dumps({
+                "count": len(result),
+                "filter": {"start_date": start_date or None, "end_date": end_date or None},
+                "records": result,
+            }, ensure_ascii=False)
+        except Exception as e:
+            return error_response(f"获取大宗交易明细失败: {e}", "get_block_trade_detail")
+
+    @mcp.tool()
+    async def get_block_trade_daily_stat(
+        start_date: str = "", end_date: str = "", limit: int = 200,
+    ) -> str:
+        """
+        获取大宗交易每日统计（按股票汇总成交笔数、总额等）。
+
+        与 detail 的区别：这里是按股票汇总后的统计视图，detail 是逐笔明细。
+
+        Args:
+            start_date: 起始日期
+            end_date: 结束日期
+            limit: 返回条数，默认 200
+
+        Returns:
+            大宗交易按股票汇总的每日统计
+        """
+        from ..data_sources.em_client import fetch_block_trade_daily_stat
+        try:
+            result = fetch_block_trade_daily_stat(
+                start_date=start_date or None, end_date=end_date or None,
+            )
+            if limit > 0:
+                result = result[:limit]
+            return json.dumps({
+                "count": len(result),
+                "filter": {"start_date": start_date or None, "end_date": end_date or None},
+                "records": result,
+            }, ensure_ascii=False)
+        except Exception as e:
+            return error_response(f"获取大宗交易每日统计失败: {e}", "get_block_trade_daily_stat")

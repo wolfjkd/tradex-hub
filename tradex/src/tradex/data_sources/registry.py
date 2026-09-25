@@ -380,6 +380,41 @@ def _do_register() -> None:
     router.register("regulatory_anomaly", "em_datacenter",
                     emc.fetch_unusual_fluctuation, priority=999)
 
+    # ── 龙虎榜扩展族（借鉴 stock-sdk dragonTiger.ts，ISC license）──
+    # 全部走 datacenter-web 子域，P999 降级源。补全 tradex-hub 龙虎榜缺失维度：
+    #   - dt_detail：上榜个股详情（含 D1/D2/D5/D10 上榜后股价跟踪）
+    #   - dt_stock_stats：个股上榜次数统计（按周期聚合）
+    #   - dt_institution：机构席位买卖统计
+    #   - dt_branch_rank：营业部排行（全市场热门营业部）
+    #   - dt_seat_detail：个股某日买卖营业部席位明细
+    router.register("dt_detail", "em_datacenter",
+                    emc.fetch_dragon_tiger_detail, priority=999)
+    router.register("dt_stock_stats", "em_datacenter",
+                    emc.fetch_dragon_tiger_stock_stats, priority=999)
+    router.register("dt_institution", "em_datacenter",
+                    emc.fetch_dragon_tiger_institution, priority=999)
+    router.register("dt_branch_rank", "em_datacenter",
+                    emc.fetch_dragon_tiger_branch_rank, priority=999)
+    router.register("dt_seat_detail", "em_datacenter",
+                    emc.fetch_dragon_tiger_seat_detail, priority=999)
+
+    # ── 融资融券扩展族（借鉴 stock-sdk margin.ts，ISC license）──
+    # tradex-hub 已有交易所官方两融明细（sse/szse_official），
+    # 补「账户统计 + 标的列表」两个新维度，走 datacenter-web P999 降级源。
+    router.register("margin_account_info", "em_datacenter",
+                    emc.fetch_margin_account_info, priority=999)
+    router.register("margin_target_list", "em_datacenter",
+                    emc.fetch_margin_target_list, priority=999)
+
+    # ── 大宗交易族（借鉴 stock-sdk blockTrade.ts，ISC license）──
+    # tradex-hub 之前完全没有大宗交易能力，本次一次性补齐 3 个维度。
+    router.register("block_trade_market_stat", "em_datacenter",
+                    emc.fetch_block_trade_market_stat, priority=999)
+    router.register("block_trade_detail", "em_datacenter",
+                    emc.fetch_block_trade_detail, priority=999)
+    router.register("block_trade_daily_stat", "em_datacenter",
+                    emc.fetch_block_trade_daily_stat, priority=999)
+
     # ── 给已有类型加独立备源（一主一备 / 一主二备） ──
     # historical_kline 第四备源：百度股市通（与 eltdx/akshare/tdx_mcp 完全独立）
     router.register("historical_kline", "baidu_http", baidu.fetch_baidu_kline_with_ma, priority=200)

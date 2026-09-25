@@ -42,6 +42,13 @@ class TestRegistryCompleteness:
         "industry_news",
         # 监管异动（2026-09-25 借鉴 stock-sdk 新增）
         "regulatory_anomaly",
+        # 龙虎榜扩展族（2026-09-25 借鉴 stock-sdk dragonTiger.ts）
+        "dt_detail", "dt_stock_stats", "dt_institution",
+        "dt_branch_rank", "dt_seat_detail",
+        # 融资融券扩展族（2026-09-25 借鉴 stock-sdk margin.ts）
+        "margin_account_info", "margin_target_list",
+        # 大宗交易族（2026-09-25 借鉴 stock-sdk blockTrade.ts）
+        "block_trade_market_stat", "block_trade_detail", "block_trade_daily_stat",
     ]
 
     def test_all_new_types_registered(self):
@@ -50,16 +57,16 @@ class TestRegistryCompleteness:
         missing = [t for t in self.NEW_TYPES if t not in r._sources]
         assert not missing, f"未注册的数据类型: {missing}"
 
-    def test_total_data_types_at_least_104(self):
+    def test_total_data_types_at_least_114(self):
         from tradex.data_sources import get_router
         r = get_router()
-        assert len(r._sources) >= 104, f"数据类型数 {len(r._sources)} < 104"
+        assert len(r._sources) >= 114, f"数据类型数 {len(r._sources)} < 114"
 
-    def test_total_source_instances_at_least_139(self):
+    def test_total_source_instances_at_least_149(self):
         from tradex.data_sources import get_router
         r = get_router()
         total = sum(len(v) for v in r._sources.values())
-        assert total >= 139, f"源实例数 {total} < 139"
+        assert total >= 149, f"源实例数 {total} < 149"
 
 
 class TestBackupSourceChains:
