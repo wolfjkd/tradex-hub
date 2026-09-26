@@ -231,8 +231,8 @@ def _do_register() -> None:
     # lockup_expiry：datacenter-web 不在封禁列表 —— 按老板指示独占也降级 P999
     router.register("lockup_expiry", "em_datacenter", asf.fetch_lockup_expiry, priority=999, exclusive=True)
     # limit_up_board：原 em_push2_clist 主源已删（push2 域名被封）→ 整类型失效
-    # 老板拍板「能用就保留，不能用就接受失效」
-    # router.register("limit_up_board", "em_push2_clist", asf.fetch_limit_up_board, priority=1, exclusive=True)
+    # 2026-09-26 修复：补 akshare_em 主源（stock_zt_pool_em），独立于 push2 域名族
+    router.register("limit_up_board", "akshare_em", akf.fetch_limit_up_board_em, priority=1)
 
     # ── akshare 主 + tencent_http 备 ──
     router.register("profit_forecast", "akshare", akf.fetch_profit_forecast, priority=1)

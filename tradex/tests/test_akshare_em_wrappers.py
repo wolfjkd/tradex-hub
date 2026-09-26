@@ -226,3 +226,128 @@ class TestDtBranchRankEm:
         with patch("akshare.stock_lhb_yybph_em", return_value=pd.DataFrame()):
             with pytest.raises(RuntimeError, match="返回空"):
                 fetch_dt_branch_rank_em(period="1month")
+
+
+# ============================================================
+# 涨停板池 fetch_limit_up_board_em 测试（2026-09-26 新增）
+# ============================================================
+
+_FAKE_ZT_POOL = pd.DataFrame([
+    {
+        "序号": 1, "代码": "000498", "名称": "山东路桥",
+        "涨跌幅": 9.92, "最新价": 5.65, "成交额": 314302752,
+        "流通市值": 8188814951.35, "总市值": 8771297480.80,
+        "换手率": 3.84, "封板资金": 59982095,
+        "首次封板时间": "092500", "最后封板时间": "093136",
+        "炸板次数": 1, "涨停统计": "1/1", "连板数": 1, "所属行业": "基础建设",
+    },
+    {
+        "序号": 2, "代码": "001234", "名称": "泰慕士",
+        "涨跌幅": 10.01, "最新价": 35.4, "成交额": 80434535,
+        "流通市值": 3240569100.0, "总市值": 3844071840.0,
+        "换手率": 2.48, "封板资金": 360840625,
+        "首次封板时间": "092500", "最后封板时间": "092500",
+        "炸板次数": 0, "涨停统计": "4/4", "连板数": 4, "所属行业": "服装家纺",
+    },
+])
+
+
+class TestLimitUpBoardEm:
+    """limit_up_board akshare 包装层测试 —— 修复整类型失效后的回归保障。"""
+
+    def test_field_alignment(self):
+        """字段映射齐全且类型正确。"""
+        from tradex.data_sources.akshare_fetchers import fetch_limit_up_board_em
+        with patch("akshare.stock_zt_pool_em", return_value=_FAKE_ZT_POOL):
+            result = fetch_limit_up_board_em(date="20260925")
+        assert len(result) == 2
+        row = result[0]
+        # 核心字段断言
+        assert row["code"] == "000498"
+        assert row["name"] == "山东路桥"
+        assert row["change_pct"] == 9.92
+        assert row["latest_price"] == 5.65
+        assert row["sealed_capital"] == 59982095
+        assert row["consecutive_days"] == 1
+        assert row["break_count"] == 1
+        assert row["industry"] == "基础建设"
+        assert row["source"] == "AKShare_stock_zt_pool_em"
+        # 类型断言
+        assert isinstance(row["change_pct"], float)
+        assert isinstance(row["consecutive_days"], int)
+        assert isinstance(row["break_count"], int)
+
+    def test_consecutive_days_preserved(self):
+        """连板数字段直接来自 akshare（原 SPEC 假设需推断，实测纠正）。"""
+        from tradex.data_sources.akshare_fetchers import fetch_limit_up_board_em
+        with patch("akshare.stock_zt_pool_em", return_value=_FAKE_ZT_POOL):
+            result = fetch_limit_up_board_em(date="20260925")
+        # 第二条是 4 连板
+        assert result[1]["consecutive_days"] == 4
+        assert result[1]["limit_up_stats"] == "4/4"
+
+    def test_code_zero_padded(self):
+        """代码补 0 到 6 位（akshare 可能返回 5 位代码）。"""
+        from tradex.data_sources.akshare_fetchers import fetch_limit_up_board_em
+        df = pd.DataFrame([{"代码": "1234", "名称": "X", "涨跌幅": 0,
+                            "最新价": 0, "成交额": 0, "流通市值": 0, "总市值": 0,
+                            "换手率": 0, "封板资金": 0, "首次封板时间": "", "最后封板时间": "",
+                            "炸板次数": 0, "涨停统计": "", "连板数": 1, "所属行业": ""}])
+        with patch("akshare.stock_zt_pool_em", return_value=df):
+            result = fetch_limit_up_board_em(date="20260925")
+        assert result[0]["code"] == "001234"  # 补 0 到 6 位
+
+    def test_empty_raises_runtime_error(self):
+        """空数据不静默吞错，抛 RuntimeError。"""
+        from tradex.data_sources.akshare_fetchers import fetch_limit_up_board_em
+        with patch("akshare.stock_zt_pool_em", return_value=pd.DataFrame()):
+            with pytest.raises(RuntimeError, match="返回空"):
+                fetch_limit_up_board_em(date="20260925")
+
+    def test_none_raises_runtime_error(self):
+        """akshare 返回 None 同样抛 RuntimeError。"""
+        from tradex.data_sources.akshare_fetchers import fetch_limit_up_board_em
+        with patch("akshare.stock_zt_pool_em", return_value=None):
+            with pytest.raises(RuntimeError, match="返回空"):
+                fetch_limit_up_board_em(date="20260925")
+
+    def test_missing_date_raises_value_error(self):
+        """date 必填，缺失抛 ValueError。"""
+        from tradex.data_sources.akshare_fetchers import fetch_limit_up_board_em
+        with pytest.raises(ValueError, match="必须传 date"):
+            fetch_limit_up_board_em(date="")
+
+    def test_invalid_date_format_raises_value_error(self):
+        """日期格式错误抛 ValueError（YYYYMMDD 8 位数字，去横杠后）。
+        
+        注意：YYYY-MM-DD 横杠格式是被允许的（自动归一化），不抛错；
+        这里只测真正非法的格式。
+        """
+        from tradex.data_sources.akshare_fetchers import fetch_limit_up_board_em
+        for bad in ["2026092", "abc12345", "2026092X", "2026"]:
+            with pytest.raises(ValueError, match="date 参数格式错误"):
+                fetch_limit_up_board_em(date=bad)
+
+    def test_date_dash_normalized(self):
+        """支持 YYYY-MM-DD 输入（自动去掉横杠）。"""
+        from tradex.data_sources.akshare_fetchers import fetch_limit_up_board_em
+        with patch("akshare.stock_zt_pool_em", return_value=_FAKE_ZT_POOL) as mock_fn:
+            fetch_limit_up_board_em(date="2026-09-25")
+            # akshare 应被以归一化的 8 位数字调用
+            call_args = mock_fn.call_args
+            assert call_args.kwargs.get("date") == "20260925" or call_args.args[0] == "20260925"
+
+
+class TestLimitUpBoardRegistration:
+    """limit_up_board 注册关系 —— 必须命中 akshare_em 主源。"""
+
+    def test_route_hits_akshare_em(self):
+        """router.route('limit_up_board') 应返回非空数据 + 命中 akshare_em。"""
+        from tradex.data_sources.registry import register_all_sources, get_router
+        register_all_sources()
+        router = get_router()
+        with patch("akshare.stock_zt_pool_em", return_value=_FAKE_ZT_POOL):
+            data, source = router.route("limit_up_board", date="20260925")
+        assert source == "akshare_em"
+        assert len(data) == 2
+        assert data[0]["code"] == "000498"

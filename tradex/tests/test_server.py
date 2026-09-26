@@ -10,9 +10,11 @@ class TestServerSetup:
         assert mcp_server.name == "tradex"
 
     def test_all_90_tools_registered(self, mcp_server):
-        """v3.5.1: 132→165 tools (129→132→165, 含数据源扩充 T01-T33 共 +33). 数量精确锁定, 版本演进需同步更新."""
+        """v3.5.1→v3.5.2: 165→176 tools.
+        历史：129→132→165→176 (含数据源扩充 T01-T33 + akshare_em 包装层 + limit_up_board 修复).
+        数量精确锁定，版本演进需同步更新本断言。"""
         tools = mcp_server._tool_manager._tools
-        assert len(tools) == 165, f"Expected 165 tools, got {len(tools)}"
+        assert len(tools) == 176, f"Expected 176 tools, got {len(tools)}"
 
     def test_v01_tools_present(self, mcp_server):
         """V0.1 company info + price data tools (8 tools)."""
@@ -127,6 +129,7 @@ class TestServerSetup:
             assert tool_name in tools, f"V0.6 tool '{tool_name}' not registered"
 
     def test_tool_count_per_version(self, mcp_server):
-        """v3.5.1: 实际注册工具总数精确锁定为 165 (132→165, 含数据源扩充 T01-T33 共 +33, 防重复注册回归)."""
+        """v3.5.2: 实际注册工具总数精确锁定为 176 (165→176, 含 akshare_em 包装层 8 个 + dt_branch_rank + limit_up_board 修复 +1).
+        防重复注册回归。版本演进需同步更新本断言。"""
         tools = mcp_server._tool_manager._tools
-        assert len(tools) == 165
+        assert len(tools) == 176

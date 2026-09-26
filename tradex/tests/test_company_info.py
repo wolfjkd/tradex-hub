@@ -23,11 +23,13 @@ class TestSearchStock:
         result = await fn(keyword="茅台")
         print(f"\n[search_by_name] raw result:\n{result[:500]}")
         data = json.loads(result)
-        print(f"[search_by_name] type={type(data).__name__}, len={len(data) if isinstance(data, list) else 'N/A'}")
+        print(f"[search_by_name] type={type(data).__name__}, keys={list(data.keys()) if isinstance(data, dict) else 'N/A'}")
         if isinstance(data, dict) and data.get("error"):
             pytest.skip(f"Network error: {data['message'][:100]}")
-        assert isinstance(data, list), f"Expected list, got {type(data).__name__}: {result[:200]}"
-        assert len(data) > 0, "Expected non-empty results for '茅台'"
+        # v3.4.0 起 service 层返回 dict: {keyword, matches, source}
+        assert isinstance(data, dict), f"Expected dict, got {type(data).__name__}: {result[:200]}"
+        assert "matches" in data, f"Missing 'matches' key: {list(data.keys())}"
+        assert len(data["matches"]) > 0, "Expected non-empty matches for '茅台'"
 
     async def test_search_by_code(self):
         from tradex.tools.company_info import register
@@ -39,11 +41,12 @@ class TestSearchStock:
         result = await fn(keyword="600519")
         print(f"\n[search_by_code] raw result:\n{result[:500]}")
         data = json.loads(result)
-        print(f"[search_by_code] type={type(data).__name__}, len={len(data) if isinstance(data, list) else 'N/A'}")
+        print(f"[search_by_code] type={type(data).__name__}, keys={list(data.keys()) if isinstance(data, dict) else 'N/A'}")
         if isinstance(data, dict) and data.get("error"):
             pytest.skip(f"Network error: {data['message'][:100]}")
-        assert isinstance(data, list), f"Expected list, got {type(data).__name__}: {result[:200]}"
-        assert len(data) > 0, "Expected non-empty results for '600519'"
+        assert isinstance(data, dict), f"Expected dict, got {type(data).__name__}: {result[:200]}"
+        assert "matches" in data
+        assert len(data["matches"]) > 0, "Expected non-empty matches for '600519'"
 
     async def test_search_no_results(self):
         from tradex.tools.company_info import register
@@ -58,8 +61,9 @@ class TestSearchStock:
         print(f"[search_no_results] type={type(data).__name__}")
         if isinstance(data, dict) and data.get("error"):
             pytest.skip(f"Network error: {data['message'][:100]}")
-        assert isinstance(data, list), f"Expected list, got {type(data).__name__}: {result[:200]}"
-        assert len(data) == 0, f"Expected empty results, got {len(data)}"
+        assert isinstance(data, dict), f"Expected dict, got {type(data).__name__}: {result[:200]}"
+        assert "matches" in data
+        assert len(data["matches"]) == 0, f"Expected empty matches, got {len(data['matches'])}"
 
 
 @pytest.mark.network

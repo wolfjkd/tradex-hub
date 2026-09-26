@@ -1956,3 +1956,63 @@ def fetch_block_trade_daily_stat_em(
         })
     return result
 
+
+# ============================================================
+# 涨停板池 —— akshare stock_zt_pool_em（2026-09-26 新增，修复 limit_up_board 整类型失效）
+# 原 em_push2_clist 主源在 push2 IP 风控中已删除（registry.py:235），整类型失效。
+# akshare 包装东财涨停板池接口，由 akshare 维护字段映射，独立于 push2 域名族。
+# 实测返回字段包含「连板数」（原 SPEC 假设无该字段，实测纠正）。
+# ============================================================
+def fetch_limit_up_board_em(*, date: str = "", **kwargs) -> list[dict]:
+    """涨停板池 —— akshare stock_zt_pool_em 包装。
+
+    Args:
+        date: 交易日日期 YYYYMMDD 格式（必填，akshare 该接口必须传日期）
+
+    Returns:
+        list[dict] with keys:
+            code/nickname/change_pct/latest_price/deal_amount/float_mv/
+            total_mv/turnover_rate/sealed_capital/first_seal_time/last_seal_time/
+            break_count/limit_up_stats/consecutive_days/industry
+
+    字段映射说明（对齐 SPEC §S1）：
+        - 连板数：实测 akshare 直接提供，无需历史推断（原 SPEC 假设已纠正）
+        - 涨停统计：格式 "今涨停数/历史涨停数"，可用作题材热度参考
+        - 所属行业：东财二级行业分类
+
+    Raises:
+        ValueError: date 为空或格式错误
+        RuntimeError: akshare 返回空（非交易日 / 数据未更新）
+    """
+    if not date:
+        raise ValueError("fetch_limit_up_board_em 必须传 date 参数（YYYYMMDD）")
+    s = str(date).strip().replace("-", "")
+    if len(s) != 8 or not s.isdigit():
+        raise ValueError(f"date 参数格式错误：{date!r}（应为 YYYYMMDD 8 位数字）")
+
+    ak = _ak()
+    df = ak.stock_zt_pool_em(date=s)
+    if df is None or df.empty:
+        raise RuntimeError(f"AKShare stock_zt_pool_em 返回空（date={s}，可能非交易日或数据未更新）")
+    result: list[dict] = []
+    for _, row in df.iterrows():
+        result.append({
+            "code": str(row.get("代码", "")).zfill(6),
+            "name": str(row.get("名称", "")),
+            "change_pct": float(row.get("涨跌幅", 0) or 0),
+            "latest_price": float(row.get("最新价", 0) or 0),
+            "deal_amount": float(row.get("成交额", 0) or 0),
+            "float_mv": float(row.get("流通市值", 0) or 0),
+            "total_mv": float(row.get("总市值", 0) or 0),
+            "turnover_rate": float(row.get("换手率", 0) or 0),
+            "sealed_capital": float(row.get("封板资金", 0) or 0),
+            "first_seal_time": str(row.get("首次封板时间", "")),
+            "last_seal_time": str(row.get("最后封板时间", "")),
+            "break_count": int(row.get("炸板次数", 0) or 0),
+            "limit_up_stats": str(row.get("涨停统计", "")),
+            "consecutive_days": int(row.get("连板数", 0) or 0),
+            "industry": str(row.get("所属行业", "")),
+            "source": "AKShare_stock_zt_pool_em",
+        })
+    return result
+

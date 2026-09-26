@@ -69,7 +69,7 @@ def fetch_earnings_forecast(
         if report_date:
             params["filter"] = f"(SECURITY_CODE=\"{sym}\")(REPORT_DATE='{report_date}')"
 
-        data = em_get(url, params=params).json().json()
+        data = em_get(url, params=params).json()
         rows_raw = (data.get("result") or {}).get("data", [])
         if not rows_raw:
             return pd.DataFrame()
@@ -137,7 +137,7 @@ def fetch_institution_survey(
             "sortColumns": "NOTICE_DATE",
             "sortTypes": "-1",
         }
-        data = em_get(url, params=params).json().json()
+        data = em_get(url, params=params).json()
         rows_raw = (data.get("result") or {}).get("data", [])
         if not rows_raw:
             return pd.DataFrame()

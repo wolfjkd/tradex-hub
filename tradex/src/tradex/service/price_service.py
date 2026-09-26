@@ -151,6 +151,13 @@ def get_historical_price(
     else:
         df_limited = df.head(500)
         bars = df_limited.where(pd.notnull(df_limited), None).to_dict(orient="records")
+        # 修复：日期列可能是 pandas Timestamp，json.dumps 不能直接序列化。
+        # 历史上 akshare/eltdx 返回的「日期」列有 datetime/string 两种形态，
+        # 统一在 service 层规整为字符串。
+        for bar in bars:
+            for k, v in list(bar.items()):
+                if hasattr(v, "isoformat"):
+                    bar[k] = v.isoformat()[:10]  # 截到 YYYY-MM-DD
         result = {
             "symbol": symbol,
             "period": period,

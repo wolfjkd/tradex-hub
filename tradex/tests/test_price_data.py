@@ -43,8 +43,10 @@ class TestGetRealtimeQuote:
         fn = mcp._tool_manager._tools["get_realtime_quote"].fn
         result = await fn(symbol="600519")
         data = json.loads(result)
-        assert isinstance(data, list)
-        assert len(data) > 0
+        # v3.4.0 起 service 层返回 dict: {quote, symbol, source}
+        assert isinstance(data, dict), f"Expected dict, got {type(data).__name__}"
+        assert "quote" in data, f"Missing 'quote' key: {list(data.keys())}"
+        assert data["quote"], "Expected non-empty quote"
 
     async def test_invalid_symbol(self, monkeypatch):
         from tradex.tools import price_data
@@ -94,5 +96,7 @@ class TestGetHistoricalPrice:
             end_date="20250131",
         )
         data = json.loads(result)
-        assert isinstance(data, list)
-        assert len(data) > 0
+        # v3.4.0 起 service 层返回 dict: {bars, symbol, period, source}
+        assert isinstance(data, dict), f"Expected dict, got {type(data).__name__}"
+        assert "bars" in data, f"Missing 'bars' key: {list(data.keys())}"
+        assert len(data["bars"]) > 0, "Expected non-empty bars"
