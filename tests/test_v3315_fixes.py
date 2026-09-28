@@ -241,21 +241,17 @@ class TestBackupSourceRegistration:
     """
 
     def test_total_data_types(self, router):
-        # 数据类型数：78（基线）→ 80（v0.1.0-DEV tdx_mcp 新增 screener / research_report 两类型；
-        #   macro_data 为既有类型加源，不计入）
-        # 2026-09-23 东财 push2 族退役：5 个类型因此变裸类型（无源）被 SmartRouter
-        # 自动从 _sources 移除 → 80 - 5 = 75：
-        #   industry_quotes / concept_attribution / market_breadth /
-        #   limit_up_board / stock_boards
-        assert len(router._sources) == 75
+        # 数据类型数演进：78（基线）→ 80（v0.1.0-DEV）→ 75（2026-09-23 push2 族退役）
+        #   → 115（SP-2026-09-23/25 数据源大扩充 + v3.3.15 备源补齐）
+        #   → 105（2026-09-28 死源剥离：期权 2 + 指数 3 + 宏观 3 + 互动 2）
+        assert len(router._sources) == 105
 
     def test_total_registrations(self, router):
-        # 总注册数演进：90 → 94（v3.3.14）→ 101（v3.3.15）
-        #   → 102（fund_hold 由单源升为 em_zlsj_direct + akshare 双源）
-        #   → 107（v0.1.0-DEV tdx_mcp 新增 5 源：realtime/kline/screener/research/macro）
-        #   → 100（2026-09-23 东财 push2 族退役：删 7 个注册点；
-        #          news_data:em_news_direct 由 P1 改 P999 保留，算 1 个）
-        assert sum(len(v) for v in router._sources.values()) == 100
+        # 总注册数演进：90 → 94（v3.3.14）→ 101（v3.3.15）→ 102 → 107
+        #   → 100（2026-09-23 东财 push2 族退役）
+        #   → 157（SP-2026-09-23/25 数据源大扩充 + v3.3.15 备源补齐）
+        #   → 145（2026-09-28 死源剥离：12 个注册点移除）
+        assert sum(len(v) for v in router._sources.values()) == 145
 
     def test_new_sources_registered_with_priority(self, router):
         for data_type, name, prio in NEW_SOURCES:

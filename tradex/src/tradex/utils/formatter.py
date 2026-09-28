@@ -11,6 +11,7 @@ Design principle: return compact, LLM-friendly data — not raw database dumps.
 from __future__ import annotations
 
 import json
+import math
 from typing import Any
 
 import pandas as pd
@@ -221,9 +222,27 @@ def df_to_json(
     return df.to_json(orient=orient, force_ascii=False, date_format=date_format)
 
 
+def _sanitize_nan(value: Any) -> Any:
+    """递归把 NaN/Inf 换成 None（2026-09-28 审计修复）。
+
+    pandas 缺失值（停牌股/缺失财务季度）常以 float('nan') 混进 dict——
+    它是 truthy，`x or 0` 拦不住；json.dumps 默认 allow_nan=True 会把它
+    序列化为裸 `NaN`（RFC 8259 非法），部分客户端 JSON.parse 直接报错。
+    """
+    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+        return None
+    if isinstance(value, dict):
+        return {k: _sanitize_nan(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_nan(v) for v in value]
+    return value
+
+
 def dict_to_json(data: dict[str, Any] | list[dict[str, Any]]) -> str:
     """
     Convert a dict or list of dicts to a JSON string.
+
+    NaN/Inf 值会被清洗为 null，保证输出始终是合法 JSON。
 
     Args:
         data: Dictionary or list of dictionaries to convert.
@@ -231,7 +250,7 @@ def dict_to_json(data: dict[str, Any] | list[dict[str, Any]]) -> str:
     Returns:
         JSON string.
     """
-    return json.dumps(data, ensure_ascii=False, default=str)
+    return json.dumps(_sanitize_nan(data), ensure_ascii=False, default=str)
 
 
 def error_response(message: str, tool_name: str = "") -> str:
@@ -253,10 +272,3 @@ def error_response(message: str, tool_name: str = "") -> str:
         },
         ensure_ascii=False,
     )
-
-
-def truncate_df(df: pd.DataFrame, max_rows: int = 50) -> pd.DataFrame:
-    """Truncate a DataFrame to max_rows, adding a note if truncated."""
-    if len(df) <= max_rows:
-        return df
-    return df.head(max_rows)

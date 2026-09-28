@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tradex"
-version = "3.5.1"
+version = "3.6.0"
 description = "China Financial Data MCP Server based on AKShare - Free alternative to commercial financial data MCPs"
 readme = "README.md"
 license = "Apache-2.0"
@@ -39,6 +39,7 @@ dependencies = [
 [project.optional-dependencies]
 http = [
     "uvicorn>=0.29.0",
+    "fastapi>=0.110.0",
     "starlette>=0.37.0",
     "sse-starlette>=1.6.0",
 ]

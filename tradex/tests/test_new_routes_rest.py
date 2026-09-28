@@ -95,28 +95,6 @@ def _clear_cache():
 
 # ---------- Option ----------
 
-class TestOptionRest:
-    """/api/v1/option/*"""
-
-    def test_tquote_default_underlying(self, client):
-        _clear_cache()
-        r = client.get("/api/v1/option/tquote")
-        assert r.status_code == 200
-        body = r.json()
-        assert body["code"] == ERR_OK
-        assert "data" in body and isinstance(body["data"], dict)
-        assert "underlying" in body["data"]
-
-    def test_greeks_returns_envelope(self, client):
-        _clear_cache()
-        r = client.get("/api/v1/option/greeks?underlying=510050")
-        assert r.status_code == 200
-        body = r.json()
-        assert body["code"] == ERR_OK
-        assert "greeks" in body["data"]
-
-
-# ---------- Event ----------
 
 class TestEventRest:
     """/api/v1/event/*"""
@@ -167,28 +145,6 @@ class TestEventRest:
 
 # ---------- Index ----------
 
-class TestIndexRest:
-    """/api/v1/index/*"""
-
-    def test_constituents_default_300(self, client):
-        _clear_cache()
-        r = client.get("/api/v1/index/constituents")
-        assert r.status_code == 200
-        body = r.json()
-        assert "constituents" in body["data"]
-
-    def test_weights_returns_envelope(self, client):
-        _clear_cache()
-        r = client.get("/api/v1/index/weights?index_code=000300")
-        assert r.status_code == 200
-
-    def test_valuation_returns_envelope(self, client):
-        _clear_cache()
-        r = client.get("/api/v1/index/valuation?index_code=000905")
-        assert r.status_code == 200
-
-
-# ---------- Macro ----------
 
 class TestMacroRest:
     """/api/v1/macro/*"""
@@ -200,25 +156,13 @@ class TestMacroRest:
         body = r.json()
         assert "data" in body["data"]
 
-    def test_social_financing_returns_envelope(self, client):
-        _clear_cache()
-        r = client.get("/api/v1/macro/social-financing")
-        assert r.status_code == 200
 
     def test_bond_yield_curve_returns_envelope(self, client):
         _clear_cache()
         r = client.get("/api/v1/macro/bond-yield-curve")
         assert r.status_code == 200
 
-    def test_repo_fixing_rate_returns_envelope(self, client):
-        _clear_cache()
-        r = client.get("/api/v1/macro/repo-fixing-rate")
-        assert r.status_code == 200
 
-    def test_lpr_returns_envelope(self, client):
-        _clear_cache()
-        r = client.get("/api/v1/macro/lpr")
-        assert r.status_code == 200
 
     def test_sw_industry_as_of_bad_symbol(self, client):
         # 长度 < 6 的 symbol 由 FastAPI 的 min_length 校验拦截 → 422
@@ -230,28 +174,6 @@ class TestMacroRest:
 
 # ---------- Interaction ----------
 
-class TestInteractionRest:
-    """/api/v1/interaction/*"""
-
-    def test_cninfo_irm_valid(self, client):
-        _clear_cache()
-        r = client.get("/api/v1/interaction/cninfo-irm?symbol=000001")
-        assert r.status_code == 200
-        body = r.json()
-        assert "qa" in body["data"]
-
-    def test_sse_e_interaction_valid(self, client):
-        _clear_cache()
-        r = client.get("/api/v1/interaction/sse-e-interaction?symbol=600519")
-        assert r.status_code == 200
-
-    def test_cninfo_irm_bad_symbol(self, client):
-        # 长度 < 6 由 FastAPI min_length 校验拦截 → 422
-        r = client.get("/api/v1/interaction/cninfo-irm?symbol=zzz")
-        assert r.status_code in (400, 422)
-
-
-# ---------- Industry News ----------
 
 class TestIndustryNewsRest:
     """/api/v1/industry-news/*"""

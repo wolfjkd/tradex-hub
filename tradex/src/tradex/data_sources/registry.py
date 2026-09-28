@@ -84,9 +84,7 @@ from . import baidu_fetchers as baidu        # 百度股市通 K 线
 from . import baostock_fetchers as baostock  # baostock 估值/退市/ST
 from . import exchange_official_fetchers as exchg  # 沪深交易所官方
 from . import event_driven_fetchers as evtd  # 事件驱动 6 件套
-from . import index_constituents_fetchers as idxcons  # 中证/国证指数
 from . import macro_official_fetchers as macro_off    # 人行/统计局/中债/货币网
-from . import interaction_fetchers as interact        # 互动易/e互动
 from . import wallstreetcn_fetchers as wscn           # 华尔街见闻
 from . import cctv_news_fetchers as cctv              # 央视新闻联播
 from . import sw_industry_fetchers as swind           # 申万行业变迁
@@ -239,29 +237,24 @@ def _do_register() -> None:
     router.register("profit_forecast", "tencent_http", hf.fetch_profit_forecast_tencent, priority=100)
 
     # ── 单源 —— 2026-09-23 东财 push2delay 被风控移除 ──
-    # concept_attribution：原 em_push2delay 主源已删 → 整类型失效
-    # 老板拍板「能用就保留，不能用就接受失效」
-    # router.register("concept_attribution", "em_push2delay", asf.fetch_concept_attribution, priority=1)
+    # concept_attribution：原 em_push2delay 主源已删 → 整类型失效（裸类型，
+    # 老板拍板「能用就保留，不能用就接受失效」，待补同花顺备源；
+    # 2026-09-28 审计已删旧 push2 fetcher 代码）
 
     # ── v3.3.1 新增：全局行情（腾讯直连，美股/大宗/亚太/外汇） ──
     router.register("global_market_quote", "tencent_http", hf.fetch_global_quote_tencent, priority=1)
 
-    # ── v3.3.8 新增：市场级统计（实时涨跌家数 / 行业板块涨幅） ──
-    # market_breadth：东财 push2ex 涨跌分布（实时）
-    # industry_quotes：东财 push2 行业板块（内部自动降级 push2delay 镜像）
-    # ── v3.3.8 曾新增：市场级统计（涨跌家数 / 行业板块涨幅） ──
+    # ── 市场级统计（实时涨跌家数 / 行业板块涨幅）为裸类型 ──
     # 2026-09-23 移除东财 push2ex / push2 主源（push2 域名族被持续风控，
     # curl: (56) 连接被服务端主动断开，且 akshare _em 后缀接口连锁失效）。
     # market_breadth / industry_quotes 暂成裸类型 —— 老板拍板「能用就保留，
     # 不能用就接受失效」，等需要时再补同花顺备源。
-    # router.register("market_breadth", "em_push2ex", hf.fetch_market_breadth, priority=1)
-    # router.register("industry_quotes", "em_push2", hf.fetch_industry_quotes, priority=1)
 
-    # ── v3.3.9 新增：同花顺备源 + 东财 slist + 通达信本地数据 ──
-    # ── v3.3.9 曾新增：同花顺备源 + 东财 slist + 通达信本地数据 ──
-    # 2026-09-23 移除东财 slist（push2 域名族被封，stock_boards 暂成裸类型，
-    # 老板拍板「能用就保留，不能用就接受失效」）。
-    # router.register("stock_boards", "em_slist", emc.fetch_stock_boards, priority=1)
+    # ── v3.3.8/3.3.9 曾新增的市场级统计源（market_breadth / industry_quotes /
+    # stock_boards）已于 2026-09-23 随东财 push2 族退役删除；push2 时代的死
+    # fetcher 函数已于 2026-09-28 审计清理。裸类型待补同花顺备源（老板拍板）：
+    # market_breadth / industry_quotes / stock_boards / concept_attribution。
+    # 同花顺备源（全部走 ths 独立上游，与 push2 无关）：
     router.register("ths_eps_forecast", "ths", ths.fetch_ths_eps_forecast, priority=1)
     router.register("ths_hot_reason", "ths", ths.fetch_ths_hot_reason, priority=1)
     router.register("ths_limit_up_pool", "ths", ths.fetch_ths_limit_up_pool, priority=1)
@@ -331,9 +324,9 @@ def _do_register() -> None:
     #   - 上游独立性验证：每条备源都与主源不同上游（避免假双源）
     # ════════════════════════════════════════════════════════════════════
 
-    # ── P0 三件套：ETF 期权 + 业绩预告 + 机构调研（全新类型） ──
-    router.register("etf_option_tquote", "sina_option", sina.fetch_sina_option_tquote, priority=1)
-    router.register("etf_option_greeks", "sina_option", sina.fetch_sina_option_greeks, priority=1)
+    # ── P0 三件套：ETF 期权 + 业绩预告 + 机构调研 ──
+    # 2026-09-28 死源剥离（老板拍板）：ETF 期权双源（sina_option）上游 OptionService
+    # 已下线（Service not found），类型与 fetcher 一并移除，待寻新源再接。
     router.register("earnings_forecast", "em_datacenter", evtd.fetch_earnings_forecast, priority=999)
     router.register("institution_survey", "em_datacenter", evtd.fetch_institution_survey, priority=999)
 
@@ -343,23 +336,20 @@ def _do_register() -> None:
     router.register("equity_pledge", "em_datacenter", evtd.fetch_equity_pledge, priority=999)
     router.register("ipo_calendar", "em_datacenter", evtd.fetch_ipo_calendar, priority=999)
 
-    # ── 指数追踪 3 件套（中证一手 + 国证备） ──
-    router.register("index_constituents", "csi_official", idxcons.fetch_csi_index_constituents, priority=1)
-    router.register("index_constituents", "cnindex_official", idxcons.fetch_cnindex_constituents, priority=100)
-    router.register("index_weights", "csi_official", idxcons.fetch_csi_index_weights, priority=1)
-    router.register("index_weights", "cnindex_official", idxcons.fetch_cnindex_weights, priority=100)
-    router.register("index_valuation", "csi_official", idxcons.fetch_csi_index_valuation, priority=1)
+    # ── 指数追踪：2026-09-28 死源剥离（老板拍板）──
+    # 中证 zealink 域名（csi-web.cn.zealink.com）全球 DNS 失效、国证 API 404，
+    # index_constituents / index_weights / index_valuation 三类型双源齐挂，
+    # fetcher 模块一并移除；复启需改走 csindex.com.cn 官网抓取。
 
-    # ── 宏观 5 件套（官方一手 + akshare 备） ──
-    router.register("social_financing", "pboc_official", macro_off.fetch_pboc_social_financing, priority=1)
+    # ── 宏观 5 件套 → 2 件套：2026-09-28 死源剥离（老板拍板）──
+    # 移除 social_financing（人行 404）/ repo_fixing_rate + lpr_history
+    # （货币网静态 json 404，AGS 接口语义不符）；保留实测可用的 PMI + 中债曲线。
     router.register("pmi_data", "nbs_official", macro_off.fetch_nbs_pmi, priority=1)
     router.register("bond_yield_curve", "chinabond_official", macro_off.fetch_chinabond_yield_curve, priority=1)
-    router.register("repo_fixing_rate", "chinamoney_official", macro_off.fetch_repo_fixing_rates, priority=1)
-    router.register("lpr_history", "chinamoney_official", macro_off.fetch_lpr_history, priority=1)
 
-    # ── 投资者互动 2 件套 ──
-    router.register("cninfo_irm", "cninfo_irm_official", interact.fetch_cninfo_irm, priority=1)
-    router.register("sse_e_interaction", "sse_einteract_official", interact.fetch_sse_e_interaction, priority=1)
+    # ── 投资者互动 2 件套：2026-09-28 死源剥离（老板拍板）──
+    # 巨潮互动易上游 500、上交所 e互动 404（主站存活、接口层死亡），
+    # 类型与 fetcher 模块一并移除。
 
     # ── 全球新闻 3 件套 ──
     router.register("wallstreetcn_lives", "wscn_api", wscn.fetch_wallstreetcn_lives, priority=1)

@@ -96,7 +96,7 @@ def fetch_sse_dragon_tiger(
 
     except Exception as e:
         logger.warning("fetch_sse_dragon_tiger(%s) failed: %s", date, e)
-        return pd.DataFrame()
+        raise  # 2026-09-28 审计修复：失败必须抛出，由 SmartRouter 记账降级（吞成空表会让降级链与健康分全部失效）
 
 
 # ============================================================
@@ -163,7 +163,7 @@ def fetch_szse_dragon_tiger(
 
     except Exception as e:
         logger.warning("fetch_szse_dragon_tiger(%s) failed: %s", date, e)
-        return pd.DataFrame()
+        raise  # 2026-09-28 审计修复：失败必须抛出，由 SmartRouter 记账降级（吞成空表会让降级链与健康分全部失效）
 
 
 # ============================================================
@@ -215,7 +215,7 @@ def fetch_sse_margin_trading(
 
     except Exception as e:
         logger.warning("fetch_sse_margin_trading(%s) failed: %s", date, e)
-        return pd.DataFrame()
+        raise  # 2026-09-28 审计修复：失败必须抛出，由 SmartRouter 记账降级（吞成空表会让降级链与健康分全部失效）
 
 
 def fetch_szse_margin_trading(
@@ -261,7 +261,7 @@ def fetch_szse_margin_trading(
 
     except Exception as e:
         logger.warning("fetch_szse_margin_trading(%s) failed: %s", date, e)
-        return pd.DataFrame()
+        raise  # 2026-09-28 审计修复：失败必须抛出，由 SmartRouter 记账降级（吞成空表会让降级链与健康分全部失效）
 
 
 # ============================================================
@@ -326,7 +326,7 @@ def fetch_szse_trading_calendar(
 
     except Exception as e:
         logger.warning("fetch_szse_trading_calendar(%d-%d) failed: %s", year, month, e)
-        return pd.DataFrame()
+        raise  # 2026-09-28 审计修复：失败必须抛出，由 SmartRouter 记账降级（吞成空表会让降级链与健康分全部失效）
 
 
 # ============================================================
@@ -390,4 +390,4 @@ def fetch_szse_announcement(
 
     except Exception as e:
         logger.warning("fetch_szse_announcement(%s) failed: %s", sym, e)
-        return pd.DataFrame()
+        raise  # 2026-09-28 审计修复：失败必须抛出，由 SmartRouter 记账降级（吞成空表会让降级链与健康分全部失效）

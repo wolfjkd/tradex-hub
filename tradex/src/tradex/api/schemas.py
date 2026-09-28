@@ -49,11 +49,3 @@ def envelope_ok(data: T) -> Envelope[T]:
 def envelope_err(code: int, msg: str) -> Envelope[None]:
     """失败响应的便捷构造器（data 恒为 None）。"""
     return Envelope(code=code, data=None, msg=msg)
-
-
-# HTTP status → 业务 code 映射（供异常处理中间件用）
-HTTP_STATUS_TO_CODE = {
-    400: ERR_BAD_REQUEST,
-    404: ERR_NOT_FOUND,
-    500: ERR_INTERNAL,
-}

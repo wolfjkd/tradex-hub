@@ -5,13 +5,15 @@ astock_signals 函数 fetch_fn 包装器。
 仅本文件（及 data_sources 包内其他 fetcher 文件）允许 `from astock_signals import ...`。
 
 包含：
-  - 东财 em_push2 / em_datacenter 源（fund_flow / dragon_tiger / industry_comparison）
+  - 东财 em_datacenter 源（dragon_tiger）
   - 同花顺 ths_hsgt 源（northbound）
   - 同花顺 ths_editorial 源（hot_money: 涨停归因/涨停揭秘）
   - 东财 em_datacenter 源（lockup_expiry）
-  - 东财 em_push2delay 源（concept_attribution）
-  - 东财 em_push2_clist 源（limit_up_board: 涨停四池/打板情绪）
   - akshare 生态源（etf_data / cb_data）
+
+2026-09-28 审计清理：fund_flow / industry_comparison / concept_attribution /
+limit_up_board 的东财 push2 族 fetcher 已删（push2 域名族 2026-09-23 起被风控
+退役，四个函数零注册零消费，复启将走同花顺备源而非旧 push2 代码）。
 """
 
 from __future__ import annotations
@@ -26,110 +28,6 @@ def _as():
     import astock_signals as asig
     return asig
 
-
-# ============================================================
-# fund_flow — 东财 em_push2 源（主源）
-# ============================================================
-
-def fetch_fund_flow_em(code: str = "", symbol: str = "", curr_date: str = "", include_history: bool = True, **kwargs) -> dict:
-    """个股资金流向（东财 push2，curl_cffi 直连绕过系统代理）。
-
-    使用 curl_cffi.requests 替代 requests，避免系统代理导致的 ProxyError /
-    RemoteDisconnected 以及 TLS 指纹识别问题。
-    空数据/异常时抛 RuntimeError 触发 SmartRouter 降级到 akshare。
-    兼容 symbol/code 两种参数名（SmartRouter 路由归一化）。
-    """
-    from datetime import datetime
-    from curl_cffi import requests as _rq
-
-    code = code or symbol
-    if not curr_date:
-        curr_date = datetime.now().strftime("%Y-%m-%d")
-
-    _session = _rq.Session()
-    _session.headers.update({
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        ),
-        "Referer": "https://data.eastmoney.com/",
-    })
-
-    secid = f"1.{code}" if code.startswith("6") else f"0.{code}"
-    result: dict = {
-        "symbol": code,
-        "source": "东财 push2 (直连)",
-        "date": curr_date,
-        "realtime": [],
-        "history": [],
-        "signal": "neutral",
-    }
-
-    # Realtime minute-level fund flow
-    url1 = "https://push2.eastmoney.com/api/qt/stock/fflow/kline/get"
-    params1 = {
-        "secid": secid,
-        "klt": 1,
-        "fields1": "f1,f2,f3,f7",
-        "fields2": "f51,f52,f53,f54,f55,f56,f57",
-    }
-    try:
-        resp = _session.get(url1, params=params1, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-        klines = data.get("data", {}).get("klines", [])
-        for line in klines:
-            parts = line.split(",")
-            if len(parts) >= 6:
-                result["realtime"].append({
-                    "time": parts[0],
-                    "main_net": float(parts[1]),
-                    "small": float(parts[2]),
-                    "mid": float(parts[3]),
-                    "large": float(parts[4]),
-                    "super_large": float(parts[5]),
-                })
-        if result["realtime"]:
-            last = result["realtime"][-1]
-            if last["main_net"] > 0:
-                result["signal"] = "bullish_inflow"
-            elif last["main_net"] < 0:
-                result["signal"] = "bearish_outflow"
-    except Exception as e:
-        logger.debug("fetch_fund_flow_em realtime failed: %s", e)
-
-    # Historical daily fund flow
-    if include_history:
-        url2 = "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get"
-        params2 = {
-            "secid": secid,
-            "lmt": 20,
-            "klt": 101,
-            "fields1": "f1,f2,f3,f7",
-            "fields2": "f51,f52,f53,f54,f55,f56,f57",
-        }
-        try:
-            resp = _session.get(url2, params=params2, timeout=10)
-            resp.raise_for_status()
-            data = resp.json()
-            hist_klines = data.get("data", {}).get("klines", [])
-            for line in hist_klines:
-                parts = line.split(",")
-                if len(parts) >= 6:
-                    result["history"].append({
-                        "date": parts[0],
-                        "main_net": float(parts[1]),
-                        "small": float(parts[2]),
-                        "mid": float(parts[3]),
-                        "large": float(parts[4]),
-                        "super_large": float(parts[5]),
-                    })
-        except Exception as e:
-            logger.debug("fetch_fund_flow_em history failed: %s", e)
-
-    if not result["realtime"] and not result["history"]:
-        raise RuntimeError("东财 push2 资金流数据为空")
-    return result
 
 
 # ============================================================
@@ -156,24 +54,6 @@ def fetch_dragon_tiger_em(code: str = "", symbol: str = "", trade_date: str = ""
         raise RuntimeError(err)
     return result
 
-
-# ============================================================
-# industry_comparison — 东财 em_push2 源（主源）
-# ============================================================
-
-def fetch_industry_comparison_em(code: str = "", symbol: str = "", trade_date: str = "", top_n: int = 20, **kwargs) -> dict:
-    """行业横向对比（东财 push2，via astock_signals.get_industry_comparison_json）。
-
-    空数据/异常时抛 RuntimeError 触发 SmartRouter 降级到 akshare。
-    兼容 symbol/code 两种参数名（SmartRouter 路由归一化）。
-    """
-    asig = _as()
-    code = code or symbol
-    result = asig.get_industry_comparison_json(code, trade_date, top_n)
-    if result.get("error") or not result.get("industries"):
-        err = result.get("error", "东财返回空数据")
-        raise RuntimeError(err)
-    return result
 
 
 # ============================================================
@@ -225,35 +105,6 @@ def fetch_lockup_expiry(symbol: str = "", code: str = "", trade_date: str = "", 
     return asig.get_lockup_expiry_json(symbol, trade_date, forward_days)
 
 
-# ============================================================
-# concept_attribution — 东财 em_push2delay 源
-# ============================================================
-
-def fetch_concept_attribution(symbol: str = "", code: str = "", **kwargs) -> dict:
-    """概念板块归属（东财 push2delay，via astock_signals.get_concept_blocks_json）。
-
-    兼容 symbol/code 两种参数名（SmartRouter 路由归一化）。
-    """
-    asig = _as()
-    symbol = symbol or code
-    return asig.get_concept_blocks_json(symbol)
-
-
-# ============================================================
-# limit_up_board — 东财 em_push2_clist 源（独占）
-# ============================================================
-
-def fetch_limit_up_board(board_type: str = "zt", **kwargs):
-    """涨停四池/打板情绪（东财 push2ex，独占源）。
-
-    通过 board_type 分派：
-      - "sentiment": 调用 get_board_sentiment_json() 返回打板情绪
-      - 其他: 调用 get_limit_up_board_json(board_type) 返回对应池数据
-    """
-    asig = _as()
-    if board_type == "sentiment":
-        return asig.get_board_sentiment_json()
-    return asig.get_limit_up_board_json(board_type)
 
 
 # ============================================================

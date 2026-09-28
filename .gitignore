@@ -63,3 +63,6 @@ _test_*.py
 diagnose_*.py
 verify_*.py
 scripts/_retired/
+
+# 本地备份目录（发版删除文件回收站镜像，不入库）
+_archive-*/

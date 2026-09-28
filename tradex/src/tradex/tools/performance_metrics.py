@@ -39,7 +39,8 @@ def _annualized_return(equity_curve: list[float], trading_days: int = 252) -> fl
     if len(equity_curve) < 2:
         return 0.0
     total_ret = _total_return(equity_curve)
-    days = len(equity_curve)
+    # N 个权益点只有 N-1 个收益区间，年化分母应用 N-1（2026-09-28 审计修正）
+    days = len(equity_curve) - 1
     if days <= 0 or (1 + total_ret) <= 0:
         return 0.0
     return (1 + total_ret) ** (trading_days / days) - 1
@@ -102,25 +103,38 @@ def _max_drawdown(equity_curve: list[float]) -> tuple[float, int, int]:
     return max_dd, peak_idx, trough_idx
 
 
-def _sharpe_ratio(equity_curve: list[float], risk_free_rate: float = 0.03) -> float:
-    ann_return = _annualized_return(equity_curve)
-    vol = _volatility(equity_curve)
+def _sharpe_ratio(
+    equity_curve: list[float],
+    risk_free_rate: float = 0.03,
+    trading_days: int = 252,
+) -> float:
+    """夏普比率（年化口径与调用方的年化收益/波动率保持一致）。
+
+    2026-09-28 审计修正：此前内部硬编码默认 252，调用方传 trading_days=250
+    等自定义值时，Sharpe 与展示的年化收益/波动率用不同年化基数，互相矛盾。
+    """
+    ann_return = _annualized_return(equity_curve, trading_days)
+    vol = _volatility(equity_curve, trading_days)
     if vol == 0:
         return 0.0
     return (ann_return - risk_free_rate) / vol
 
 
-def _sortino_ratio(equity_curve: list[float], risk_free_rate: float = 0.03) -> float:
-    ann_return = _annualized_return(equity_curve)
-    downside_vol = _downside_volatility(equity_curve)
+def _sortino_ratio(
+    equity_curve: list[float],
+    risk_free_rate: float = 0.03,
+    trading_days: int = 252,
+) -> float:
+    ann_return = _annualized_return(equity_curve, trading_days)
+    downside_vol = _downside_volatility(equity_curve, trading_days)
     if downside_vol == 0:
         # 无下行波动:正超额收益策略 Sortino 趋于 +∞,否则视为无风险调整收益
         return float('inf') if ann_return > risk_free_rate else 0.0
     return (ann_return - risk_free_rate) / downside_vol
 
 
-def _calmar_ratio(equity_curve: list[float]) -> float:
-    ann_return = _annualized_return(equity_curve)
+def _calmar_ratio(equity_curve: list[float], trading_days: int = 252) -> float:
+    ann_return = _annualized_return(equity_curve, trading_days)
     max_dd, _, _ = _max_drawdown(equity_curve)
     if max_dd == 0:
         return float('inf') if ann_return > 0 else 0.0
@@ -289,10 +303,10 @@ def register(mcp: FastMCP):
                 "cvar_95": round(_cvar_95(equity_curve), 4),
             }
 
-            # 风险调整收益
-            sharpe = _sharpe_ratio(equity_curve, risk_free_rate)
-            sortino = _sortino_ratio(equity_curve, risk_free_rate)
-            calmar = _calmar_ratio(equity_curve)
+            # 风险调整收益（年化基数与 risk_metrics 的 volatility 保持一致）
+            sharpe = _sharpe_ratio(equity_curve, risk_free_rate, trading_days)
+            sortino = _sortino_ratio(equity_curve, risk_free_rate, trading_days)
+            calmar = _calmar_ratio(equity_curve, trading_days)
             risk_adjusted_metrics = {
                 "sharpe_ratio": round(sharpe, 4) if sharpe != float('inf') else "inf",
                 "sortino_ratio": round(sortino, 4) if sortino != float('inf') else "inf",

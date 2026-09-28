@@ -227,12 +227,14 @@ def _fetch_sina_index_amount_today(sym: str):
     新浪指数行情字段：…, 成交量(手), 成交额(元), …（上证/深证的额在第10位）。返回整数成交额(元)或 None。
     """
     import urllib.request
+    # 铁律：国内接口直连。默认 opener 会读 HTTP(S)_PROXY 环境变量，必须绕过。
+    _opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     url = f"https://hq.sinajs.cn/list={sym}"
     req = urllib.request.Request(url, headers={
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120",
         "Referer": "https://finance.sina.com.cn",
     })
-    resp = urllib.request.urlopen(req, timeout=8)
+    resp = _opener.open(req, timeout=8)
     raw = resp.read().decode("gbk", "ignore")
     quotes = raw.split("=", 1)[-1].strip(";").strip('"')
     if not quotes:
@@ -849,7 +851,10 @@ def fetch_profit_forecast(symbol: str = "", **kwargs) -> dict:
         ),
         "Referer": "https://basic.10jqka.com.cn/",
     }
-    resp = _rq.get(url, headers=_headers, timeout=15)
+    # 铁律：国内接口直连。requests 默认 trust_env=True 会读 HTTP(S)_PROXY。
+    _s = _rq.Session()
+    _s.trust_env = False
+    resp = _s.get(url, headers=_headers, timeout=15)
     resp.encoding = "gbk"
     html = resp.text
 
@@ -919,11 +924,12 @@ def fetch_profit_forecast(symbol: str = "", **kwargs) -> dict:
 
     try:
         import urllib.request as _ur
-        prefix = "sh" if code.startswith("6") else "sz"
+        # 铁律：国内接口直连。默认 opener 会读 HTTP(S)_PROXY 环境变量，必须绕过。
+        _opener = _ur.build_opener(_ur.ProxyHandler({}))
         quote_url = f"https://qt.gtimg.cn/q={prefix}{code}"
         req = _ur.Request(quote_url)
         req.add_header("User-Agent", "Mozilla/5.0")
-        quote_resp = _ur.urlopen(req, timeout=5)
+        quote_resp = _opener.open(req, timeout=5)
         raw = quote_resp.read().decode("gbk")
         vals = raw.split('"')[1].split("~") if '"' in raw else []
         if len(vals) >= 53:

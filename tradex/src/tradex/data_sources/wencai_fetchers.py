@@ -66,7 +66,7 @@ def fetch_wencai_query(
             "pywencai 未安装，无法执行问财查询。"
             "请执行: pip install pywencai"
         )
-        return pd.DataFrame()
+        raise  # 2026-09-28 审计修复：失败必须抛出，由 SmartRouter 记账降级（吞成空表会让降级链与健康分全部失效）
 
     try:
         params: dict[str, Any] = {
@@ -85,7 +85,7 @@ def fetch_wencai_query(
         return df
     except Exception as e:
         logger.warning("fetch_wencai_query(%s) failed: %s", query[:50], e)
-        return pd.DataFrame()
+        raise  # 2026-09-28 审计修复：失败必须抛出，由 SmartRouter 记账降级（吞成空表会让降级链与健康分全部失效）
 
 
 # ============================================================
@@ -141,7 +141,9 @@ def fetch_wencai_news(
             url, data=data, headers=headers, method="POST"
         )
 
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        # 铁律：国内接口直连。默认 opener 会读 HTTP(S)_PROXY 环境变量，必须绕过。
+        _opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with _opener.open(req, timeout=30) as resp:
             result = json.loads(resp.read().decode("utf-8"))
 
         # 解析响应
@@ -166,4 +168,4 @@ def fetch_wencai_news(
 
     except Exception as e:
         logger.warning("fetch_wencai_news(%s) failed: %s", keyword, e)
-        return pd.DataFrame()
+        raise  # 2026-09-28 审计修复：失败必须抛出，由 SmartRouter 记账降级（吞成空表会让降级链与健康分全部失效）

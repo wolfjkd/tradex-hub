@@ -55,6 +55,9 @@ class SourceHealth:
     last_fail_ts: float = 0.0
     consecutive_fails: int = 0
     _latency_window: list[float] = field(default_factory=list)
+    # 2026-09-28 审计修复：record_success/record_failure 对 score 做读-改-写，
+    # 此前在 route() 的 router 锁外执行，8 线程并发时惩罚/恢复加分互相覆盖。
+    _mutex: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     @property
     def success_rate(self) -> float:
@@ -78,47 +81,50 @@ class SourceHealth:
         )
 
     def record_success(self, latency_ms: float):
-        self.total_calls += 1
-        self.success_count += 1
-        self.consecutive_fails = 0
-        self.last_success_ts = time.time()
-        # 滑动窗口记录延迟（最近50次）
-        self._latency_window.append(latency_ms)
-        if len(self._latency_window) > 50:
-            self._latency_window = self._latency_window[-50:]
-        self.avg_latency_ms = sum(self._latency_window) / len(self._latency_window)
-        # 成功恢复评分（拉黑源半开探测成功：score 曾归 0 → 直接满血复活）
-        if self.score == 0.0:
-            self.score = 100.0
-        else:
-            self.score = min(100.0, self.score + 5.0)
-        # 延迟惩罚：>5s扣分，>10s重罚
-        if latency_ms > 10000:
-            self.score = max(0, self.score - 10)
-        elif latency_ms > 5000:
-            self.score = max(0, self.score - 5)
+        with self._mutex:
+            self.total_calls += 1
+            self.success_count += 1
+            self.consecutive_fails = 0
+            self.last_success_ts = time.time()
+            # 滑动窗口记录延迟（最近50次）
+            self._latency_window.append(latency_ms)
+            if len(self._latency_window) > 50:
+                self._latency_window = self._latency_window[-50:]
+            self.avg_latency_ms = sum(self._latency_window) / len(self._latency_window)
+            # 成功恢复评分（拉黑源半开探测成功：score 曾归 0 → 直接满血复活）
+            if self.score == 0.0:
+                self.score = 100.0
+            else:
+                self.score = min(100.0, self.score + 5.0)
+            # 延迟惩罚：>5s扣分，>10s重罚
+            if latency_ms > 10000:
+                self.score = max(0, self.score - 10)
+            elif latency_ms > 5000:
+                self.score = max(0, self.score - 5)
 
     def record_failure(self):
-        self.total_calls += 1
-        self.fail_count += 1
-        self.consecutive_fails += 1
-        self.last_fail_ts = time.time()
-        # 失败惩罚：连续失败加重
-        penalty = 20 * min(self.consecutive_fails, 5)
-        self.score = max(0, self.score - penalty)
-        # 连续5次失败直接归零并拉黑(冷却期后自动半开探测)
-        if self.consecutive_fails >= 5:
-            self.score = 0.0
+        with self._mutex:
+            self.total_calls += 1
+            self.fail_count += 1
+            self.consecutive_fails += 1
+            self.last_fail_ts = time.time()
+            # 失败惩罚：连续失败加重
+            penalty = 20 * min(self.consecutive_fails, 5)
+            self.score = max(0, self.score - penalty)
+            # 连续5次失败直接归零并拉黑(冷却期后自动半开探测)
+            if self.consecutive_fails >= 5:
+                self.score = 0.0
 
     def recover(self, amount: float = 10.0):
         """冷却期后恢复评分（半开探测用）。
 
         仅当冷却期已过才允许恢复；否则拉黑源不会进入路由候选。
         """
-        if self.is_blacklisted:
-            return
-        if self.score < 100:
-            self.score = min(100.0, self.score + amount)
+        with self._mutex:
+            if self.is_blacklisted:
+                return
+            if self.score < 100:
+                self.score = min(100.0, self.score + amount)
 
     def to_dict(self) -> dict:
         """转换为字典（供看板使用）。"""
@@ -189,10 +195,21 @@ class SmartRouter:
             # 按优先级排序
             self._sources[data_type].sort(key=lambda x: x[2])
 
-    def route(self, data_type: str, timeout: float | None = None, **kwargs) -> tuple[Any, str]:
+    def route(
+        self,
+        data_type: str,
+        timeout: float | None = None,
+        source_name: str | None = None,
+        **kwargs,
+    ) -> tuple[Any, str]:
         """智能路由：按健康评分选择数据源，失败自动降级。
 
         独占源（exclusive=True）失败后不降级，直接 raise。
+
+        固定源（v3.3.16 审计修复）：
+            source_name 指定时只路由到该源、失败不降级（独占语义），
+            且该参数不会透传给 fetch_fn。此前它落入 **kwargs 原样转发，
+            选源仍按健康分排序——「上交所龙虎榜」工具可能拿到深交所/东财数据。
 
         超时保护（v3.3.2 新增）：
             每个源的 fetch_fn 在独立线程中执行，超过 timeout 秒未返回即判为失败，
@@ -202,6 +219,7 @@ class SmartRouter:
             data_type: 数据类型
             timeout: 单次尝试超时秒数；None 使用 _DEFAULT_ROUTE_TIMEOUT；
                      传 0 或负数则关闭超时（同步直调）。
+            source_name: 指定源名（如 "sse_official"），仅路由该源、不降级。
             **kwargs: 透传给 fetch_fn 的参数
 
         Returns:
@@ -212,10 +230,17 @@ class SmartRouter:
         if timeout is None:
             timeout = _DEFAULT_ROUTE_TIMEOUT
         candidates = self._sources.get(data_type, [])
+        if source_name is not None:
+            candidates = [c for c in candidates if c[0] == source_name]
+            if not candidates:
+                raise RuntimeError(
+                    f"Source '{source_name}' not registered for '{data_type}'"
+                )
         if not candidates:
             raise RuntimeError(f"No data source registered for '{data_type}'")
 
-        # 按健康评分排序（评分高的优先）
+        # 按健康评分排序（评分高的优先）。
+        # 固定源请求不做健康过滤：调用方明确点名该源，黑名单只影响自动选源。
         with self._lock:
             scored = []
             for name, fn, priority, exclusive in candidates:
@@ -225,7 +250,7 @@ class SmartRouter:
                     # 新源：注册时已创建 SourceHealth，这里兜底
                     health = SourceHealth(name=name)
                     self._health[key] = health
-                if health.is_healthy:
+                if source_name is not None or health.is_healthy:
                     # 综合评分 = 健康分 * 0.7 + 优先级分 * 0.3
                     priority_score = max(0, 100 - priority)
                     combined = health.score * 0.7 + priority_score * 0.3

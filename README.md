@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/Python-3.13+-blue.svg" alt="Python"/>
   <img src="https://img.shields.io/badge/MCP-1.0-green.svg" alt="MCP"/>
   <img src="https://img.shields.io/badge/REST-v3.5.2-orange.svg" alt="REST"/>
-  <img src="https://img.shields.io/badge/Tools-129-orange.svg" alt="MCP Tools"/>
+  <img src="https://img.shields.io/badge/Tools-166-orange.svg" alt="MCP Tools"/>
   <img src="https://img.shields.io/badge/Endpoints-48-orange.svg" alt="REST Endpoints"/>
   <img src="https://img.shields.io/badge/License-Apache--2.0-yellow.svg" alt="License"/>
   <img src="https://img.shields.io/badge/Version-3.5.2-blue.svg" alt="Version"/>
@@ -22,7 +22,7 @@
 
 ## 项目介绍
 
-tradex-hub 是一个**本地运行的金融数据中台**，把分散在多个数据源（通达信、腾讯财经、东方财富、同花顺、新浪、巨潮、财联社、AKShare 等）的 A 股数据，统一封装成 **129 个 MCP 工具** + **48 个 REST 端点**，供 AI Agent（WorkBuddy / Claude Code / Cursor / Dify / LangChain）和前端看板（TradeX）一站式调用。
+tradex-hub 是一个**本地运行的金融数据中台**，把分散在多个数据源（通达信、腾讯财经、东方财富、同花顺、新浪、巨潮、财联社、AKShare 等）的 A 股数据，统一封装成 **166 个 MCP 工具** + **58 个 REST 端点**（2026-09-28 死源剥离后基线），供 AI Agent（WorkBuddy / Claude Code / Cursor / Dify / LangChain）和前端看板（TradeX）一站式调用。
 
 **核心定位**：让 AI Agent **不用关心数据从哪儿来、怎么反爬、怎么降级** —— 只管调一个统一接口，tradex-hub 自动选最优数据源、自动健康检查、自动故障隔离。
 
@@ -55,7 +55,7 @@ tradex-hub 是一个**本地运行的金融数据中台**，把分散在多个�
 │  协议层（双协议并存）                                            │
 │  ┌─────────────────────┐    ┌─────────────────────────────┐    │
 │  │  MCP Server         │    │  FastAPI REST               │    │
-│  │  129 个工具         │    │  48 个端点（/api/v1/*）      │    │
+│  │  166 个工具         │    │  58 个端点（/api/v1/*）      │    │
 │  └──────────┬──────────┘    └──────────────┬──────────────┘    │
 │             │                              │                    │
 │             └──────────┬───────────────────┘                    │
@@ -103,7 +103,7 @@ flowchart LR
     end
 
     subgraph Gateway["tradex-hub 网关 (端口 8000)"]
-        B1["MCP Server<br/>129 个工具<br/>JSON-RPC over HTTP"]
+        B1["MCP Server<br/>166 个工具<br/>JSON-RPC over HTTP"]
         B2["FastAPI REST<br/>48 个端点<br/>统一包裹响应"]
         B3["监控看板<br/>/dashboard<br/>Prometheus /metrics"]
         B1 -.共享.- B2
@@ -129,7 +129,7 @@ flowchart LR
 
 | 协议 | 适用场景 | 接口形态 |
 |------|----------|----------|
-| **MCP** | AI Agent 对话式调用（工具描述可被 LLM 理解） | JSON-RPC over HTTP，129 个工具 |
+| **MCP** | AI Agent 对话式调用（工具描述可被 LLM 理解） | JSON-RPC over HTTP，166 个工具 |
 | **REST** | 看板 / 外部系统 / 自定义脚本 | 标准 HTTP + JSON，48 端点，包裹响应 `{code, data, msg}` |
 
 两个协议返回的数据**完全一致**（仅序列化差异：MCP 返 JSON 字符串、REST 返包裹 dict），契约严格对齐。
@@ -190,8 +190,8 @@ python -m venv .venv
 .venv\Scripts\activate    # Windows
 # source .venv/bin/activate  # Linux/macOS
 
-# 安装依赖
-pip install -r tradex/src/requirements.txt
+# 安装依赖（可编辑安装，含 http 网关 extras）
+pip install -e "tradex[http]"
 
 # 启动网关（HTTP 模式，默认 8000 端口）
 python -m tradex --http
@@ -227,7 +227,7 @@ TDX_MCP_MIN_INTERVAL=0.8
 
 ---
 
-## MCP 工具清单（129 个）
+## MCP 工具清单（166 个）
 
 完整工具清单详见 [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md)。按业务领域分组：
 
@@ -340,7 +340,7 @@ if resp["code"] == 0:
 | `tradex_data_source_latency_seconds{source}` | Gauge | 数据源最近响应延迟（秒） |
 | `tradex_slow_queries_total` | Counter | 慢查询总数（超过 `TRADEX_SLOW_QUERY_MS` 默认 800ms） |
 | `tradex_gateway_uptime_seconds` | Gauge | 网关运行时长 |
-| `tradex_tools_registered` | Gauge | 已注册 MCP 工具数（129） |
+| `tradex_tools_registered` | Gauge | 已注册 MCP 工具数（166） |
 | `tradex_cache_hits_total` / `cache_misses_total` | Counter | 缓存命中 / 未命中 |
 
 ### Dashboard 监控看板
@@ -460,7 +460,7 @@ curl http://your-host:8000/api/v1/market/overview
 ```bash
 # 健康检查
 curl http://127.0.0.1:8000/health
-# 期望: {"status":"ok","service":"tradex-mcp","version":"3.5.0","tools":129}
+# 期望: {"status":"ok","service":"tradex-mcp","tools":166}
 
 # REST 端点
 curl http://127.0.0.1:8000/api/v1/ping
@@ -490,6 +490,7 @@ curl http://127.0.0.1:8000/mcp -X POST \
 
 | 版本 | 日期 | 关键里程碑 |
 |------|------|-----------|
+| **v3.6.0** | 2026-09-29 | 全项目代码审计（修复 47+ 处「异常吞成空表」、腾讯行情单位错标 P0、限流/代理直连化/健康分锁等 14 项）+ 死源剥离（上游已死的期权/指数/社融/LPR/互动 10 类型全链路移除，工具 176→166、端点 58）+ SDK 2.0.0（修命名碰撞、路径化方法名、59 端点重生成） |
 | **v3.5.2** | 2026-09-28 | 修复 fetch_market_overview_tencent 腾讯指数成交额错标：字段 37（万元）原样标「成交额(元)」，下游拿到数值差 1 万倍；现 ×1e4 换算为真元，与分类榜 amount_wan*1e4 口径对齐（实证 sh000001 → 8045.4 亿） |
 | **v3.5.1** | 2026-09-22 | 修复 stdio 模式 MCP 启动崩溃：`parse_allowed_hosts` 的 http 依赖延迟到 `--http` 分支加载，无 fastapi 也可正常启动 |
 | **v3.5.0** | 2026-09-19 | REST API 阶段二：可观测性（数据源健康实时埋点 + 端点 QPS/P95 + 慢查询日志）+ 并发安全（写操作切 SQLite + WAL + 自动迁移）+ 接入友好（三层限流 + 双语言 SDK + 访问日志双写） |

@@ -1,22 +1,21 @@
 """
-工具注册中心 — 支持自动发现和元数据管理。
+工具注册中心 — 自动发现与注册。
 
 设计原则：
   1. 自动发现：扫描 tools/ 目录下所有模块，无需手动导入
   2. 注册函数：每个工具模块导出 register(mcp) 函数，在其中用 @mcp.tool() 注册
-  3. 元数据管理：每个工具有分类、描述等元信息，支持按分类查询
 
-⚠️ v3.3.9 勘误：此前文档推荐 @register_tool 装饰器轨，但装饰器只把元数据
-写入 ToolRegistry._tools，discover_and_register 不会将其挂到 FastMCP——
-按装饰器轨写的新工具会静默消失。新增工具请一律使用 register(mcp) 函数轨：
+⚠️ 历史勘误（v3.3.9）：曾提供 @register_tool 装饰器轨把元数据写入
+ToolRegistry._tools，但 discover_and_register 不会将其挂到 FastMCP——
+按装饰器轨写的新工具会静默消失。2026-09-28 审计清理：该装饰器轨与
+元数据查询 API（get_by_category/get_all/get_categories）全库零使用，
+已整体删除。新增工具请一律使用 register(mcp) 函数轨：
 
     # 正确姿势（register 函数轨）
     def register(mcp):
         @mcp.tool()
         async def search_stock(keyword: str) -> str:
             ...
-
-装饰器 @register_tool 仅用于登记分类元数据，勿用于注册新工具。
 """
 
 from __future__ import annotations
@@ -24,74 +23,19 @@ from __future__ import annotations
 import importlib
 import logging
 import pkgutil
-from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class ToolMeta:
-    """工具元数据。
-
-    Attributes:
-        name: 工具名称（函数名）
-        category: 工具分类（L1-数据获取 / L2-计算引擎 / L3-决策支持 / 系统诊断）
-        description: 工具描述
-        handler: 工具处理函数
-    """
-
-    name: str
-    category: str
-    description: str
-    handler: Callable[..., Any]
-
-
 class ToolRegistry:
-    """工具注册中心。
-
-    管理所有通过装饰器注册的工具元数据，支持自动发现和分类查询。
-    与现有的 register(mcp) 函数模式共存，不影响向后兼容性。
-    """
-
-    _tools: dict[str, ToolMeta] = {}
-
-    @classmethod
-    def register(
-        cls,
-        category: str,
-        description: str,
-        name: Optional[str] = None,
-    ) -> Callable:
-        """装饰器：注册工具元数据。
-
-        Args:
-            category: 工具分类（L1-数据获取 / L2-计算引擎 / L3-决策支持 / 系统诊断）
-            description: 工具描述
-            name: 工具名称，默认使用函数名
-
-        Returns:
-            装饰器函数
-        """
-
-        def decorator(func: Callable) -> Callable:
-            tool_name = name or func.__name__
-            cls._tools[tool_name] = ToolMeta(
-                name=tool_name,
-                category=category,
-                description=description,
-                handler=func,
-            )
-            logger.debug("工具已注册: %s [%s]", tool_name, category)
-            return func
-
-        return decorator
+    """工具注册中心：扫描 tools/ 包并调用各模块的 register(mcp)。"""
 
     @classmethod
     def auto_discover(cls, tools_package: Any) -> None:
         """自动扫描 tools/ 目录下所有模块。
 
-        导入所有子模块，触发装饰器注册和 register(mcp) 函数收集。
+        导入所有子模块（含 signal_data_* 兼容子模块，触发其副作用/装饰器）。
 
         Args:
             tools_package: tools 包模块对象
@@ -111,8 +55,6 @@ class ToolRegistry:
     @classmethod
     def discover_and_register(cls, tools_package: Any, mcp: Any) -> list[str]:
         """自动发现所有工具模块并调用其 register(mcp) 函数。
-
-        兼容现有的 register(mcp) 函数模式，同时收集装饰器注册的元数据。
 
         Args:
             tools_package: tools 包模块对象
@@ -144,42 +86,3 @@ class ToolRegistry:
 
         logger.info("工具自动发现完成，共注册 %d 个模块", len(registered))
         return registered
-
-    @classmethod
-    def get_by_category(cls, category: str) -> list[ToolMeta]:
-        """按分类获取工具列表。
-
-        Args:
-            category: 工具分类
-
-        Returns:
-            该分类下所有工具的元数据列表
-        """
-        return [t for t in cls._tools.values() if t.category == category]
-
-    @classmethod
-    def get_all(cls) -> list[ToolMeta]:
-        """获取所有已注册工具。
-
-        Returns:
-            所有工具元数据列表
-        """
-        return list(cls._tools.values())
-
-    @classmethod
-    def get_categories(cls) -> list[str]:
-        """获取所有工具分类。
-
-        Returns:
-            去重后的分类列表
-        """
-        return list({t.category for t in cls._tools.values()})
-
-    @classmethod
-    def clear(cls) -> None:
-        """清空注册表（主要用于测试）。"""
-        cls._tools.clear()
-
-
-# 便捷别名
-register_tool = ToolRegistry.register

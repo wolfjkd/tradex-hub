@@ -120,7 +120,7 @@ def fetch_em_news_direct(symbol: str = "", code: str = "", **kwargs) -> pd.DataF
 
     except Exception as e:
         logger.warning("fetch_em_news_direct(%s) failed: %s", sym, e)
-        return pd.DataFrame()
+        raise  # 2026-09-28 审计修复：失败必须抛出，由 SmartRouter 记账降级（吞成空表会让降级链与健康分全部失效）
 
 
 def _parse_em_time(raw: str) -> str:
@@ -206,7 +206,7 @@ def fetch_cls_telegraph(num_results: int = 20, **kwargs) -> pd.DataFrame:
 
     except Exception as e:
         logger.warning("fetch_cls_telegraph failed: %s", e)
-        return pd.DataFrame()
+        raise  # 2026-09-28 审计修复：失败必须抛出，由 SmartRouter 记账降级（吞成空表会让降级链与健康分全部失效）
 
 
 # ============================================================
@@ -314,7 +314,7 @@ def fetch_cninfo_direct(
 
     except Exception as e:
         logger.warning("fetch_cninfo_direct(%s) failed: %s", sym or "all", e)
-        return pd.DataFrame()
+        raise  # 2026-09-28 审计修复：失败必须抛出，由 SmartRouter 记账降级（吞成空表会让降级链与健康分全部失效）
 
 
 def _resolve_org_id(symbol: str) -> str:
@@ -426,4 +426,4 @@ def fetch_sina_finance_news(num_results: int = 20, **kwargs) -> pd.DataFrame:
 
     except Exception as e:
         logger.warning("fetch_sina_finance_news failed: %s", e)
-        return pd.DataFrame()
+        raise  # 2026-09-28 审计修复：失败必须抛出，由 SmartRouter 记账降级（吞成空表会让降级链与健康分全部失效）

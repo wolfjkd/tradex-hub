@@ -459,7 +459,10 @@ class TestCalculateBoll:
                 assert m == s
 
     def test_upper_lower_formula(self):
-        """上轨 = 中轨 + k*std, 下轨 = 中轨 - k*std。"""
+        """上轨 = 中轨 + k*std, 下轨 = 中轨 - k*std（中轨为上下轨中点）。
+
+        容差 1e-3：u/m/l 各自 round(·,4)，中点恒等式在舍入后最大偏差 ~1e-4。
+        """
         closes = _gen_closes(30)
         out = _call(_TOOLS["calculate_boll"], closes, period=20, k=2.0)
         # 取最后一个有效点验证
@@ -468,9 +471,9 @@ class TestCalculateBoll:
         l = out["lower"][-1]
         # 半带宽
         half = (u - l) / 2
-        assert abs(m - half - l) < 1e-6 or abs(u - m - (m - l)) < 1e-6
+        assert abs(m - half - l) < 1e-3 or abs(u - m - (m - l)) < 1e-3
         # 中轨居中
-        assert abs((u + l) / 2 - m) < 1e-4
+        assert abs((u + l) / 2 - m) < 1e-3
 
     def test_leading_none_count(self):
         """前 period-1=19 个为 None。"""
@@ -569,12 +572,12 @@ class TestCalculateAtr:
 
 class TestStddev:
     def test_known_value(self):
-        """[1,2,3,4,5] 均值 3, 总体方差 2, 标准差 sqrt(2)。"""
-        assert ti._stddev([1, 2, 3, 4, 5], 3.0) == pytest.approx(math.sqrt(2), rel=1e-9)
+        """[1,2,3,4,5] 均值 3, 样本方差 2.5, 标准差 sqrt(2.5)（通达信 STD 口径，÷N-1）。"""
+        assert ti._stddev([1, 2, 3, 4, 5], 3.0) == pytest.approx(math.sqrt(2.5), rel=1e-9)
 
     def test_empty_returns_zero(self):
         assert ti._stddev([], 0.0) == 0.0
 
     def test_single_value_zero_std(self):
-        """单个值标准差为 0。"""
+        """单个值标准差为 0（样本口径 N<2 保护）。"""
         assert ti._stddev([5.0], 5.0) == 0.0

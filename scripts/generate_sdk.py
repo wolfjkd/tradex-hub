@@ -33,6 +33,10 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8000"
 
+# SDK 客户端版本：1.x = operationId 命名；2.0.0 = 2026-09-28 路径确定性命名
+# （修 company.search/news.stock 被遮蔽的碰撞 + 全端点覆盖，非 GET 加动词前缀）
+SDK_VERSION = "2.0.0"
+
 
 def fetch_openapi(base_url: str) -> dict[str, Any]:
     """从网关拉取 openapi.json。"""
@@ -48,6 +52,31 @@ def _to_camel(s: str) -> str:
     """snake_case → camelCase。"""
     parts = s.split("_")
     return parts[0] + "".join(p.capitalize() for p in parts[1:])
+
+
+def _endpoint_fn_name(path: str, method: str = "GET") -> str:
+    """路径 → 确定性 snake_case 方法名（2026-09-28 审计修复）。
+
+    旧实现取 operationId 第一段（`_api_v1_` 前缀），/company/search 与
+    /news/search 都生成 `search`、/news/stock 与 /diagnostic/stock 都生成
+    `stock`——后定义覆盖前者，company 搜索和 news/stock 在客户端不可达。
+    新实现用 /api/v1 之后的完整路径：/company/search → company_search，
+    路径参数段 {sid} → by_sid（如 /write/strategy/{sid} → write_strategy_by_sid）。
+    非 GET 方法加动词前缀（post_/put_/delete_/patch_），避免同一路径的
+    GET/PUT/DELETE 方法名互相覆盖。
+    """
+    parts: list[str] = []
+    for seg in path.split("/"):
+        if not seg or seg in ("api", "v1"):
+            continue
+        m = re.fullmatch(r"\{(\w+)\}", seg)
+        parts.append(f"by_{m.group(1)}" if m else seg)
+    name = "_".join(parts)
+    name = re.sub(r"\W", "_", name) or "root"
+    m = method.lower()
+    if m not in ("get", ""):
+        name = f"{m}_{name}"
+    return name
 
 
 def _parse_endpoint(path: str, method: str, op: dict) -> dict:
@@ -84,8 +113,7 @@ def _parse_endpoint(path: str, method: str, op: dict) -> dict:
 
 def _gen_ts_endpoint(endpoint: dict) -> list[str]:
     """生成单个端点的 TypeScript 方法。"""
-    op_id = endpoint["operation_id"]
-    fn_name = _to_camel(op_id.split("_api_v1_")[0] if "_api_v1_" in op_id else op_id)
+    fn_name = _to_camel(_endpoint_fn_name(endpoint["path"]))
     path = endpoint["path"]
     method = endpoint["method"]
     qparams = endpoint["query_params"]
@@ -166,11 +194,7 @@ def generate_typescript(endpoints: list[dict]) -> str:
 # ────────────────────── Python 生成 ──────────────────────────
 
 def _gen_py_endpoint(endpoint: dict) -> list[str]:
-    op_id = endpoint["operation_id"]
-    fn_name = (
-        op_id.split("_api_v1_")[0]
-        if "_api_v1_" in op_id else op_id
-    )
+    fn_name = _endpoint_fn_name(endpoint["path"], endpoint["method"])
     # Python 用 snake_case（保持与 OpenAPI 一致）
     path = endpoint["path"]
     method = endpoint["method"].lower()
@@ -211,12 +235,15 @@ def generate_python(endpoints: list[dict]) -> str:
         "import requests",
         "from typing import Any",
         "",
+        "__version__ = '" + SDK_VERSION + "'",
         "",
         "class TradexClient:",
         "    def __init__(self, base_url: str = 'http://127.0.0.1:8000', timeout: float = 30.0):",
         "        self.base_url = base_url.rstrip('/')",
         "        self.timeout = timeout",
         "        self._session = requests.Session()",
+        "        # 直连本地网关：requests 默认 trust_env=True 会读 HTTP(S)_PROXY",
+        "        self._session.trust_env = False",
         "",
         "    def _request(self, method: str, path: str, **kwargs) -> requests.Response:",
         "        url = self.base_url + path",
@@ -297,7 +324,7 @@ def _gen_readme(sdk_dir: Path, endpoints: list[dict]) -> None:
     parts.append("```typescript\n")
     parts.append("import { TradexClient } from './tradex-sdk';\n\n")
     parts.append("const client = new TradexClient('http://127.0.0.1:8000');\n")
-    parts.append("// 函数名从 operationId 提取第一段（如 quote_api_v1_price_quote_get → quote）\n")
+    parts.append("// 函数名由路径确定性生成（如 /api/v1/price/quote → priceQuote，无碰撞）\n")
     parts.append("const result = await client.quote(query={ symbol: '600519' });\n")
     parts.append("console.log(result.data.quote);\n")
     parts.append("```\n\n")

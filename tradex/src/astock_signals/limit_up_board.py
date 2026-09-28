@@ -10,6 +10,10 @@ import logging
 
 import requests as _requests
 
+# 铁律：国内接口直连。requests 默认 trust_env=True 会读 HTTP(S)_PROXY。
+_session = _requests.Session()
+_session.trust_env = False
+
 from .anti_ban_client import em_get
 
 logger = logging.getLogger(__name__)
@@ -178,7 +182,7 @@ def get_limit_up_insight(code: str = "") -> dict:
         url = "https://data.10jqka.com.cn/dataapi/limit_up/limit_up_detail"
         params = {"code": code} if code else {}
         headers = {"User-Agent": _UA}
-        r = _requests.get(url, params=params, headers=headers, timeout=10)
+        r = _session.get(url, params=params, headers=headers, timeout=10)
         data = r.json()
         if data.get("code", 0) != 0:
             result["error"] = data.get("msg", "unknown error")

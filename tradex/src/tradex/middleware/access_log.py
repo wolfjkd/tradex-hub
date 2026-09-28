@@ -172,14 +172,13 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         duration_ms = (time.time() - start) * 1000.0
 
-        # 尝试读取 response body 提取业务 code（不消耗响应流）
+        # 提取业务 code（2026-09-28 审计修复：此前 response_code 恒为 0，审计列无价值）。
+        # JSONResponse 的 body 已渲染为 bytes（.body 属性），可直接解析；
+        # 流式响应没有 .body，保持默认 0，不读 body_iterator 以免消耗响应流。
         response_code = 0
-        try:
-            # 对 starlette Response，body_iterator 只能读一次
-            # 这里我们不读 body 避免破坏响应；接受 response_code=0 的默认值
-            pass
-        except Exception:
-            pass
+        body = getattr(response, "body", None)
+        if isinstance(body, (bytes, bytearray)):
+            response_code = _extract_response_code(bytes(body))
 
         record = {
             "timestamp": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),

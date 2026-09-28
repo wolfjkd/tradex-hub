@@ -91,7 +91,7 @@ def fetch_earnings_forecast(
 
     except Exception as e:
         logger.warning("fetch_earnings_forecast(%s) failed: %s", sym, e)
-        return pd.DataFrame()
+        raise  # 2026-09-28 审计修复：失败必须抛出，由 SmartRouter 记账降级（吞成空表会让降级链与健康分全部失效）
 
 
 # ============================================================
@@ -159,7 +159,7 @@ def fetch_institution_survey(
 
     except Exception as e:
         logger.warning("fetch_institution_survey(%s) failed: %s", sym, e)
-        return pd.DataFrame()
+        raise  # 2026-09-28 审计修复：失败必须抛出，由 SmartRouter 记账降级（吞成空表会让降级链与健康分全部失效）
 
 
 # ============================================================
@@ -227,7 +227,7 @@ def fetch_holder_trades(
 
     except Exception as e:
         logger.warning("fetch_holder_trades(%s) failed: %s", sym, e)
-        return pd.DataFrame()
+        raise  # 2026-09-28 审计修复：失败必须抛出，由 SmartRouter 记账降级（吞成空表会让降级链与健康分全部失效）
 
 
 # ============================================================
@@ -282,7 +282,7 @@ def fetch_share_buyback(
 
     except Exception as e:
         logger.warning("fetch_share_buyback(%s) failed: %s", sym, e)
-        return pd.DataFrame()
+        raise  # 2026-09-28 审计修复：失败必须抛出，由 SmartRouter 记账降级（吞成空表会让降级链与健康分全部失效）
 
 
 # ============================================================
@@ -336,7 +336,7 @@ def fetch_equity_pledge(
 
     except Exception as e:
         logger.warning("fetch_equity_pledge(%s) failed: %s", sym, e)
-        return pd.DataFrame()
+        raise  # 2026-09-28 审计修复：失败必须抛出，由 SmartRouter 记账降级（吞成空表会让降级链与健康分全部失效）
 
 
 # ============================================================
@@ -390,4 +390,4 @@ def fetch_ipo_calendar(
 
     except Exception as e:
         logger.warning("fetch_ipo_calendar failed: %s", e)
-        return pd.DataFrame()
+        raise  # 2026-09-28 审计修复：失败必须抛出，由 SmartRouter 记账降级（吞成空表会让降级链与健康分全部失效）

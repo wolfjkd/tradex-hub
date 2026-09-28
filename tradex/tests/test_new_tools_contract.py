@@ -36,21 +36,19 @@ def _get_tool_fn(mcp_instance, name: str):
 
 
 class TestNewToolsRegistration:
-    """33 个新工具全部成功注册到 mcp。"""
+    """23 个新工具全部成功注册到 mcp。
+
+    2026-09-28 死源剥离：etf_option(2) / index_tracking(3) /
+    investor_interaction(2) / macro_official 的 social+repo+lpr(3) 共 10 个
+    工具已随上游死源移除。
+    """
 
     NEW_TOOLS = [
-        # etf_option.py (2)
-        "get_etf_option_tquote", "get_etf_option_greeks",
         # event_driven.py (6)
         "get_earnings_forecast", "get_institution_survey", "get_holder_trades",
         "get_share_buyback", "get_equity_pledge", "get_ipo_calendar",
-        # index_tracking.py (3)
-        "get_index_constituents", "get_index_weights", "get_index_valuation",
-        # macro_official.py (5)
-        "get_social_financing", "get_pmi", "get_bond_yield_curve_official",
-        "get_repo_fixing_rate", "get_lpr_history",
-        # investor_interaction.py (2)
-        "get_cninfo_irm", "get_sse_e_interaction",
+        # macro_official.py (2)
+        "get_pmi", "get_bond_yield_curve_official",
         # global_market_news.py (3)
         "get_wallstreetcn_lives", "get_macro_calendar", "get_cctv_news",
         # sw_industry_history.py (2)
@@ -148,21 +146,3 @@ class TestExchangeOfficialToolsContract:
                 f"工具不应返回 error: {data}"
 
 
-class TestEtfOptionToolsContract:
-    """etf_option 工具 mock。"""
-
-    def test_tquote_mock(self):
-        from mcp.server.fastmcp import FastMCP
-        from tradex.tools.etf_option import register
-        mcp = FastMCP("test_option")
-        register(mcp)
-        fn = _get_tool_fn(mcp, "get_etf_option_tquote")
-        with patch("tradex.tools.etf_option._router") as mock_r:
-            mock_r.route.return_value = (
-                pd.DataFrame([{"合约": "50ETF购1月2700"}]),
-                "sina_option",
-            )
-            result = asyncio.run(fn(underlying="510050"))
-            data = json.loads(result)
-            assert not (isinstance(data, dict) and data.get("error")), \
-                f"工具不应返回 error: {data}"

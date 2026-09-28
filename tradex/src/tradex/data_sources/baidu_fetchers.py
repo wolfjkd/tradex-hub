@@ -142,4 +142,4 @@ def fetch_baidu_kline_with_ma(
 
     except Exception as e:
         logger.warning("fetch_baidu_kline_with_ma(%s) failed: %s", sym, e)
-        return pd.DataFrame()
+        raise  # 2026-09-28 审计修复：失败必须抛出，由 SmartRouter 记账降级（吞成空表会让降级链与健康分全部失效）

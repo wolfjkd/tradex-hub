@@ -112,7 +112,7 @@ def fetch_wallstreetcn_lives(
 
     except Exception as e:
         logger.warning("fetch_wallstreetcn_lives(%s) failed: %s", channel, e)
-        return pd.DataFrame()
+        raise  # 2026-09-28 审计修复：失败必须抛出，由 SmartRouter 记账降级（吞成空表会让降级链与健康分全部失效）
 
 
 # ============================================================
@@ -185,4 +185,4 @@ def fetch_macro_calendar(
 
     except Exception as e:
         logger.warning("fetch_macro_calendar failed: %s", e)
-        return pd.DataFrame()
+        raise  # 2026-09-28 审计修复：失败必须抛出，由 SmartRouter 记账降级（吞成空表会让降级链与健康分全部失效）

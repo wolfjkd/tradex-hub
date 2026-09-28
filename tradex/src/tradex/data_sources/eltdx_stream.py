@@ -157,6 +157,7 @@ class EltdxStreamManager:
                         result[code] = None
             except Exception as exc:  # noqa: BLE001
                 logger.error("eltdx stream subscribe snapshot failed: %s", exc)
+                self._reset_connection()
                 for code in norm_codes:
                     result[code] = None
         return result
@@ -179,6 +180,7 @@ class EltdxStreamManager:
             page = client.quotes.refresh(target, cursors=cursors)
         except Exception as exc:  # noqa: BLE001
             logger.error("eltdx stream poll failed: %s", exc)
+            self._reset_connection()
             return {}
 
         records = _records_map(page)
@@ -201,6 +203,7 @@ class EltdxStreamManager:
             page = client.quotes.refresh(norm_codes, cursors={})
         except Exception as exc:  # noqa: BLE001
             logger.error("eltdx stream snapshot failed: %s", exc)
+            self._reset_connection()
             return {}
         records = _records_map(page)
         return {c: _record_to_dict(records[c]) for c in norm_codes if c in records}
@@ -246,6 +249,25 @@ class EltdxStreamManager:
         if self._started and self._client is not None:
             return True
         return self.start()
+
+    def _reset_connection(self) -> None:
+        """连接疑似失效：丢弃客户端并清空游标，下次 _ensure_started 自动重建。
+
+        2026-09-28 审计修复：此前 _started=True 后无任何重建路径，底层连接
+        硬断后 poll/snapshot 永远返回空/None（与「无变化」不可区分），
+        五档看板静默退化为永久无数据直到进程重启。清空游标使重连后
+        首次 refresh 走 cursor=0 全量，避免用断线前的旧游标漏数据。
+        """
+        with self._lock:
+            client, self._client = self._client, None
+            self._started = False
+            self._cursors.clear()
+        if client is not None:
+            try:
+                client.close()
+            except Exception:  # noqa: BLE001
+                pass
+            logger.warning("eltdx stream connection reset (will reconnect on next call)")
 
     def _update_cursor(self, code: str, rec: Any) -> None:
         new_cursor = getattr(rec, "update_time_raw", None)

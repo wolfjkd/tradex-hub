@@ -1,7 +1,7 @@
 """工单 T35 测试：数据源注册与降级（registry 层）。
 
 验证：
-- 新数据类型已注册（114 类型 / 156 源实例）
+- 新数据类型已注册（2026-09-28 死源剥离后：105 类型 / 145 源实例）
 - 各类型至少有 1 个源
 - 关键类型支持主备双源（如 historical_kline 应有 ≥3 个源）
 - 已注册类型的优先级字段合法
@@ -24,18 +24,15 @@ class TestRegistryCompleteness:
     """新增的数据类型必须全部已注册。"""
 
     NEW_TYPES = [
-        # 期权
-        "etf_option_tquote", "etf_option_greeks",
+        # 期权：2026-09-28 死源剥离（新浪 OptionService 下线），etf_option_* 移除
         # 事件驱动
         "earnings_forecast", "institution_survey", "holder_trades",
         "share_buyback", "equity_pledge", "ipo_calendar",
-        # 指数追踪
-        "index_constituents", "index_weights", "index_valuation",
-        # 官方宏观
-        "social_financing", "pmi_data", "bond_yield_curve",
-        "repo_fixing_rate", "lpr_history",
-        # 投资者互动
-        "cninfo_irm", "sse_e_interaction",
+        # 指数追踪：2026-09-28 死源剥离（zealink DNS 失效 + 国证 404），index_* 移除
+        # 官方宏观：2026-09-28 死源剥离（人行 404 / 货币网 404），
+        #   social_financing / repo_fixing_rate / lpr_history 移除
+        "pmi_data", "bond_yield_curve",
+        # 投资者互动：2026-09-28 死源剥离（互动易 500 / e互动 404）移除
         # 全球新闻
         "wallstreetcn_lives", "macro_calendar", "cctv_news_main",
         # 申万行业
@@ -61,16 +58,18 @@ class TestRegistryCompleteness:
         missing = [t for t in self.NEW_TYPES if t not in r._sources]
         assert not missing, f"未注册的数据类型: {missing}"
 
-    def test_total_data_types_at_least_114(self):
+    def test_total_data_types_at_least_105(self):
+        """2026-09-28 死源剥离后基线：105 类型（原 ≥114）。"""
         from tradex.data_sources import get_router
         r = get_router()
-        assert len(r._sources) >= 114, f"数据类型数 {len(r._sources)} < 114"
+        assert len(r._sources) >= 105, f"数据类型数 {len(r._sources)} < 105"
 
-    def test_total_source_instances_at_least_156(self):
+    def test_total_source_instances_at_least_145(self):
+        """2026-09-28 死源剥离后基线：145 源实例（原 ≥156）。"""
         from tradex.data_sources import get_router
         r = get_router()
         total = sum(len(v) for v in r._sources.values())
-        assert total >= 156, f"源实例数 {total} < 156"
+        assert total >= 145, f"源实例数 {total} < 145"
 
 
 class TestBackupSourceChains:

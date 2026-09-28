@@ -78,10 +78,15 @@ def _ema(closes: list[float], period: int) -> list[float]:
 
 
 def _stddev(values: list[float], mean: float) -> float:
-    """总体标准差。"""
-    if len(values) == 0:
+    """样本标准差（÷N-1，通达信 STD 口径；2026-09-28 审计修正）。
+
+    此前实现除以 N（总体标准差），与通达信/同花顺 BOLL 的 STD（估算样本
+    标准差）系统性偏差 √((N-1)/N)（N=20 时窄约 2.5%）。N<2 时返回 0。
+    """
+    n = len(values)
+    if n < 2:
         return 0.0
-    variance = sum((v - mean) ** 2 for v in values) / len(values)
+    variance = sum((v - mean) ** 2 for v in values) / (n - 1)
     return math.sqrt(variance)
 
 
@@ -180,7 +185,7 @@ def _boll_values(
     period: int = 20,
     k: float = 2.0,
 ) -> dict[str, list[float | None]]:
-    """布林带（BOLL）：中轨 SMA + k 倍总体标准差，前 period-1 个为 None。
+    """布林带（BOLL）：中轨 SMA + k 倍样本标准差（通达信 STD 口径），前 period-1 个为 None。
 
     另含 bandwidth = (上轨-下轨)/中轨 与 percent_b = (收盘-下轨)/(上轨-下轨)。
     """

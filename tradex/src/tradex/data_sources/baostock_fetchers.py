@@ -97,8 +97,8 @@ def fetch_baostock_valuation_history(
         raise ValueError("stock code is required")
 
     if not _ensure_login():
-        logger.warning("baostock unavailable; valuation_history returns empty")
-        return pd.DataFrame()
+        # 2026-09-28 审计修复：库缺失/登录失败属源故障，必须抛出让路由记账降级
+        raise RuntimeError("baostock unavailable (not installed or login failed)")
 
     bs_code = _normalize_to_baostock(sym)
     if bs_code is None:
@@ -120,8 +120,7 @@ def fetch_baostock_valuation_history(
             frequency="d",
         )
         if rs.error_code != "0":
-            logger.warning("baostock query failed: %s", rs.error_msg)
-            return pd.DataFrame()
+            raise RuntimeError(f"baostock query failed: {rs.error_msg}")
 
         rows = []
         while rs.next():
@@ -145,7 +144,7 @@ def fetch_baostock_valuation_history(
 
     except Exception as e:
         logger.warning("fetch_baostock_valuation_history(%s) failed: %s", sym, e)
-        return pd.DataFrame()
+        raise
 
 
 # ============================================================
@@ -169,7 +168,7 @@ def fetch_baostock_delisting_date(
         raise ValueError("stock code is required")
 
     if not _ensure_login():
-        return pd.DataFrame()
+        raise RuntimeError("baostock unavailable (not installed or login failed)")
 
     bs_code = _normalize_to_baostock(sym)
     if bs_code is None:
@@ -178,7 +177,7 @@ def fetch_baostock_delisting_date(
     try:
         rs = bs.query_stock_basic(code=bs_code)
         if rs.error_code != "0":
-            return pd.DataFrame()
+            raise RuntimeError(f"baostock query failed: {rs.error_msg}")
 
         rows = []
         while rs.next():
@@ -198,7 +197,7 @@ def fetch_baostock_delisting_date(
 
     except Exception as e:
         logger.warning("fetch_baostock_delisting_date(%s) failed: %s", sym, e)
-        return pd.DataFrame()
+        raise
 
 
 # ============================================================
@@ -214,13 +213,13 @@ def fetch_baostock_st_list(**kwargs) -> pd.DataFrame:
         DataFrame with columns: 代码, 名称, 上市日期
     """
     if not _ensure_login():
-        return pd.DataFrame()
+        raise RuntimeError("baostock unavailable (not installed or login failed)")
 
     try:
         # baostock 查询全部 A 股
         rs = bs.query_stock_basic()
         if rs.error_code != "0":
-            return pd.DataFrame()
+            raise RuntimeError(f"baostock query failed: {rs.error_msg}")
 
         rows = []
         while rs.next():
@@ -240,7 +239,7 @@ def fetch_baostock_st_list(**kwargs) -> pd.DataFrame:
 
     except Exception as e:
         logger.warning("fetch_baostock_st_list failed: %s", e)
-        return pd.DataFrame()
+        raise
 
 
 def cleanup() -> None:

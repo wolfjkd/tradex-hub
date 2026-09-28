@@ -4,12 +4,13 @@
 提供以下 fetcher（均使用 curl_cffi 直连新浪财经 HTTP 接口）：
   - fetch_sina_research_reports:    新浪研报列表（个股或全市场翻页）
   - fetch_sina_fund_flow:           新浪日度资金流（东财资金流被封时降级）
-  - fetch_sina_option_tquote:       新浪 ETF 期权 T 型报价
-  - fetch_sina_option_greeks:       新浪 ETF 期权希腊字母 + IV
+
+2026-09-28 死源剥离（老板拍板）：新浪 ETF 期权 T 型报价 / 希腊字母两个
+fetcher 已随上游 OptionService 下线（Service not found）一并移除。
 
 设计原则：
   - 每个 fetch_fn 接受 **kwargs，返回 DataFrame（统一格式）
-  - 失败时返回空 DataFrame，不抛异常（容错设计）
+  - 失败时抛异常由 SmartRouter 记账降级（v3.3.15 起约定，2026-09-28 审计统一）
   - 仅使用 curl_cffi（requests 兼容层），不引入其他第三方依赖
   - 与东财系完全独立上游，作为 priority=100/200 备源使用
 
@@ -113,7 +114,7 @@ def fetch_sina_research_reports(
 
     except Exception as e:
         logger.warning("fetch_sina_research_reports(%s) failed: %s", sym, e)
-        return pd.DataFrame()
+        raise  # 2026-09-28 审计修复：失败必须抛出，由 SmartRouter 记账降级（吞成空表会让降级链与健康分全部失效）
 
 
 # ============================================================
@@ -232,131 +233,15 @@ def fetch_sina_fund_flow(
 
     except Exception as e:
         logger.warning("fetch_sina_fund_flow(%s) failed: %s", sym, e)
-        return pd.DataFrame()
+        raise  # 2026-09-28 审计修复：失败必须抛出，由 SmartRouter 记账降级（吞成空表会让降级链与健康分全部失效）
 
 
 # ============================================================
 # 新浪 ETF 期权 T 型报价 — sina_option_tquote
 # ============================================================
 
-def fetch_sina_option_tquote(
-    underlying: str = "510050",
-    **kwargs,
-) -> pd.DataFrame:
-    """新浪财经 ETF 期权 T 型报价直连。
-
-    返回指定标的的所有合约的实时报价（买卖五档 / 持仓量 / 行权价 / 最新价）。
-    作为 etf_option_tquote 的主源（新浪期权接口稳定且零鉴权）。
-
-    Args:
-        underlying: 标的代码，默认 "510050"（50ETF），可选 "510300"（300ETF）/"159919"（嘉实 300）
-
-    Returns:
-        DataFrame with columns: 合约代码, 合约名称, 最新价, 行权价, 持仓量,
-                                买一价, 卖一价, 买一量, 卖一量, 类型(认沽/认购), 到期月份
-    """
-    try:
-        # 新浪期权 T 型报价接口
-        url = "https://stock.finance.sina.com.cn/futures/api/openapi.php/OptionService.getOptionT"
-        params = {
-            "underlying": underlying,
-        }
-        headers = {
-            "User-Agent": _UA,
-            "Referer": "https://stock.finance.sina.com.cn/",
-            "Accept": "*/*",
-        }
-        resp = curl_requests.get(
-            url, params=params, headers=headers, timeout=_TIMEOUT, impersonate="chrome120"
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        opt_data = data.get("result", {}).get("data", {}).get("option", [])
-        if not opt_data:
-            return pd.DataFrame()
-
-        rows = []
-        for it in opt_data:
-            rows.append({
-                "合约代码": (it.get("symbol") or "").strip(),
-                "合约名称": (it.get("name") or "").strip(),
-                "最新价": float(it.get("price") or 0),
-                "行权价": float(it.get("strike") or 0),
-                "持仓量": float(it.get("open_interest") or 0),
-                "买一价": float(it.get("bid") or 0),
-                "卖一价": float(it.get("ask") or 0),
-                "买一量": float(it.get("bid_vol") or 0),
-                "卖一量": float(it.get("ask_vol") or 0),
-                "类型": "认购" if (it.get("call_put") == "C" or it.get("type") == "call") else "认沽",
-                "到期月份": (it.get("expire_month") or "").strip(),
-            })
-        if not rows:
-            return pd.DataFrame()
-        df = pd.DataFrame(rows)
-        df = df[df["合约代码"] != ""].reset_index(drop=True)
-        return df
-
-    except Exception as e:
-        logger.warning("fetch_sina_option_tquote(%s) failed: %s", underlying, e)
-        return pd.DataFrame()
-
 
 # ============================================================
 # 新浪 ETF 期权希腊字母 + IV — sina_option_greeks
 # ============================================================
 
-def fetch_sina_option_greeks(
-    underlying: str = "510050",
-    **kwargs,
-) -> pd.DataFrame:
-    """新浪财经 ETF 期权希腊字母 + 隐含波动率直连。
-
-    返回 Delta / Gamma / Theta / Vega / Rho / IV 等希腊字母。
-    作为 etf_option_greeks 的主源。
-
-    Args:
-        underlying: 标的代码，默认 "510050"
-
-    Returns:
-        DataFrame with columns: 合约代码, 合约名称, Delta, Gamma, Theta, Vega, Rho, IV(隐含波动率)
-    """
-    try:
-        url = "https://stock.finance.sina.com.cn/futures/api/openapi.php/OptionService.getGreeks"
-        params = {
-            "underlying": underlying,
-        }
-        headers = {
-            "User-Agent": _UA,
-            "Referer": "https://stock.finance.sina.com.cn/",
-            "Accept": "*/*",
-        }
-        resp = curl_requests.get(
-            url, params=params, headers=headers, timeout=_TIMEOUT, impersonate="chrome120"
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        greeks_data = data.get("result", {}).get("data", {}).get("greeks", [])
-        if not greeks_data:
-            return pd.DataFrame()
-
-        rows = []
-        for it in greeks_data:
-            rows.append({
-                "合约代码": (it.get("symbol") or "").strip(),
-                "合约名称": (it.get("name") or "").strip(),
-                "Delta": float(it.get("delta") or 0),
-                "Gamma": float(it.get("gamma") or 0),
-                "Theta": float(it.get("theta") or 0),
-                "Vega": float(it.get("vega") or 0),
-                "Rho": float(it.get("rho") or 0),
-                "IV": float(it.get("iv") or 0),
-            })
-        if not rows:
-            return pd.DataFrame()
-        df = pd.DataFrame(rows)
-        df = df[df["合约代码"] != ""].reset_index(drop=True)
-        return df
-
-    except Exception as e:
-        logger.warning("fetch_sina_option_greeks(%s) failed: %s", underlying, e)
-        return pd.DataFrame()

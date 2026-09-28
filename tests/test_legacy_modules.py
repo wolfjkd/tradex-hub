@@ -32,15 +32,6 @@ class TestLockupModule:
         assert has_key, f"Unexpected keys: {list(result.keys())}"
 
 
-class TestConceptModule:
-    """概念归属模块测试（仅测导入和签名）。"""
-
-    def test_import_and_call_signature(self):
-        from astock_signals.concept import get_concept_blocks, get_concept_blocks_json
-        assert callable(get_concept_blocks)
-        assert callable(get_concept_blocks_json)
-
-
 class TestIndicatorsModule:
     """技术指标模块测试。"""
 

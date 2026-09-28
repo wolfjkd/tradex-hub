@@ -41,8 +41,7 @@ def _tencent_quote_vals(code: str) -> list:
     if sym[:2] in ("sh", "sz", "bj"):
         query = sym
     else:
-        prefix = "sh" if sym.startswith("6") else "sz"
-        query = prefix + sym
+        query = _a_share_prefix(sym) + sym
     url = f"https://qt.gtimg.cn/q={query}"
     resp = _urlopen_no_proxy(url, timeout=5)
     raw = resp.read().decode("gbk")
@@ -70,13 +69,18 @@ def fetch_realtime_quote_tencent(symbol: str = "", code: str = "", **kwargs):
         "最新价": float(vals[3]) if vals[3] else 0,
         "涨跌幅": float(vals[32]) if len(vals) > 32 and vals[32] else 0,
         "成交量": float(vals[36]) if len(vals) > 36 and vals[36] else 0,
-        "成交额": float(vals[37]) if len(vals) > 37 and vals[37] else 0,
+        # 腾讯字段 37 单位=万元（2026-09-28 实证 sh600519：348872万≈34.9亿），
+        # 与本文件 fetch_market_overview_tencent / fetch_category_quotes_tencent
+        # 同款换算，出口统一为元（与 eltdx/akshare 主源口径一致）。
+        "成交额": float(vals[37]) * 1e4 if len(vals) > 37 and vals[37] else 0,
         "最高": float(vals[33]) if len(vals) > 33 and vals[33] else 0,
         "最低": float(vals[34]) if len(vals) > 34 and vals[34] else 0,
         "今开": float(vals[5]) if len(vals) > 5 and vals[5] else 0,
         "昨收": float(vals[4]) if len(vals) > 4 and vals[4] else 0,
-        "总市值": float(vals[45]) if len(vals) > 45 and vals[45] else 0,
-        "流通市值": float(vals[44]) if len(vals) > 44 and vals[44] else 0,
+        # 腾讯字段 44/45 单位=亿元（实证 sh600519：15549.52 亿≈1.55 万亿），
+        # 换算为元与 akshare/em 主源口径一致。
+        "总市值": float(vals[45]) * 1e8 if len(vals) > 45 and vals[45] else 0,
+        "流通市值": float(vals[44]) * 1e8 if len(vals) > 44 and vals[44] else 0,
         "市盈率": float(vals[39]) if len(vals) > 39 and vals[39] else 0,
     }])
 
@@ -110,12 +114,18 @@ def fetch_profit_forecast_tencent(symbol: str = "", code: str = "", **kwargs) ->
 # ============================================================
 
 _TENCENT_BATCH = 80   # 腾讯单次批量请求的代码数（控制 URL 长度）
-_A_SHARE_PREFIX = {"6": "sh", "5": "sh", "9": "sh"}  # 其余默认 sz
+# 北交所前缀：腾讯 qt.gtimg.cn 实测支持 bj430047 / bj920002（2026-09-28 直连验证）
+_BJ_PREFIXES = ("4", "8", "92")
 
 
 def _a_share_prefix(code: str) -> str:
-    """6 位 A 股代码 → 腾讯前缀（sh/sz）。688/600/601/603/605/5/9 → sh，其余 sz。"""
-    if code.startswith(("6", "5", "9", "900")):
+    """6 位 A 股代码 → 腾讯前缀（sh/sz/bj）。
+
+    sh: 60/68/5/9/11（转债）；sz: 00/30/12/15/16/18；bj: 43/83-88/920。
+    """
+    if code.startswith(_BJ_PREFIXES):
+        return "bj"
+    if code.startswith(("6", "5", "9", "11")):
         return "sh"
     return "sz"
 
@@ -398,74 +408,3 @@ def fetch_market_overview_tencent(**kwargs) -> pd.DataFrame:
     except Exception as e:
         logger.warning("fetch_market_overview_tencent failed: %s", e)
         raise
-
-
-def fetch_market_breadth(**kwargs) -> pd.DataFrame:
-    """全市场实时涨跌家数/涨跌停（东财 push2ex 涨跌分布，直连实时）。
-
-    Returns:
-        DataFrame columns: 上涨 / 下跌 / 平盘 / 涨停 / 跌停
-    """
-    from tradex.data_sources.em_client import em_get
-
-    url = "https://push2ex.eastmoney.com/getTopicZDFenBu"
-    params = {"ut": "7eea3edcaed734bea9cbfc24409ed989", "dpt": "wz.ztzt"}
-    resp = em_get(url, params=params, timeout=15)
-    resp.raise_for_status()
-    fenbu = resp.json()["data"]["fenbu"]
-    up = down = flat = limit_up = limit_down = 0
-    for item in fenbu:
-        for k, v in item.items():
-            k = int(k)
-            v = int(v)
-            if k > 0:
-                up += v
-            elif k < 0:
-                down += v
-            else:
-                flat += v
-            if k >= 10:
-                limit_up += v
-            if k <= -10:
-                limit_down += v
-    return pd.DataFrame([{"上涨": up, "下跌": down, "平盘": flat, "涨停": limit_up, "跌停": limit_down}])
-
-
-def fetch_industry_quotes(**kwargs) -> pd.DataFrame:
-    """行业板块实时涨幅（东财 push2 主源，失败降级 push2delay 镜像）。
-
-    Returns:
-        DataFrame columns: 板块名称 / 涨跌幅 / 领涨股票 / 领涨股票涨跌幅 / 上涨家数 / 下跌家数
-    """
-    from tradex.data_sources.em_client import em_get
-
-    params = {
-        "pn": "1", "pz": "100", "po": "1", "np": "1",
-        "ut": "bd1d9ddb04089700cf9c27f6f7426281", "fltt": "2", "invt": "2",
-        "fid": "f3", "fs": "m:90 t:2 f:!50",
-        "fields": "f12,f14,f2,f3,f104,f105,f128,f136",
-    }
-    # 主源 push2（实时、常封），备源 push2delay（稳定、延迟几分钟）
-    for host in ("https://push2.eastmoney.com", "https://push2delay.eastmoney.com"):
-        try:
-            resp = em_get(f"{host}/api/qt/clist/get", params=params, timeout=15)
-            resp.raise_for_status()
-            diff = resp.json().get("data", {}).get("diff", [])
-            rows = []
-            for item in diff:
-                pct = item.get("f3")
-                if pct is None or pct == "-":
-                    continue
-                rows.append({
-                    "板块名称": item.get("f14", ""),
-                    "涨跌幅": float(pct),
-                    "领涨股票": item.get("f128", ""),
-                    "领涨股票涨跌幅": float(item.get("f136", 0) or 0),
-                    "上涨家数": int(item.get("f104", 0) or 0),
-                    "下跌家数": int(item.get("f105", 0) or 0),
-                })
-            rows.sort(key=lambda x: x["涨跌幅"], reverse=True)
-            return pd.DataFrame(rows)
-        except Exception as e:  # noqa: BLE001
-            logger.warning("fetch_industry_quotes %s failed: %s", host, e)
-    raise RuntimeError("fetch_industry_quotes all sources failed")

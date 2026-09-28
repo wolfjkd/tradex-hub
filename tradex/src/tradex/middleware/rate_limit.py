@@ -87,7 +87,15 @@ class RateLimiter:
     - global_bucket：单例，所有请求共享
     - ip_buckets：dict[client_ip, TokenBucket]
     - endpoint_buckets：dict[(path, method), TokenBucket]
+
+    2026-09-28 审计修复：桶字典此前只增不减（每个新 IP/新带参路径永久占内存，
+    可被低成本撑大），且端点桶按原始路径建桶（/write/strategy/{sid} 的每个
+    sid 各享 120/min，换 sid 扫库完全绕过限流）。现按模板归一化路径 + 容量
+    上限 + 空闲桶淘汰。
     """
+
+    # 桶字典容量上限：超过后按最近使用时间淘汰（防内存被刷爆）
+    _MAX_BUCKETS = 10_000
 
     def __init__(
         self,
@@ -103,9 +111,18 @@ class RateLimiter:
         self._endpoint_buckets: dict[tuple[str, str], TokenBucket] = {}
         self._lock = threading.Lock()
 
+    def _evict_if_needed(self, buckets: dict) -> None:
+        """桶数超上限时淘汰最久未使用的 10%（consume 会刷新 last_refill，可当 LRU 时钟）。"""
+        if len(buckets) <= self._MAX_BUCKETS:
+            return
+        keep = max(1, self._MAX_BUCKETS // 10)
+        for key, _ in sorted(buckets.items(), key=lambda kv: kv[1].last_refill)[:-keep or None]:
+            buckets.pop(key, None)
+
     def _get_ip_bucket(self, client_ip: str) -> TokenBucket:
         with self._lock:
             if client_ip not in self._ip_buckets:
+                self._evict_if_needed(self._ip_buckets)
                 self._ip_buckets[client_ip] = TokenBucket(
                     capacity=self.ip_limit, refill_rate=self.ip_limit / 60.0
                 )
@@ -115,6 +132,7 @@ class RateLimiter:
         with self._lock:
             key = (path, method)
             if key not in self._endpoint_buckets:
+                self._evict_if_needed(self._endpoint_buckets)
                 self._endpoint_buckets[key] = TokenBucket(
                     capacity=self.endpoint_limit, refill_rate=self.endpoint_limit / 60.0
                 )
@@ -171,6 +189,23 @@ def reset_limiter() -> None:
         _limiter = None
 
 
+def normalize_path(path: str) -> str:
+    """把带路径参数的 URL 归一为限流模板（/write/strategy/abc-123 → /write/strategy/{param}）。
+
+    中间件在路由之前执行，拿不到 route 模板，只能启发式判定：
+    纯数字段（股票代码/ID）或超长段（uuid/session id）视为路径参数。
+    """
+    segs = []
+    for seg in path.split("/"):
+        if not seg:
+            continue
+        if seg.isdigit() or len(seg) >= 20:
+            segs.append("{param}")
+        else:
+            segs.append(seg)
+    return "/" + "/".join(segs)
+
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """限流中间件 —— 拦截 /api/v1/* 请求按三层令牌桶判断。
 
@@ -186,9 +221,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         client_ip = request.client.host if request.client else ""
         method = request.method
+        # 端点桶按归一化模板建桶，防「换 sid 扫库」绕过限流
+        endpoint_path = normalize_path(path)
 
         limiter = get_limiter()
-        allowed, retry_after, failed_layer = limiter.check(client_ip, path, method)
+        allowed, retry_after, failed_layer = limiter.check(client_ip, endpoint_path, method)
         if not allowed:
             # 构造限流响应
             from tradex.api.schemas import ERR_RATE_LIMIT

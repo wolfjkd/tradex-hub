@@ -1,6 +1,10 @@
 [tool.pytest.ini_options]
 testpaths = ["tests", "tradex/tests"]
 addopts = "-v --tb=short"
+# 2026-09-28 审计修复：tradex/pyproject.toml 有 asyncio_mode="auto" 但根配置没有，
+# 两套测试合并运行（rootdir=仓库根）时 async MCP 工具测试全部报
+# "async def functions are not natively supported"，与 testpaths 的合并意图矛盾。
+asyncio_mode = "auto"
 markers = [
     "network: marks tests that require network access (deselect with '-m \"not network\"')",
 ]

@@ -3,13 +3,13 @@
 路径前缀：/api/v1（由 http_server.py 挂载时加上）。
 
 端点：
-- GET /macro/social-financing         人行社融
 - GET /macro/pmi                      统计局 PMI
 - GET /macro/bond-yield-curve         中债收益率曲线
-- GET /macro/repo-fixing-rate         中国货币网回购定盘
-- GET /macro/lpr                      LPR 历史
 - GET /macro/sw-industry-history      申万行业变迁史
 - GET /macro/sw-industry-as-of        按 (code, date) 查询申万行业归属
+
+2026-09-28 死源剥离（老板拍板）：/macro/social-financing（人行 404）、
+/macro/repo-fixing-rate 与 /macro/lpr（货币网静态 json 404）已随死源移除。
 """
 
 from __future__ import annotations
@@ -43,17 +43,6 @@ def _data_source_error(e: Exception):
     )
 
 
-@router.get("/social-financing", response_model=Envelope[dict])
-def social_financing(
-    year: int = Query(0, ge=0, description="年份，默认 0 = 当前年"),
-) -> Envelope[dict]:
-    """人行社融数据。"""
-    try:
-        return envelope_ok(macro_service.get_social_financing(year=year))
-    except Exception as e:
-        raise _data_source_error(e)
-
-
 @router.get("/pmi", response_model=Envelope[dict])
 def pmi() -> Envelope[dict]:
     """统计局 PMI。"""
@@ -70,28 +59,6 @@ def bond_yield_curve(
     """中债收益率曲线。"""
     try:
         return envelope_ok(macro_service.get_bond_yield_curve(curve=curve))
-    except Exception as e:
-        raise _data_source_error(e)
-
-
-@router.get("/repo-fixing-rate", response_model=Envelope[dict])
-def repo_fixing_rate(
-    kind: str = Query("FR", description="定盘类型：FR/Shibor"),
-) -> Envelope[dict]:
-    """中国货币网回购定盘利率。"""
-    try:
-        return envelope_ok(macro_service.get_repo_fixing_rate(kind=kind))
-    except Exception as e:
-        raise _data_source_error(e)
-
-
-@router.get("/lpr", response_model=Envelope[dict])
-def lpr(
-    years_back: int = Query(5, ge=1, le=30),
-) -> Envelope[dict]:
-    """LPR 历史。"""
-    try:
-        return envelope_ok(macro_service.get_lpr_history(years_back=years_back))
     except Exception as e:
         raise _data_source_error(e)
 

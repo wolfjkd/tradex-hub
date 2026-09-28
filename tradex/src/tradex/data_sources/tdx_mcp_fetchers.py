@@ -80,7 +80,8 @@ class TDXMCPClient:
     _client: httpx.Client = field(default=None, init=False, repr=False)
 
     def __post_init__(self):
-        self._client = httpx.Client(timeout=self.timeout)
+        # 铁律：国内接口直连。httpx 默认 trust_env=True 会读 HTTP(S)_PROXY 环境变量。
+        self._client = httpx.Client(timeout=self.timeout, trust_env=False)
         self._initialized = False  # initialize 握手只做一次的标志
 
     @property

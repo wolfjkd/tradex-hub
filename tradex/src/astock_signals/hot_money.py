@@ -16,6 +16,11 @@ import logging
 
 import requests as _requests
 
+# 铁律：国内接口直连。requests 默认 trust_env=True 会读 HTTP(S)_PROXY，
+# 与 http_fetchers/ths_fetchers 的直连约定保持一致。
+_session = _requests.Session()
+_session.trust_env = False
+
 logger = logging.getLogger(__name__)
 
 _UA = (
@@ -45,7 +50,7 @@ def get_hot_stocks(curr_date: str = "") -> str:
             f"date/{curr_date}/orderby/date/orderway/desc/charset/GBK/"
         )
         headers = {"User-Agent": _UA}
-        r = _requests.get(url, headers=headers, timeout=10)
+        r = _session.get(url, headers=headers, timeout=10)
         data = r.json()
 
         if data.get("errocode", 0) != 0:
@@ -116,7 +121,7 @@ def get_hot_stocks_json(curr_date: str = "") -> dict:
             f"date/{curr_date}/orderby/date/orderway/desc/charset/GBK/"
         )
         headers = {"User-Agent": _UA}
-        r = _requests.get(url, headers=headers, timeout=10)
+        r = _session.get(url, headers=headers, timeout=10)
         data = r.json()
 
         if data.get("errocode", 0) != 0:

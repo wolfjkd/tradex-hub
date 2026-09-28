@@ -88,11 +88,14 @@ class TestSDKArtifacts:
         assert client.base_url == "http://127.0.0.1:8000"
 
     def test_python_sdk_has_core_methods(self):
-        """Python SDK 应含核心方法（ping + quote）。"""
+        """Python SDK 应含核心方法（ping + price_quote）。
+
+        2026-09-28 起方法名由路径确定性生成（/api/v1/price/quote → price_quote）。
+        """
         init_path = _SDK_DIR / "python" / "tradex_client" / "__init__.py"
         content = init_path.read_text(encoding="utf-8")
         assert "def ping(" in content
-        assert "def quote(" in content
+        assert "def price_quote(" in content
 
     def test_readme_has_both_sdks(self):
         """README 应同时含 TypeScript 和 Python 章节。"""

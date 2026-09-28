@@ -146,7 +146,10 @@ class TestIndependentBackupSources:
         #                  concept_attribution:em_push2delay、market_breadth:em_push2ex、
         #                  limit_up_board:em_push2_clist、stock_boards:em_slist、
         #                  news_data:em_news_direct 由 P1 降级保留但类型计数不变）
-        assert len(router.get_registry_report()) == 100
+        #           → 157（SP-2026-09-23/25 数据源大扩充 + v3.3.15 备源补齐）
+        #           → 145（2026-09-28 死源剥离：新浪期权 2 + 中证/国证 5 +
+        #                  货币网 2 + 人行 1 + 互动 2，共 12 个注册点移除）
+        assert len(router.get_registry_report()) == 145
 
     def test_unsupported_endpoint_raises(self):
         """备源只覆盖部分 endpoint，其余必须显式报错而非静默返回空。"""

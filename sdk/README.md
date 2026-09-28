@@ -13,7 +13,7 @@ cp -r sdk/typescript ./your-project/tradex-sdk
 import { TradexClient } from './tradex-sdk';
 
 const client = new TradexClient('http://127.0.0.1:8000');
-// 函数名从 operationId 提取第一段（如 quote_api_v1_price_quote_get → quote）
+// 函数名由路径确定性生成（如 /api/v1/price/quote → priceQuote，无碰撞）
 const result = await client.quote(query={ symbol: '600519' });
 console.log(result.data.quote);
 ```
@@ -33,7 +33,7 @@ result = client.quote(query={'symbol': '600519'})
 print(result['data']['quote'])
 ```
 
-## 端点列表（46 个）
+## 端点列表（59 个）
 
 | Method | Path | Summary |
 |--------|------|---------|
@@ -83,3 +83,16 @@ print(result['data']['quote'])
 | DELETE | `/api/v1/write/watchlist/{symbol}` | Remove From Watchlist |
 | GET | `/api/v1/metrics/json` | Metrics Json |
 | GET | `/api/v1/metrics/slow-queries` | Slow Queries |
+| GET | `/api/v1/access-log` | List Access Log |
+| GET | `/api/v1/event/earnings-forecast` | Earnings Forecast |
+| GET | `/api/v1/event/institution-survey` | Institution Survey |
+| GET | `/api/v1/event/holder-trades` | Holder Trades |
+| GET | `/api/v1/event/share-buyback` | Share Buyback |
+| GET | `/api/v1/event/equity-pledge` | Equity Pledge |
+| GET | `/api/v1/event/ipo-calendar` | Ipo Calendar |
+| GET | `/api/v1/macro/pmi` | Pmi |
+| GET | `/api/v1/macro/bond-yield-curve` | Bond Yield Curve |
+| GET | `/api/v1/macro/sw-industry-history` | Sw Industry History |
+| GET | `/api/v1/macro/sw-industry-as-of` | Sw Industry As Of |
+| GET | `/api/v1/industry-news/get` | Get News |
+| GET | `/api/v1/industry-news/tracks` | Tracks |

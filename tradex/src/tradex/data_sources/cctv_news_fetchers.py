@@ -81,7 +81,7 @@ def fetch_cctv_news(
                 items = [(it.get("url", ""), it.get("title", ""), it.get("time", ""))
                          for it in (data.get("data") or [])]
             except Exception:
-                return pd.DataFrame()
+                raise  # 2026-09-28 审计修复：失败必须抛出，由 SmartRouter 记账降级（吞成空表会让降级链与健康分全部失效）
 
         rows = []
         for link, title, time_str in items:
@@ -120,4 +120,4 @@ def fetch_cctv_news(
 
     except Exception as e:
         logger.warning("fetch_cctv_news(%s) failed: %s", date, e)
-        return pd.DataFrame()
+        raise  # 2026-09-28 审计修复：失败必须抛出，由 SmartRouter 记账降级（吞成空表会让降级链与健康分全部失效）

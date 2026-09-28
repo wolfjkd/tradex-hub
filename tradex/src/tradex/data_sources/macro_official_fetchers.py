@@ -2,15 +2,16 @@
 官方宏观数据源 fetch_fn 包装器（人行/统计局/中债/中国货币网）。
 
 提供以下 fetcher：
-  - fetch_pboc_social_financing:     人民银行社融数据
-  - fetch_nbs_pmi:                   国家统计局 PMI
+  - fetch_nbs_pmi:                   国家统计局 PMI（2026-09-28 动态化）
   - fetch_chinabond_yield_curve:     中债国债/信用债收益率曲线
-  - fetch_repo_fixing_rates:         中国货币网回购定盘利率
-  - fetch_lpr_history:               LPR 历史
+
+2026-09-28 死源剥离（老板拍板）：pboc 社融（404）/ 货币网回购定盘 + LPR
+（静态 json 404）上游已死且无备源，fetcher 与注册点一并移除，测试 skip 记录在案。
 
 设计原则：
   - 全部官方一手数据（人行/统计局/中债/中国货币网），与 akshare(抓东财聚合) 上游独立
-  - 失败时返回空 DataFrame，不抛异常
+  - 失败必须抛出（v3.3.15 起约定，2026-09-28 审计统一）：由 SmartRouter 记账降级，
+    吞成空表会让降级链与健康分全部失效
 
 借鉴：simonlin1212/a-stock-data 的 §11 宏观与利率层实现思路。
 """
@@ -36,55 +37,27 @@ _TIMEOUT = 20
 # 人行社融 — pboc_social_financing
 # ============================================================
 
-def fetch_pboc_social_financing(
-    year: int = 0,
-    **kwargs,
-) -> pd.DataFrame:
-    """人民银行社融数据（月度 12 列）。
-
-    Args:
-        year: 年份，默认当前年
-
-    Returns:
-        DataFrame with columns: 月份, 社融规模增量(万亿), 人民币贷款(万亿), ...
-    """
-    if not year:
-        year = datetime.now().year
-
-    try:
-        url = f"http://www.pbc.gov.cn/diaochatongjisi/116219/116319/{year}/{year}.html"
-        headers = {
-            "User-Agent": _UA,
-            "Referer": "http://www.pbc.gov.cn/",
-            "Accept": "*/*",
-        }
-        resp = curl_requests.get(
-            url, headers=headers, timeout=_TIMEOUT, impersonate="chrome120"
-        )
-        resp.raise_for_status()
-        # 人行页面是 HTML，需要解析表格
-        try:
-            tables = pd.read_html(io.StringIO(resp.text))
-        except ValueError:
-            return pd.DataFrame()
-        if not tables:
-            return pd.DataFrame()
-
-        # 通常第一个表是月度增量表
-        df = tables[0]
-        return df.head(15)  # 取前 15 行
-
-    except Exception as e:
-        logger.warning("fetch_pboc_social_financing(%d) failed: %s", year, e)
-        return pd.DataFrame()
-
 
 # ============================================================
 # 国家统计局 PMI — nbs_pmi
 # ============================================================
 
+# 统计局「最新发布」列表页：每月 PMI 发布稿 URL 无固定地址，从这里动态定位
+_NBS_LATEST_URL = "https://www.stats.gov.cn/sj/zxfb/"
+_NBS_HEADERS = {
+    "User-Agent": _UA,
+    "Referer": "https://www.stats.gov.cn/",
+    "Accept": "*/*",
+}
+
+
 def fetch_nbs_pmi(**kwargs) -> pd.DataFrame:
     """国家统计局 PMI（制造业 + 非制造业）。
+
+    2026-09-28 审计修复：此前硬编码 2024-02-29 发布稿 URL，两年后仍把单期
+    陈旧数据当实时结果返回。现改为两跳：先抓「最新发布」列表页定位最新一期
+    《中国采购经理指数运行情况》，再进发布稿解析表格（2026-09-28 实测列表页
+    可程序化解析，最新稿为 2026-08-31 发布）。
 
     注意：统计局页面有全角括号 + 内带空格，需要清理。
 
@@ -92,14 +65,29 @@ def fetch_nbs_pmi(**kwargs) -> pd.DataFrame:
         DataFrame with columns: 月份, 制造业PMI, 非制造业PMI
     """
     try:
-        url = "http://www.stats.gov.cn/sj/zxfb/202402/t20240229_1947915.html"
-        headers = {
-            "User-Agent": _UA,
-            "Referer": "http://www.stats.gov.cn/",
-            "Accept": "*/*",
-        }
+        list_resp = curl_requests.get(
+            _NBS_LATEST_URL, headers=_NBS_HEADERS, timeout=_TIMEOUT,
+            impersonate="chrome120",
+        )
+        list_resp.raise_for_status()
+        hits = re.findall(
+            r'href="([^"]+)"[^>]*>([^<]*采购经理指数运行情况[^<]*)<',
+            list_resp.text,
+        )
+        if not hits:
+            raise RuntimeError("stats.gov.cn 最新发布页未找到采购经理指数发布稿")
+        href = hits[0][0]
+        if href.startswith("./"):
+            url = "https://www.stats.gov.cn/sj/zxfb/" + href[2:]
+        elif href.startswith("http"):
+            url = href
+        elif href.startswith("/"):
+            url = "https://www.stats.gov.cn" + href
+        else:
+            url = "https://www.stats.gov.cn/sj/zxfb/" + href
+
         resp = curl_requests.get(
-            url, headers=headers, timeout=_TIMEOUT, impersonate="chrome120"
+            url, headers=_NBS_HEADERS, timeout=_TIMEOUT, impersonate="chrome120"
         )
         resp.raise_for_status()
         text = resp.text
@@ -110,14 +98,14 @@ def fetch_nbs_pmi(**kwargs) -> pd.DataFrame:
         try:
             tables = pd.read_html(io.StringIO(text))
         except ValueError:
-            return pd.DataFrame()
+            raise  # 解析失败属源故障，抛出由 SmartRouter 记账降级
         if not tables:
             return pd.DataFrame()
         return tables[0].head(20)
 
     except Exception as e:
         logger.warning("fetch_nbs_pmi failed: %s", e)
-        return pd.DataFrame()
+        raise  # 2026-09-28 审计修复：失败必须抛出，由 SmartRouter 记账降级（吞成空表会让降级链与健康分全部失效）
 
 
 # ============================================================
@@ -167,7 +155,7 @@ def fetch_chinabond_yield_curve(
                     return tables[0].head(15)
             except ValueError:
                 pass
-            return pd.DataFrame()
+            raise  # 2026-09-28 审计修复：失败必须抛出，由 SmartRouter 记账降级（吞成空表会让降级链与健康分全部失效）
 
         items = data.get("data") or []
         if not items:
@@ -185,109 +173,15 @@ def fetch_chinabond_yield_curve(
 
     except Exception as e:
         logger.warning("fetch_chinabond_yield_curve(%s) failed: %s", curve, e)
-        return pd.DataFrame()
+        raise  # 2026-09-28 审计修复：失败必须抛出，由 SmartRouter 记账降级（吞成空表会让降级链与健康分全部失效）
 
 
 # ============================================================
 # 回购定盘利率 — repo_fixing_rates
 # ============================================================
 
-def fetch_repo_fixing_rates(
-    kind: str = "FR",  # FR / FDR
-    **kwargs,
-) -> pd.DataFrame:
-    """中国货币网回购定盘利率（FR001/FR007/FR014 或 FDR001/FDR007/FDR014）。
-
-    Returns:
-        DataFrame with columns: 日期, FR001, FR007, FR014
-    """
-    try:
-        indicator = "FDR" if kind.upper() == "FDR" else "FR"
-        url = "https://www.chinamoney.com.cn/r/cms/www/chinamoney/data/fd/fixed-reference-rate.json"
-        params = {
-            "lang": "CN",
-            "indicator": indicator,
-        }
-        headers = {
-            "User-Agent": _UA,
-            "Referer": "https://www.chinamoney.com.cn/",
-            "Accept": "application/json",
-        }
-        resp = curl_requests.get(
-            url, params=params, headers=headers, timeout=_TIMEOUT, impersonate="chrome120"
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        items = data.get("records") or data.get("data") or []
-        if not items:
-            return pd.DataFrame()
-
-        rows = []
-        for it in items:
-            rows.append({
-                "日期": (it.get("date") or "").strip(),
-                "FR001": float(it.get("rate1") or it.get("FR001") or 0),
-                "FR007": float(it.get("rate2") or it.get("FR007") or 0),
-                "FR014": float(it.get("rate3") or it.get("FR014") or 0),
-            })
-        if not rows:
-            return pd.DataFrame()
-        return pd.DataFrame(rows)
-
-    except Exception as e:
-        logger.warning("fetch_repo_fixing_rates(%s) failed: %s", kind, e)
-        return pd.DataFrame()
-
 
 # ============================================================
 # LPR 历史 — lpr_history
 # ============================================================
 
-def fetch_lpr_history(
-    years_back: int = 5,
-    **kwargs,
-) -> pd.DataFrame:
-    """LPR（贷款市场报价利率）历史（1 年 + 5 年），来自中国货币网。
-
-    Returns:
-        DataFrame with columns: 日期, 1年期LPR(%), 5年期LPR(%)
-    """
-    try:
-        url = "https://www.chinamoney.com.cn/r/cms/www/chinamoney/data/fd/lpr-historical.json"
-        headers = {
-            "User-Agent": _UA,
-            "Referer": "https://www.chinamoney.com.cn/chinese/bk-lpr/",
-            "Accept": "application/json",
-        }
-        resp = curl_requests.get(
-            url, headers=headers, timeout=_TIMEOUT, impersonate="chrome120"
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        items = data.get("records") or data.get("data") or []
-        if not items:
-            return pd.DataFrame()
-
-        cutoff_year = datetime.now().year - years_back
-        rows = []
-        for it in items:
-            date_str = (it.get("date") or "").strip()
-            try:
-                year = int(date_str.split("-")[0])
-            except (ValueError, IndexError):
-                continue
-            if year < cutoff_year:
-                continue
-            rows.append({
-                "日期": date_str,
-                "1年期LPR(%)": float(it.get("rate1") or it.get("lpr1") or 0),
-                "5年期LPR(%)": float(it.get("rate2") or it.get("lpr5") or 0),
-            })
-        if not rows:
-            return pd.DataFrame()
-        df = pd.DataFrame(rows).sort_values("日期", ascending=False).reset_index(drop=True)
-        return df
-
-    except Exception as e:
-        logger.warning("fetch_lpr_history failed: %s", e)
-        return pd.DataFrame()

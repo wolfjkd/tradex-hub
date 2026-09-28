@@ -18,6 +18,10 @@ from datetime import datetime
 
 import requests as _requests
 
+# 铁律：国内接口直连。requests 默认 trust_env=True 会读 HTTP(S)_PROXY。
+_session = _requests.Session()
+_session.trust_env = False
+
 logger = logging.getLogger(__name__)
 
 _HSGT_HEADERS = {
@@ -106,7 +110,7 @@ def get_northbound_flow(
 
     try:
         url_rt = "https://data.hexin.cn/market/hsgtApi/method/dayChart/"
-        r = _requests.get(url_rt, headers=_HSGT_HEADERS, timeout=10)
+        r = _session.get(url_rt, headers=_HSGT_HEADERS, timeout=10)
         d = r.json()
 
         times = d.get("time", [])
@@ -196,7 +200,7 @@ def get_northbound_flow_json(
 
     try:
         url_rt = "https://data.hexin.cn/market/hsgtApi/method/dayChart/"
-        r = _requests.get(url_rt, headers=_HSGT_HEADERS, timeout=10)
+        r = _session.get(url_rt, headers=_HSGT_HEADERS, timeout=10)
         d = r.json()
 
         times = d.get("time", [])

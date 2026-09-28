@@ -24,7 +24,11 @@ logger = __import__("logging").getLogger("tradex.em")
 EM_MIN_INTERVAL = 1.0
 
 # v3.3.9+：限流时间戳加锁保护——多线程同时穿透间隔会导致并发请求数超风控阈值封 IP。
-_em_last_call = [0.0]
+# 2026-09-28 审计修复：改为「锁内取号、锁外发请求」（与 anti_ban_client 同款）。
+# 此前整个网络请求（timeout 可达 20s+）都在锁内执行，一个慢请求会让所有
+# em 系 fetcher 在锁内排队，还没发出就撞上 SmartRouter 12s 路由超时被误判
+# 为源失败（单个慢请求放大为整个东财 datacenter 家族连锁误降级）。
+_em_next_slot = [0.0]  # 下一个允许发出的时刻（取号制，保证请求起始间隔 ≥1s）
 _em_throttle_lock = threading.Lock()
 _EM_SESSION = _rq.Session()
 
@@ -37,57 +41,24 @@ def em_get(url: str, params: dict | None = None, headers: dict | None = None,
            timeout: int = 15, **kwargs):
     """东财统一请求入口：自动节流 + 复用 session + 默认 UA。
 
-    节流检查与时间戳更新在同一把锁内完成（含 sleep），
-    保证任意时刻只有一个请求在"检查-等待-发出"临界区，
-    多线程并发调用时严格维持 ≥EM_MIN_INTERVAL 的实际间隔。
+    锁内只做「取号」：预订下一个允许发出的时刻，保证多线程下请求起始
+    间隔严格 ≥ EM_MIN_INTERVAL；等待与网络请求都在锁外执行，慢请求
+    不会阻塞其他线程取号。
     """
+    h = {"User-Agent": _UA, "Referer": _REFERER}
+    if headers:
+        h.update(headers)
     with _em_throttle_lock:
-        wait = EM_MIN_INTERVAL - (time.time() - _em_last_call[0])
-        if wait > 0:
-            time.sleep(wait + random.uniform(0.1, 0.5))
-        h = {"User-Agent": _UA, "Referer": _REFERER}
-        if headers:
-            h.update(headers)
-        try:
-            resp = _EM_SESSION.get(url, params=params, headers=h, timeout=timeout,
-                                   impersonate="chrome120", **kwargs)
-        finally:
-            _em_last_call[0] = time.time()
-    return resp
+        now = time.time()
+        start_at = max(now, _em_next_slot[0])
+        _em_next_slot[0] = start_at + EM_MIN_INTERVAL
+    lead = start_at - time.time()
+    if lead > 0:
+        time.sleep(lead + random.uniform(0.1, 0.5))
+    return _EM_SESSION.get(url, params=params, headers=h, timeout=timeout,
+                           impersonate="chrome120", **kwargs)
 
 
-def fetch_stock_boards(code: str, **kwargs) -> pd.DataFrame:
-    """个股所属板块/概念归属（东财 slist，一次请求拿全行业/概念/地域 + 龙头股）。
-
-    Returns:
-        DataFrame columns: 板块名称 / 板块代码(BK) / 涨跌幅 / 领涨股票
-    """
-    code = str(code).split(".")[0].split("_")[0]  # 归一纯 6 位
-    market_code = 1 if code.startswith("6") else 0
-    params = {
-        "fltt": "2", "invt": "2",
-        "secid": f"{market_code}.{code}",
-        "spt": "3", "pi": "0", "pz": "200", "po": "1",
-        "fields": "f12,f14,f3,f128",
-    }
-    r = em_get("https://push2.eastmoney.com/api/qt/slist/get", params=params, timeout=15)
-    r.raise_for_status()
-    diff = (r.json().get("data") or {}).get("diff") or {}
-    items = diff.values() if isinstance(diff, dict) else diff
-    rows = []
-    for it in items:
-        rows.append({
-            "板块名称": it.get("f14", ""),
-            "板块代码": it.get("f12", ""),
-            "涨跌幅": it.get("f3", ""),
-            "领涨股票": it.get("f128", ""),
-        })
-    return pd.DataFrame(rows)
-
-
-# ============================================================
-# 公共辅助函数（datacenter 字段映射通用工具）
-# ============================================================
 
 def _to_float(v) -> float | None:
     """datacenter 数值字段安全转 float（None/空字符串/无效值都返回 None）。"""

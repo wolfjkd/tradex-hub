@@ -1,22 +1,23 @@
 """
-astock_signals — A-stock signal data modules (独立包 v1.1.1).
+astock_signals — A-stock signal data modules (独立包 v2.0.0).
 
 TradingAgents-astock 移植层。提供以下核心能力:
   - anti_ban_client:  东财防封客户端（节流+Session复用）
   - lockup:           限售解禁日历（RPT_LIFT_STAGE）
   - hot_money:        涨停归因/热点资金追踪（同花顺 editorial）
-  - concept:          概念板块归属（东财 push2delay）
   - indicators:       技术指标计算（MACD/RSI/Boll/ATR 等）
   - northbound:       北向资金流向（沪深股通，同花顺 hsgtApi）
-  - fund_flow:        个股资金流向（东财 push2）
   - dragon_tiger:     龙虎榜席位明细（东财 datacenter）
-  - industry:         行业横向对比（东财 push2 行业排名）
+  - limit_up_board:   涨停四池/打板情绪（东财 push2ex + 同花顺）
 
 V0.3 — 新增 ETF / 可转债 2 个品种模块 + 智能路由 / Tick存储 / WebSocket 3 个基础设施模块。
 
-模块清单（14个）:
-  - anti_ban_client / lockup / hot_money / concept / indicators
-  - northbound / fund_flow / dragon_tiger / industry  (V0.2)
+2026-09-28 审计清理：fund_flow / concept / industry 三个 push2 时代模块已删
+（东财 push2 域名族 2026-09-23 起被风控退役，三模块自彼时起零生产消费）。
+
+模块清单（12个）:
+  - anti_ban_client / lockup / hot_money / indicators / northbound
+  - dragon_tiger / limit_up_board
   - etf / convertible_bond  (V0.3 新品种)
   - smart_router / tick_store / ws_server  (V0.3 基础设施)
 """
@@ -35,7 +36,6 @@ from .anti_ban_client import (
 
 from .lockup import get_lockup_expiry, get_lockup_expiry_json
 from .hot_money import get_hot_stocks, get_hot_stocks_json
-from .concept import get_concept_blocks, get_concept_blocks_json
 from .indicators import (
     get_supported_indicators,
     get_indicator_description,
@@ -43,9 +43,7 @@ from .indicators import (
     get_indicators_text,
 )
 from .northbound import get_northbound_flow, get_northbound_flow_json
-from .fund_flow import get_fund_flow, get_fund_flow_json
 from .dragon_tiger import get_dragon_tiger_board, get_dragon_tiger_board_json
-from .industry import get_industry_comparison, get_industry_comparison_json
 from .limit_up_board import (
     get_limit_up_pool,
     get_break_board_pool,
@@ -79,9 +77,6 @@ __all__ = [
     # hot_money
     "get_hot_stocks",
     "get_hot_stocks_json",
-    # concept
-    "get_concept_blocks",
-    "get_concept_blocks_json",
     # indicators
     "get_supported_indicators",
     "get_indicator_description",
@@ -90,15 +85,9 @@ __all__ = [
     # northbound
     "get_northbound_flow",
     "get_northbound_flow_json",
-    # fund_flow
-    "get_fund_flow",
-    "get_fund_flow_json",
     # dragon_tiger
     "get_dragon_tiger_board",
     "get_dragon_tiger_board_json",
-    # industry
-    "get_industry_comparison",
-    "get_industry_comparison_json",
     # etf (lazy loaded)
     "get_etf_realtime",
     "get_etf_realtime_json",
@@ -159,4 +148,4 @@ def __getattr__(name):
     raise AttributeError(f"module 'astock_signals' has no attribute '{name}'")
 
 # astock_signals 独立包,版本号独立维护
-__version__ = "1.1.1"
+__version__ = "2.0.0"

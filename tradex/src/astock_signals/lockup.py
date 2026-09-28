@@ -123,6 +123,11 @@ def get_lockup_expiry_json(
     """
     code = ticker.strip()
     result = {"code": code, "trade_date": trade_date, "history": [], "upcoming": []}
+    # 2026-09-28 审计修复：此前查询失败只写 *_error 键后正常 return，
+    # 独占源挂掉时被伪装成「无解禁」，SmartRouter 还记成功。改为：
+    # 单边失败保留 partial 数据 + 错误键；双边全失败 raise 让路由记账。
+    history_error: str | None = None
+    upcoming_error: str | None = None
 
     try:
         history_data = em_datacenter(
@@ -140,7 +145,7 @@ def get_lockup_expiry_json(
                 "ratio": row.get("FREE_RATIO", ""),
             })
     except Exception as e:
-        result["history_error"] = str(e)
+        history_error = str(e)
 
     try:
         end_dt = datetime.strptime(trade_date, "%Y-%m-%d") + pd.Timedelta(
@@ -173,6 +178,15 @@ def get_lockup_expiry_json(
         result["total_upcoming_ratio"] = round(total_ratio, 2)
         result["risk_warning"] = total_ratio > 5
     except Exception as e:
-        result["upcoming_error"] = str(e)
+        upcoming_error = str(e)
 
+    if history_error is not None and upcoming_error is not None:
+        raise RuntimeError(
+            f"lockup_expiry both queries failed: "
+            f"history: {history_error}; upcoming: {upcoming_error}"
+        )
+    if history_error is not None:
+        result["history_error"] = history_error
+    if upcoming_error is not None:
+        result["upcoming_error"] = upcoming_error
     return result

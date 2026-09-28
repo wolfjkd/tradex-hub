@@ -10,7 +10,8 @@ class TestAstockSignalsInit:
 
     def test_import_version(self):
         import astock_signals
-        assert astock_signals.__version__ == "1.1.1"
+        # v2.0.0（2026-09-29 死源剥离）：fund_flow/concept/industry 三模块移除，MAJOR bump
+        assert astock_signals.__version__ == "2.0.0"
 
     def test_import_anti_ban_client(self):
         from astock_signals import em_get, em_datacenter, em_push2

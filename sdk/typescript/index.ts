@@ -22,7 +22,7 @@ export class TradexClient {
   }
 
   /** Overview */
-  async overview(): Promise<any> {
+  async marketOverview(): Promise<any> {
     const url = `/api/v1/market/overview`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -30,7 +30,7 @@ export class TradexClient {
   }
 
   /** Global Quote */
-  async globalQuote(query: { category?: string }): Promise<any> {
+  async marketGlobal(query: { category?: string }): Promise<any> {
     const url = `/api/v1/market/global?${new URLSearchParams({category: query.category}).toString()}`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -38,7 +38,7 @@ export class TradexClient {
   }
 
   /** Limit Up Down */
-  async limitUpDown(query: { direction?: string }): Promise<any> {
+  async marketLimitUpDown(query: { direction?: string }): Promise<any> {
     const url = `/api/v1/market/limit-up-down?${new URLSearchParams({direction: query.direction}).toString()}`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -46,7 +46,7 @@ export class TradexClient {
   }
 
   /** Dragon Tiger */
-  async dragonTiger(query: { numDays?: integer }): Promise<any> {
+  async marketDragonTiger(query: { numDays?: integer }): Promise<any> {
     const url = `/api/v1/market/dragon-tiger?${new URLSearchParams({num_days: query.numDays}).toString()}`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -54,7 +54,7 @@ export class TradexClient {
   }
 
   /** Flow */
-  async flow(query: { symbol: string }): Promise<any> {
+  async fundFlow(query: { symbol: string }): Promise<any> {
     const url = `/api/v1/fund/flow?${new URLSearchParams({symbol: query.symbol}).toString()}`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -62,7 +62,7 @@ export class TradexClient {
   }
 
   /** Northbound */
-  async northbound(): Promise<any> {
+  async fundNorthbound(): Promise<any> {
     const url = `/api/v1/fund/northbound`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -70,7 +70,7 @@ export class TradexClient {
   }
 
   /** Quote */
-  async quote(query: { symbol: string }): Promise<any> {
+  async priceQuote(query: { symbol: string }): Promise<any> {
     const url = `/api/v1/price/quote?${new URLSearchParams({symbol: query.symbol}).toString()}`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -78,7 +78,7 @@ export class TradexClient {
   }
 
   /** Kline */
-  async kline(query: { symbol: string; period?: string; startDate?: string; endDate?: string; adjust?: string }): Promise<any> {
+  async priceKline(query: { symbol: string; period?: string; startDate?: string; endDate?: string; adjust?: string }): Promise<any> {
     const url = `/api/v1/price/kline?${new URLSearchParams({symbol: query.symbol, period: query.period, start_date: query.startDate, end_date: query.endDate, adjust: query.adjust}).toString()}`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -86,7 +86,7 @@ export class TradexClient {
   }
 
   /** Intraday */
-  async intraday(query: { symbol: string }): Promise<any> {
+  async priceIntraday(query: { symbol: string }): Promise<any> {
     const url = `/api/v1/price/intraday?${new URLSearchParams({symbol: query.symbol}).toString()}`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -94,7 +94,7 @@ export class TradexClient {
   }
 
   /** Search */
-  async search(query: { keyword: string }): Promise<any> {
+  async companySearch(query: { keyword: string }): Promise<any> {
     const url = `/api/v1/company/search?${new URLSearchParams({keyword: query.keyword}).toString()}`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -102,7 +102,7 @@ export class TradexClient {
   }
 
   /** Info */
-  async info(query: { symbol: string }): Promise<any> {
+  async companyInfo(query: { symbol: string }): Promise<any> {
     const url = `/api/v1/company/info?${new URLSearchParams({symbol: query.symbol}).toString()}`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -110,7 +110,7 @@ export class TradexClient {
   }
 
   /** Profile */
-  async profile(query: { symbol: string }): Promise<any> {
+  async companyProfile(query: { symbol: string }): Promise<any> {
     const url = `/api/v1/company/profile?${new URLSearchParams({symbol: query.symbol}).toString()}`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -118,7 +118,7 @@ export class TradexClient {
   }
 
   /** Competitors */
-  async competitors(query: { symbol: string; industry?: string }): Promise<any> {
+  async companyCompetitors(query: { symbol: string; industry?: string }): Promise<any> {
     const url = `/api/v1/company/competitors?${new URLSearchParams({symbol: query.symbol, industry: query.industry}).toString()}`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -126,7 +126,7 @@ export class TradexClient {
   }
 
   /** Income */
-  async income(query: { symbol: string; numQuarters?: integer }): Promise<any> {
+  async financialIncome(query: { symbol: string; numQuarters?: integer }): Promise<any> {
     const url = `/api/v1/financial/income?${new URLSearchParams({symbol: query.symbol, num_quarters: query.numQuarters}).toString()}`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -134,7 +134,7 @@ export class TradexClient {
   }
 
   /** Balance */
-  async balance(query: { symbol: string; numQuarters?: integer }): Promise<any> {
+  async financialBalance(query: { symbol: string; numQuarters?: integer }): Promise<any> {
     const url = `/api/v1/financial/balance?${new URLSearchParams({symbol: query.symbol, num_quarters: query.numQuarters}).toString()}`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -142,7 +142,7 @@ export class TradexClient {
   }
 
   /** Cashflow */
-  async cashflow(query: { symbol: string; numQuarters?: integer }): Promise<any> {
+  async financialCashflow(query: { symbol: string; numQuarters?: integer }): Promise<any> {
     const url = `/api/v1/financial/cashflow?${new URLSearchParams({symbol: query.symbol, num_quarters: query.numQuarters}).toString()}`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -150,7 +150,7 @@ export class TradexClient {
   }
 
   /** Line Item */
-  async lineItem(query: { symbol: string; item: string; numQuarters?: integer }): Promise<any> {
+  async financialLineItem(query: { symbol: string; item: string; numQuarters?: integer }): Promise<any> {
     const url = `/api/v1/financial/line-item?${new URLSearchParams({symbol: query.symbol, item: query.item, num_quarters: query.numQuarters}).toString()}`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -158,7 +158,7 @@ export class TradexClient {
   }
 
   /** Indicators */
-  async indicators(query: { symbol: string; numPeriods?: integer }): Promise<any> {
+  async financialIndicators(query: { symbol: string; numPeriods?: integer }): Promise<any> {
     const url = `/api/v1/financial/indicators?${new URLSearchParams({symbol: query.symbol, num_periods: query.numPeriods}).toString()}`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -166,7 +166,7 @@ export class TradexClient {
   }
 
   /** Growth */
-  async growth(query: { symbol: string; numPeriods?: integer }): Promise<any> {
+  async financialGrowth(query: { symbol: string; numPeriods?: integer }): Promise<any> {
     const url = `/api/v1/financial/growth?${new URLSearchParams({symbol: query.symbol, num_periods: query.numPeriods}).toString()}`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -174,7 +174,7 @@ export class TradexClient {
   }
 
   /** Per Share */
-  async perShare(query: { symbol: string; numPeriods?: integer }): Promise<any> {
+  async financialPerShare(query: { symbol: string; numPeriods?: integer }): Promise<any> {
     const url = `/api/v1/financial/per-share?${new URLSearchParams({symbol: query.symbol, num_periods: query.numPeriods}).toString()}`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -182,7 +182,7 @@ export class TradexClient {
   }
 
   /** Segments */
-  async segments(query: { symbol: string }): Promise<any> {
+  async financialSegments(query: { symbol: string }): Promise<any> {
     const url = `/api/v1/financial/segments?${new URLSearchParams({symbol: query.symbol}).toString()}`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -190,7 +190,7 @@ export class TradexClient {
   }
 
   /** Stock */
-  async stock(query: { symbol: string }): Promise<any> {
+  async newsStock(query: { symbol: string }): Promise<any> {
     const url = `/api/v1/news/stock?${new URLSearchParams({symbol: query.symbol}).toString()}`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -198,7 +198,7 @@ export class TradexClient {
   }
 
   /** Announcements */
-  async announcements(query: { symbol?: string; numResults?: integer }): Promise<any> {
+  async newsAnnouncements(query: { symbol?: string; numResults?: integer }): Promise<any> {
     const url = `/api/v1/news/announcements?${new URLSearchParams({symbol: query.symbol, num_results: query.numResults}).toString()}`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -206,7 +206,7 @@ export class TradexClient {
   }
 
   /** Search */
-  async search(query: { keyword: string; symbol?: string; numResults?: integer }): Promise<any> {
+  async newsSearch(query: { keyword: string; symbol?: string; numResults?: integer }): Promise<any> {
     const url = `/api/v1/news/search?${new URLSearchParams({keyword: query.keyword, symbol: query.symbol, num_results: query.numResults}).toString()}`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -214,7 +214,7 @@ export class TradexClient {
   }
 
   /** List Industries */
-  async listIndustries(): Promise<any> {
+  async industryList(): Promise<any> {
     const url = `/api/v1/industry/list`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -222,7 +222,7 @@ export class TradexClient {
   }
 
   /** Stocks */
-  async stocks(query: { industry: string }): Promise<any> {
+  async industryStocks(query: { industry: string }): Promise<any> {
     const url = `/api/v1/industry/stocks?${new URLSearchParams({industry: query.industry}).toString()}`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -230,7 +230,7 @@ export class TradexClient {
   }
 
   /** Concepts */
-  async concepts(): Promise<any> {
+  async industryConcepts(): Promise<any> {
     const url = `/api/v1/industry/concepts`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -238,7 +238,7 @@ export class TradexClient {
   }
 
   /** Fund Flow */
-  async fundFlow(query: { sectorType?: string; indicator?: string }): Promise<any> {
+  async industryFundFlow(query: { sectorType?: string; indicator?: string }): Promise<any> {
     const url = `/api/v1/industry/fund-flow?${new URLSearchParams({sector_type: query.sectorType, indicator: query.indicator}).toString()}`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -246,7 +246,7 @@ export class TradexClient {
   }
 
   /** Pe */
-  async pe(query: { industry: string; startDate?: string; endDate?: string }): Promise<any> {
+  async industryPe(query: { industry: string; startDate?: string; endDate?: string }): Promise<any> {
     const url = `/api/v1/industry/pe?${new URLSearchParams({industry: query.industry, start_date: query.startDate, end_date: query.endDate}).toString()}`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -254,7 +254,7 @@ export class TradexClient {
   }
 
   /** Macd */
-  async macd(query: { symbol: string; period?: string; fastPeriod?: integer; slowPeriod?: integer; signalPeriod?: integer }): Promise<any> {
+  async indicatorMacd(query: { symbol: string; period?: string; fastPeriod?: integer; slowPeriod?: integer; signalPeriod?: integer }): Promise<any> {
     const url = `/api/v1/indicator/macd?${new URLSearchParams({symbol: query.symbol, period: query.period, fast_period: query.fastPeriod, slow_period: query.slowPeriod, signal_period: query.signalPeriod}).toString()}`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -262,7 +262,7 @@ export class TradexClient {
   }
 
   /** Kdj */
-  async kdj(query: { symbol: string; period?: string; kdjPeriod?: integer; kPeriod?: integer; dPeriod?: integer }): Promise<any> {
+  async indicatorKdj(query: { symbol: string; period?: string; kdjPeriod?: integer; kPeriod?: integer; dPeriod?: integer }): Promise<any> {
     const url = `/api/v1/indicator/kdj?${new URLSearchParams({symbol: query.symbol, period: query.period, kdj_period: query.kdjPeriod, k_period: query.kPeriod, d_period: query.dPeriod}).toString()}`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -270,7 +270,7 @@ export class TradexClient {
   }
 
   /** Rsi */
-  async rsi(query: { symbol: string; period?: string; rsiPeriod?: integer }): Promise<any> {
+  async indicatorRsi(query: { symbol: string; period?: string; rsiPeriod?: integer }): Promise<any> {
     const url = `/api/v1/indicator/rsi?${new URLSearchParams({symbol: query.symbol, period: query.period, rsi_period: query.rsiPeriod}).toString()}`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -278,7 +278,7 @@ export class TradexClient {
   }
 
   /** Boll */
-  async boll(query: { symbol: string; period?: string; bollPeriod?: integer; k?: number }): Promise<any> {
+  async indicatorBoll(query: { symbol: string; period?: string; bollPeriod?: integer; k?: number }): Promise<any> {
     const url = `/api/v1/indicator/boll?${new URLSearchParams({symbol: query.symbol, period: query.period, boll_period: query.bollPeriod, k: query.k}).toString()}`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -286,7 +286,7 @@ export class TradexClient {
   }
 
   /** Stock */
-  async stock(query: { symbol: string }): Promise<any> {
+  async diagnosticStock(query: { symbol: string }): Promise<any> {
     const url = `/api/v1/diagnostic/stock?${new URLSearchParams({symbol: query.symbol}).toString()}`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -294,7 +294,7 @@ export class TradexClient {
   }
 
   /** Market */
-  async market(): Promise<any> {
+  async diagnosticMarket(): Promise<any> {
     const url = `/api/v1/diagnostic/market`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -302,7 +302,7 @@ export class TradexClient {
   }
 
   /** Technical */
-  async technical(query: { symbol: string; lookBackDays?: integer }): Promise<any> {
+  async diagnosticTechnical(query: { symbol: string; lookBackDays?: integer }): Promise<any> {
     const url = `/api/v1/diagnostic/technical?${new URLSearchParams({symbol: query.symbol, look_back_days: query.lookBackDays}).toString()}`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -310,7 +310,7 @@ export class TradexClient {
   }
 
   /** Create Strategy */
-  async createStrategy(body: any): Promise<any> {
+  async writeStrategy(body: any): Promise<any> {
     const url = `/api/v1/write/strategy`;
     const r = await fetch(this.baseUrl + url, { method: 'POST', headers: {...this.headers, 'Content-Type': 'application/json'}, body: JSON.stringify(body) });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -318,7 +318,7 @@ export class TradexClient {
   }
 
   /** List Strategies */
-  async listStrategies(): Promise<any> {
+  async writeStrategyList(): Promise<any> {
     const url = `/api/v1/write/strategy/list`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -326,7 +326,7 @@ export class TradexClient {
   }
 
   /** Get Strategy */
-  async getStrategy(sid: string): Promise<any> {
+  async writeStrategyBySid(sid: string): Promise<any> {
     const url = `/api/v1/write/strategy/${sid}`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -334,7 +334,7 @@ export class TradexClient {
   }
 
   /** Delete Strategy */
-  async deleteStrategy(sid: string): Promise<any> {
+  async writeStrategyBySid(sid: string): Promise<any> {
     const url = `/api/v1/write/strategy/${sid}`;
     const r = await fetch(this.baseUrl + url, { method: 'DELETE', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -342,7 +342,7 @@ export class TradexClient {
   }
 
   /** Add To Watchlist */
-  async addToWatchlist(body: any): Promise<any> {
+  async writeWatchlist(body: any): Promise<any> {
     const url = `/api/v1/write/watchlist`;
     const r = await fetch(this.baseUrl + url, { method: 'POST', headers: {...this.headers, 'Content-Type': 'application/json'}, body: JSON.stringify(body) });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -350,7 +350,7 @@ export class TradexClient {
   }
 
   /** List Watchlist */
-  async listWatchlist(): Promise<any> {
+  async writeWatchlistList(): Promise<any> {
     const url = `/api/v1/write/watchlist/list`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -358,7 +358,7 @@ export class TradexClient {
   }
 
   /** Remove From Watchlist */
-  async removeFromWatchlist(symbol: string): Promise<any> {
+  async writeWatchlistBySymbol(symbol: string): Promise<any> {
     const url = `/api/v1/write/watchlist/${symbol}`;
     const r = await fetch(this.baseUrl + url, { method: 'DELETE', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -374,8 +374,112 @@ export class TradexClient {
   }
 
   /** Slow Queries */
-  async slowQueries(query: { limit?: integer }): Promise<any> {
+  async metricsSlowQueries(query: { limit?: integer }): Promise<any> {
     const url = `/api/v1/metrics/slow-queries?${new URLSearchParams({limit: query.limit}).toString()}`;
+    const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  }
+
+  /** List Access Log */
+  async accessLog(query: { limit?: integer; path?: string }): Promise<any> {
+    const url = `/api/v1/access-log?${new URLSearchParams({limit: query.limit, path: query.path}).toString()}`;
+    const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  }
+
+  /** Earnings Forecast */
+  async eventEarningsForecast(query: { symbol: string; reportDate?: string; limit?: integer }): Promise<any> {
+    const url = `/api/v1/event/earnings-forecast?${new URLSearchParams({symbol: query.symbol, report_date: query.reportDate, limit: query.limit}).toString()}`;
+    const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  }
+
+  /** Institution Survey */
+  async eventInstitutionSurvey(query: { symbol: string; startDate?: string; endDate?: string; limit?: integer }): Promise<any> {
+    const url = `/api/v1/event/institution-survey?${new URLSearchParams({symbol: query.symbol, start_date: query.startDate, end_date: query.endDate, limit: query.limit}).toString()}`;
+    const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  }
+
+  /** Holder Trades */
+  async eventHolderTrades(query: { symbol: string; direction?: string; startDate?: string; endDate?: string; limit?: integer }): Promise<any> {
+    const url = `/api/v1/event/holder-trades?${new URLSearchParams({symbol: query.symbol, direction: query.direction, start_date: query.startDate, end_date: query.endDate, limit: query.limit}).toString()}`;
+    const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  }
+
+  /** Share Buyback */
+  async eventShareBuyback(query: { symbol: string; progress?: string; limit?: integer }): Promise<any> {
+    const url = `/api/v1/event/share-buyback?${new URLSearchParams({symbol: query.symbol, progress: query.progress, limit: query.limit}).toString()}`;
+    const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  }
+
+  /** Equity Pledge */
+  async eventEquityPledge(query: { symbol: string; date?: string; limit?: integer }): Promise<any> {
+    const url = `/api/v1/event/equity-pledge?${new URLSearchParams({symbol: query.symbol, date: query.date, limit: query.limit}).toString()}`;
+    const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  }
+
+  /** Ipo Calendar */
+  async eventIpoCalendar(query: { daysAhead?: integer; limit?: integer }): Promise<any> {
+    const url = `/api/v1/event/ipo-calendar?${new URLSearchParams({days_ahead: query.daysAhead, limit: query.limit}).toString()}`;
+    const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  }
+
+  /** Pmi */
+  async macroPmi(): Promise<any> {
+    const url = `/api/v1/macro/pmi`;
+    const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  }
+
+  /** Bond Yield Curve */
+  async macroBondYieldCurve(query: { curve?: string }): Promise<any> {
+    const url = `/api/v1/macro/bond-yield-curve?${new URLSearchParams({curve: query.curve}).toString()}`;
+    const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  }
+
+  /** Sw Industry History */
+  async macroSwIndustryHistory(query: { forceRefresh?: boolean }): Promise<any> {
+    const url = `/api/v1/macro/sw-industry-history?${new URLSearchParams({force_refresh: query.forceRefresh}).toString()}`;
+    const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  }
+
+  /** Sw Industry As Of */
+  async macroSwIndustryAsOf(query: { symbol: string; date?: string }): Promise<any> {
+    const url = `/api/v1/macro/sw-industry-as-of?${new URLSearchParams({symbol: query.symbol, date: query.date}).toString()}`;
+    const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  }
+
+  /** Get News */
+  async industryNewsGet(query: { track?: string; days?: integer; perSource?: integer }): Promise<any> {
+    const url = `/api/v1/industry-news/get?${new URLSearchParams({track: query.track, days: query.days, per_source: query.perSource}).toString()}`;
+    const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  }
+
+  /** Tracks */
+  async industryNewsTracks(): Promise<any> {
+    const url = `/api/v1/industry-news/tracks`;
     const r = await fetch(this.baseUrl + url, { method: 'GET', headers: this.headers });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return r.json();

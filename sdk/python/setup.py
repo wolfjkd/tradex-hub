@@ -4,7 +4,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="tradex-client",
-    version="0.1.0",
+    version="2.0.0",
     description="Auto-generated Python client for tradex-hub REST API",
     long_description="见 sdk/README.md",
     long_description_content_type="text/markdown",

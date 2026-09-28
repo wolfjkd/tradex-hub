@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ---
 
-## [Unreleased] - 2026-09-23 数据源大扩充（代码已合入 master，版本号待阶段批处理时 bump 到 3.6.0）
+## [3.6.0] - 2026-09-29（数据源大扩充 + 全项目代码审计 + 死源剥离）
+
+**三个批次合并发版**：① 2026-09-23/25 数据源大扩充（当时已合入 master）；② 2026-09-28 全项目
+代码审计（4 路并行扫描：孤儿模块 / 数据源层 / 工具与 REST 层 / 冗余，修复 14 项真 bug）；
+③ 2026-09-29 死源剥离（老板拍板：上游已死的 10 个数据类型全链路移除）。
+发布基线：**166 MCP 工具 / 58 REST 端点 / 145 源实例 / 105 数据类型**。
 
 **核心目标**：参考 simonlin1212/investment-news 与 simonlin1212/a-stock-data 两个项目，
 把 tradex-hub 的数据源覆盖度从"够用"升级到"全市场覆盖 + 一主一备 + 独立上游交叉验证"。
@@ -57,6 +62,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
   - `test_smart_router_failover.py`（8 用例）：源 tuple 结构 + 优先级排序 + 降级可用性。
   - `test_new_routes_rest.py`（25 用例）：22 个新 REST 端点契约 + 参数校验 + 真实数据源连通性。
 - **回归测试**：379 通过 / 5 跳过（network mark）/ 2 已修正（工具数断言同步）。
+
+### Added — 审计批次（2026-09-28/29）
+
+- **SmartRouter 固定源路由**：`route()` 新增 `source_name` 参数——指定源时不参与健康过滤、
+  失败不降级、参数不泄漏给 fetch_fn。修复「上交所龙虎榜」等 8 个工具的指定源假透传
+  （此前可能拿到深交所/东财数据）。
+- **SDK 2.0.0**：`generate_sdk.py` 改路径确定性命名（`/api/v1/price/quote` → `price_quote`），
+  修复旧 operationId 命名下 company.search / news.stock 被同名方法遮蔽不可达的碰撞；
+  非 GET 方法加动词前缀防同路径覆盖；生成客户端补 `trust_env=False` 直连；
+  实测起服务重新生成，59 端点全覆盖。
+- **统计局 PMI 动态化**：从硬编码 2024-02 发布稿改为「最新发布列表页 → 最新发布稿」两跳抓取
+  （实测返回 2026-08 数据）。
+
+### Changed — 审计批次
+
+- **失败语义统一（系统性修复）**：13+ 个 fetcher 模块约 47 处「异常吞成空 DataFrame」改为
+  抛出（与 v3.3.15 确立的约定对齐）——此前失败被记为成功：不降级备源、健康分虚高、
+  死源伪装 200 假绿。
+- **国内接口直连化 8 处**：腾讯/新浪/同花顺主源、tdx_mcp httpx、互动信号模块等此前默认读
+  HTTP(S)_PROXY（违反直连铁律），统一 `trust_env=False` / 空 ProxyHandler。
+- **em_client 限流改取号制**：锁内预约时段、锁外发请求（同 anti_ban_client 模式）——
+  此前慢请求占锁 20s+ 会把整个东财 datacenter 家族连锁误判超时。
+- **SmartRouter 健康分记账加锁**：record_success/record_failure 的读-改-写此前在锁外，
+  并发下惩罚/恢复加分互相覆盖。
+- **eltdx_stream 断线自愈**：poll/snapshot 异常时重置连接并清游标，下次调用自动重建——
+  此前断线后五档看板永久静默无数据。
+- **rate_limit 加固**：带参路径归一化（防换 sid 扫库绕过限流）+ 桶字典 LRU 上限淘汰
+  （防内存被刷爆）。
+- **BOLL 对齐通达信口径**：标准差从总体（÷N）改样本（÷N-1），上/下轨此前系统性窄约 2.5%。
+- **绩效指标口径统一**：Sharpe/Sortino/Calmar 贯通调用方 `trading_days` 参数（此前内部硬编码
+  252）；年化收益分母从权益点数 N 改为收益区间数 N-1。
+- **signal_generation 文档对齐实现**：评分权重描述从失真的 30/25/20/15/10% 改为实际加减分制。
+- **测试计数锁对齐审计基线**：工具数 132（master 上本已失真）→ 166，源/类型锁同步；
+  根 pyproject 补 `asyncio_mode="auto"`（两套测试合并运行时 async 用例此前全部报错）。
+
+### Removed — 死源剥离（2026-09-29 老板拍板，上游已死且无备源）
+
+- **新浪 ETF 期权**（tquote/greeks）：上游 OptionService 已下线（实测 Service not found）。
+- **指数官方追踪 3 件套**（index_constituents/index_weights/index_valuation）：中证 zealink
+  域名全球 DNS 失效 + 国证 API 404，双源齐挂。
+- **人行社融 / 货币网回购定盘 / LPR**：上游页面与静态 json 均 404（AGS 接口语义不符不可替代）。
+- **互动易 / 上证 e 互动**：接口层 500 / 404（主站存活）。
+- 以上合计移除 **10 个数据类型 / 12 个注册点 / 10 个 MCP 工具 / 10 个 REST 端点**，
+  对应 fetcher 模块、service、route 全链路清除；复启需接新上游（registry 已留注释位）。
+- **孤儿代码清理**：`api/deps.py`（未接线占位）、astock_signals 的 fund_flow/concept/industry
+  三个 push2 时代死模块（子包 1.1.1 → **2.0.0**）、6 个零消费死 fetcher 函数、
+  ToolRegistry 装饰器轨（静默丢工具的已知陷阱）等，净删约 2100 行。
+
+### Fixed — 审计批次
+
+- **腾讯 realtime_quote 单位错标（P0）**：成交额漏 ×1e4（万元当元，差 1 万倍）、
+  总市值/流通市值漏 ×1e8（亿当元）——上次仅修指数行情，个股行情漏网；北交所代码
+  前缀误归 sz 致腾讯备源静默丢弃北交所，实测补 bj 前缀。
+- **解禁日历吞错误**：lockup 双查询全败时伪装「无解禁」（独占源无降级，风险提示整体失真），
+  改为双边全败抛出、单边失败保留部分数据 + 错误键。
+- **anti_ban_client JSON 解析失败**：`return []` 伪装无数据 → 抛出。
+- **baostock 登录失败/错误码**：伪装空表 → 抛出（北交所不支持等合法空表保留）。
+- **access_log response_code 恒 0**：从 JSONResponse.body 提取业务码，审计列恢复价值。
+- **NaN 穿透产出非法 JSON**：formatter.dict_to_json 递归清洗 NaN/Inf → null（此前
+  `nan or 0` 拦不住 truthy 的 NaN，序列化出裸 `NaN`）。
+- **generate_sdk 命名碰撞 / health_check 脚本过期 / pyproject http extra 缺 fastapi /
+  README 引用不存在的 requirements.txt**：随审计修正。
+
+### 升级指引（v3.6.0）
+
+- **有破坏性变更**：10 个 MCP 工具 / 10 个 REST 端点已移除（清单见 Removed），依赖这些
+  能力的调用方需迁移（期权/指数/互动/社融/LPR 等）；SDK 客户端方法名由 operationId
+  命名改为路径命名（2.0.0），升级 SDK 后需按新方法名调用。
+- 数据源行为变更：失败不再返回空结果而是报错/降级——下游如有「空表=正常」的判断需复核。
+- 重启 WorkBuddy 托管的 MCP 进程与 HTTP 网关后生效。
 
 ---
 
