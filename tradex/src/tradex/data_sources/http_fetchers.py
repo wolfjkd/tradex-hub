@@ -379,7 +379,11 @@ def fetch_market_overview_tencent(**kwargs) -> pd.DataFrame:
             change = float(fields[31]) if len(fields) > 31 and fields[31] else 0.0
             change_pct = float(fields[32]) if len(fields) > 32 and fields[32] else 0.0
             volume = float(fields[36]) if len(fields) > 36 and fields[36] else 0.0
-            amount = float(fields[37]) if len(fields) > 37 and fields[37] else 0.0
+            # 腾讯字段 37 单位=万元（2026-09-28 实证 sh000001：80454370万=8045亿），
+            # 换算为元后以「成交额(元)」出口，与本文件 fetch_category_quotes_tencent
+            # 的 amount_wan*1e4 口径一致。下游（TradeX/MCP）拿到的即真实元值。
+            amount_wan = float(fields[37]) if len(fields) > 37 and fields[37] else 0.0
+            amount = amount_wan * 1e4
             rows.append({
                 "指数名称": name,
                 "最新点位": price,
