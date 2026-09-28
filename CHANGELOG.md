@@ -60,6 +60,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ---
 
+## [3.5.2] - 2026-09-28
+
+### Fixed
+
+- `fetch_market_overview_tencent`（腾讯指数行情兜底源）成交额错标修复：腾讯字段 37 单位为万元
+  （2026-09-28 实证 sh000001：80454370 万 = 8045.4 亿），原样标「成交额(元)」导致下游数值差 1 万倍。
+  现 ×1e4 换算为真实元值出口，与本文件 `fetch_category_quotes_tencent` 的 `amount_wan*1e4` 口径对齐。
+
 ## [3.5.1] - 2026-09-22
 
 **Bug fix**：修复 stdio 模式 MCP 启动崩溃。

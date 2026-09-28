@@ -11,11 +11,11 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.13+-blue.svg" alt="Python"/>
   <img src="https://img.shields.io/badge/MCP-1.0-green.svg" alt="MCP"/>
-  <img src="https://img.shields.io/badge/REST-v3.5.1-orange.svg" alt="REST"/>
+  <img src="https://img.shields.io/badge/REST-v3.5.2-orange.svg" alt="REST"/>
   <img src="https://img.shields.io/badge/Tools-129-orange.svg" alt="MCP Tools"/>
   <img src="https://img.shields.io/badge/Endpoints-48-orange.svg" alt="REST Endpoints"/>
   <img src="https://img.shields.io/badge/License-Apache--2.0-yellow.svg" alt="License"/>
-  <img src="https://img.shields.io/badge/Version-3.5.1-blue.svg" alt="Version"/>
+  <img src="https://img.shields.io/badge/Version-3.5.2-blue.svg" alt="Version"/>
 </p>
 
 ---
@@ -490,6 +490,7 @@ curl http://127.0.0.1:8000/mcp -X POST \
 
 | 版本 | 日期 | 关键里程碑 |
 |------|------|-----------|
+| **v3.5.2** | 2026-09-28 | 修复 fetch_market_overview_tencent 腾讯指数成交额错标：字段 37（万元）原样标「成交额(元)」，下游拿到数值差 1 万倍；现 ×1e4 换算为真元，与分类榜 amount_wan*1e4 口径对齐（实证 sh000001 → 8045.4 亿） |
 | **v3.5.1** | 2026-09-22 | 修复 stdio 模式 MCP 启动崩溃：`parse_allowed_hosts` 的 http 依赖延迟到 `--http` 分支加载，无 fastapi 也可正常启动 |
 | **v3.5.0** | 2026-09-19 | REST API 阶段二：可观测性（数据源健康实时埋点 + 端点 QPS/P95 + 慢查询日志）+ 并发安全（写操作切 SQLite + WAL + 自动迁移）+ 接入友好（三层限流 + 双语言 SDK + 访问日志双写） |
 | **v3.4.0** | 2026-09-19 | REST API 上线：双协议并存（44 端点 + 129 MCP 工具），11 个 service 模块抽出共享业务逻辑，Prometheus 指标 + 监控看板，统一响应包裹 `{code, data, msg}` |
