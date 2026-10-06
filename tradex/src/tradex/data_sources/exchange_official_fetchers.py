@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -37,6 +38,124 @@ _TIMEOUT = 15
 # 上交所龙虎榜 — sse_dragon_tiger
 # ============================================================
 
+# —— 上交所「每日交易信息」文本解析（showTradePublicFile.do 返回 fileContents 行数组）——
+# 板块标题：'一、有价格涨跌幅限制的日收盘价格涨幅偏离值达到7%的前五只证券:'（长标题会折行）
+_SECTION_RE = re.compile(r"^\s*([一二三四五六七八九十]+)、(.+?)[：:]?\s*$")
+# 子类目：' 1、A股' / ' 2、B股' / ' 3、封闭式基金'
+_SUBSEC_RE = re.compile(r"^\s*\d+、(A股|B股|封闭式基金)\s*$")
+# 汇总行：'(1)  600340  *ST华幸  11.92%  185170600  23135.90 [09.23-09.28]'
+_SUMMARY_RE = re.compile(
+    r"^\s*\(\d+\)\s+(?P<code>\d{6})\s+(?P<name>\S.*?)\s{2,}"
+    r"(?P<dev>[-+]?\d+(?:\.\d+)?%)\s+(?P<vol>\d+)\s+(?P<amt>[\d,]+(?:\.\d+)?)"
+    r"(?:\s+(?P<period>\d{2}\.\d{2}-\d{2}\.\d{2}))?\s*$"
+)
+# 席位块头：'证券代码: 600340    证券简称: *ST华幸'
+_DETAIL_RE = re.compile(r"^\s*证券代码:\s*(?P<code>\d{6})\s+证券简称:\s*(?P<name>.+?)\s*$")
+# 席位行：'  (1) 华泰证券股份有限公司常州东横街证券营业部    2527981.40'
+_SEAT_RE = re.compile(r"^\s*\((?P<idx>\d+)\)\s+(?P<name>\S.*?)\s{2,}(?P<amt>[\d,]+(?:\.\d+)?)\s*$")
+
+
+def _parse_sse_trade_public(lines: list) -> list[dict]:
+    """解析每日交易信息文本，输出上榜记录（板块×证券）。
+
+    一条记录对应一个板块下的一只证券：上榜原因=板块标题，净买入=买入五席
+    合计-卖出五席合计，席位文本为"营业部 金额"分号串。仅保留 A 股
+    （6 开头；B 股 9 开头、基金 5 开头不属于股票龙虎榜）。
+    有席位块走席位块（含资金明细），无席位块的汇总行兜底成一条净买入 0 的记录。
+    """
+    rows: list[dict] = []
+    seen_detail: set[tuple[str, str]] = set()
+    pending_summary: list[tuple[str, str, str]] = []  # (板块, 代码, 简称)
+    reason = ""
+    subsec = ""
+    detail: dict | None = None
+    mode = ""  # buy / sell
+
+    def _flush_detail() -> None:
+        nonlocal detail
+        if not detail:
+            return
+        buy: list[tuple[str, float]] = detail["buy"]
+        sell: list[tuple[str, float]] = detail["sell"]
+        if detail["code"].startswith("6"):
+            rows.append({
+                "代码": detail["code"],
+                "名称": detail["name"],
+                "上榜原因": detail["reason"],
+                "净买入": round(sum(a for _, a in buy) - sum(a for _, a in sell), 2),
+                "买入席位": "；".join(f"{n} {a:,.2f}" for n, a in buy),
+                "卖出席位": "；".join(f"{n} {a:,.2f}" for n, a in sell),
+            })
+            seen_detail.add((detail["reason"], detail["code"]))
+        detail = None
+
+    def _flush_pending_summary() -> None:
+        nonlocal pending_summary
+        for sec, code, name in pending_summary:
+            if (sec, code) in seen_detail or not code.startswith("6"):
+                continue
+            rows.append({
+                "代码": code,
+                "名称": name,
+                "上榜原因": sec,
+                "净买入": 0.0,
+                "买入席位": "",
+                "卖出席位": "",
+            })
+        pending_summary = []
+
+    for raw in lines:
+        line = raw.rstrip().rstrip("\x1a")
+        if _SECTION_RE.match(line) and _SUBSEC_RE.match(line) is None:
+            _flush_detail()
+            _flush_pending_summary()
+            reason = _SECTION_RE.match(line).group(2).strip()
+            subsec = ""
+            continue
+        m_sub = _SUBSEC_RE.match(line)
+        if m_sub:
+            _flush_detail()
+            _flush_pending_summary()
+            subsec = m_sub.group(1)
+            continue
+        # 板块标题折行续行（标题后、子类目前的非空行）
+        if reason and not subsec and not detail and line.strip():
+            reason += line.strip()
+            continue
+        m_detail = _DETAIL_RE.match(line)
+        if m_detail:
+            _flush_detail()
+            detail = {
+                "code": m_detail.group("code"),
+                "name": m_detail.group("name").strip(),
+                "reason": reason,
+                "buy": [],
+                "sell": [],
+            }
+            mode = ""
+            continue
+        if detail is not None:
+            if "买入营业部名称" in line:
+                mode = "buy"
+                continue
+            if "卖出营业部名称" in line:
+                mode = "sell"
+                continue
+            m_seat = _SEAT_RE.match(line)
+            if m_seat and mode in ("buy", "sell"):
+                detail[mode].append(
+                    (m_seat.group("name").strip(), float(m_seat.group("amt").replace(",", "")))
+                )
+            continue
+        m_sum = _SUMMARY_RE.match(line)
+        if m_sum and subsec == "A股":
+            pending_summary.append((reason, m_sum.group("code"), m_sum.group("name").strip()))
+
+    _flush_detail()
+    _flush_pending_summary()
+    return rows
+
+
 def fetch_sse_dragon_tiger(
     date: str = "",
     **kwargs,
@@ -46,27 +165,27 @@ def fetch_sse_dragon_tiger(
     作为 dragon_tiger 的官方备源，与东财 datacenter 完全独立。
     含营业部买卖席位明细，比东财聚合数据更详细。
 
+    2026-09-29 修复：上交所已下线 infodisplay/queryLatestBargainRank.do（404），
+    改用官网「交易公开信息」现行接口 infodisplay/showTradePublicFile.do ——
+    返回最新一期「上海证券交易所每日交易信息」全文（文本行数组），本地解析出
+    上榜证券与买卖席位。该接口只提供最新一期（dateTx 传历史日期返回空），
+    因此 date 参数仅在与最新文件日期一致时有数据，否则返回空表。
+
     Args:
-        date: 交易日 YYYY-MM-DD，默认今天
+        date: 交易日 YYYY-MM-DD，默认取最新一期
 
     Returns:
         DataFrame with columns: 代码, 名称, 上榜原因, 净买入, 买入席位, 卖出席位
     """
-    if not date:
-        date = datetime.now().strftime("%Y-%m-%d")
-
     try:
-        # 上交所龙虎榜接口
-        url = "http://query.sse.com.cn/infodisplay/queryLatestBargainRank.do"
+        url = "https://query.sse.com.cn/infodisplay/showTradePublicFile.do"
         params = {
-            "is_tbill": "false",
-            "page_no": "1",
-            "page_size": "50",
-            "date": date.replace("-", ""),
+            "isPagination": "false",
+            "dateTx": "",
         }
         headers = {
             "User-Agent": _UA,
-            "Referer": "http://www.sse.com.cn/",
+            "Referer": "https://www.sse.com.cn/",
             "Accept": "*/*",
         }
         resp = curl_requests.get(
@@ -74,24 +193,20 @@ def fetch_sse_dragon_tiger(
         )
         resp.raise_for_status()
         data = resp.json()
-        rows_raw = (data.get("bargainRank") or []).get("result", [])
-        if not rows_raw:
+        lines = data.get("fileContents") or []
+        # dateTx 形如 "2026/09/28" —— 以文件自身标注日期为准（非交易日返回最近一期）
+        file_date = str(data.get("dateTx") or "").replace("/", "-")
+        if not lines or not file_date:
+            return pd.DataFrame()
+        if date and date.replace("-", "") != file_date.replace("-", ""):
+            logger.info("fetch_sse_dragon_tiger: 最新文件日期 %s 与请求日期 %s 不符，返回空", file_date, date)
             return pd.DataFrame()
 
-        rows = []
-        for it in rows_raw:
-            rows.append({
-                "代码": (it.get("STOCKCODE") or it.get("symbol") or "").strip(),
-                "名称": (it.get("STOCKNAME") or it.get("name") or "").strip(),
-                "上榜原因": (it.get("REASON") or "").strip(),
-                "净买入": float(it.get("NETBUYAMT") or 0),
-                "买入席位": (it.get("BUYSEAT") or "").strip(),
-                "卖出席位": (it.get("SALESEAT") or "").strip(),
-                "日期": date,
-            })
+        rows = _parse_sse_trade_public(lines)
         if not rows:
             return pd.DataFrame()
         df = pd.DataFrame(rows)
+        df["日期"] = file_date
         return df[df["代码"] != ""].reset_index(drop=True)
 
     except Exception as e:
