@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ---
 
-## [Unreleased]
+## [3.6.1] - 2026-10-18
 
 ### Fixed
 - `fetch_sina_fund_flow` 增加新浪 MoneyFlow 降级路径：东财 `push2his` 的 `fflow/daykline`
