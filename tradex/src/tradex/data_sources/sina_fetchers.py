@@ -23,8 +23,6 @@ import json
 import logging
 import re
 from datetime import datetime
-from typing import Any
-from urllib.parse import urlencode
 
 import pandas as pd
 from curl_cffi import requests as curl_requests
@@ -150,6 +148,69 @@ def _em_secid(sym: str) -> str:
     return f"0.{sym}"
 
 
+def _sina_moneyflow_snapshot(sym: str) -> pd.DataFrame:
+    """新浪 MoneyFlow 当日资金流快照（东财 push2his 被封时的最终备源）。
+
+    2026-10-18 实测：push2his.eastmoney.com 的 fflow/daykline 接口直连返回
+    curl(56) Connection closed abruptly，akshare 同源接口一并失效；新浪
+    MoneyFlow 接口返回 200 且字段完整，但**只提供当日单日快照**，无法给出多日历史。
+
+    字段映射（与 fetch_sina_fund_flow 主路径同构）：
+      netamount → 主力净流入；r0/r1/r2/r3 分别对应超大单/大单/中单/小单，
+      每个 rN_in - rN_out 即该档净流入；占比按「净额 / 成交额(volume × trade)」
+      计算，与东财口径（净占比 = 净额 / 成交额）保持一致。
+    """
+    secid = _em_secid(sym)
+    prefix = "sh" if secid.startswith("1.") else "sz"
+    url = (
+        "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/"
+        "MoneyFlow.ssi_ssfx_flzjtj"
+    )
+    resp = curl_requests.get(
+        url,
+        params={"daima": f"{prefix}{sym}"},
+        headers={"User-Agent": _UA, "Referer": "https://finance.sina.com.cn"},
+        timeout=_TIMEOUT,
+        impersonate="chrome120",
+    )
+    resp.raise_for_status()
+    d = resp.json()
+    if not isinstance(d, dict) or "netamount" not in d:
+        return pd.DataFrame()
+
+    def _f(key: str) -> float:
+        try:
+            return float(d.get(key) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    turnover_amt = _f("volume") * _f("trade")  # 成交额 ≈ 成交量 × 现价
+
+    def _pct(v: float) -> float:
+        return round(v / turnover_amt * 100, 4) if turnover_amt else 0.0
+
+    net_r0 = _f("r0_in") - _f("r0_out")  # 超大单
+    net_r1 = _f("r1_in") - _f("r1_out")  # 大单
+    net_r2 = _f("r2_in") - _f("r2_out")  # 中单
+    net_r3 = _f("r3_in") - _f("r3_out")  # 小单
+    main_net = _f("netamount")
+    return pd.DataFrame([{
+        "日期": datetime.now().strftime("%Y-%m-%d"),
+        "收盘价": _f("trade"),
+        "涨跌幅": round(_f("changeratio") * 100, 4),
+        "主力净流入": main_net,
+        "小单净流入": net_r3,
+        "中单净流入": net_r2,
+        "大单净流入": net_r1,
+        "超大单净流入": net_r0,
+        "主力净占比": _pct(main_net),
+        "小单净占比": _pct(net_r3),
+        "中单净占比": _pct(net_r2),
+        "大单净占比": _pct(net_r1),
+        "超大单净占比": _pct(net_r0),
+    }])
+
+
 def fetch_sina_fund_flow(
     symbol: str = "",
     code: str = "",
@@ -233,6 +294,16 @@ def fetch_sina_fund_flow(
 
     except Exception as e:
         logger.warning("fetch_sina_fund_flow(%s) failed: %s", sym, e)
+        # 2026-10-18 降级：东财 push2his 的 fflow/daykline 已被风控封禁
+        # （直连 curl 56 连接重置，akshare 同源一并失效），改走新浪 MoneyFlow
+        # 当日快照，至少保住「资金流向」卡片的当日数据（历史多日仍不可得）。
+        try:
+            snap = _sina_moneyflow_snapshot(sym)
+            if not snap.empty:
+                logger.info("fetch_sina_fund_flow(%s) 降级为新浪 MoneyFlow 当日快照", sym)
+                return snap
+        except Exception as e2:  # noqa: BLE001  # nosec: B110 - 备源失败不应掩盖主源异常
+            logger.warning("sina moneyflow fallback failed: %s", e2)
         raise  # 2026-09-28 审计修复：失败必须抛出，由 SmartRouter 记账降级（吞成空表会让降级链与健康分全部失效）
 
 

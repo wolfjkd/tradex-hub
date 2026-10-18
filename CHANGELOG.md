@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- `fetch_sina_fund_flow` 增加新浪 MoneyFlow 降级路径：东财 `push2his` 的 `fflow/daykline`
+  接口已被风控封禁（直连返回 curl(56) 连接重置，akshare 同源接口一并失效），主路径失败时
+  改走新增的 `_sina_moneyflow_snapshot`（新浪 MoneyFlow 当日快照，字段口径与主路径同构），
+  保证「资金流向」至少有当日数据。**限制**：该备源仅提供当日单日快照，多日历史仍不可得。
+
 ## [3.6.0] - 2026-09-29（数据源大扩充 + 全项目代码审计 + 死源剥离）
 
 **三个批次合并发版**：① 2026-09-23/25 数据源大扩充（当时已合入 master）；② 2026-09-28 全项目
