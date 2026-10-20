@@ -11,11 +11,11 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.13+-blue.svg" alt="Python"/>
   <img src="https://img.shields.io/badge/MCP-1.0-green.svg" alt="MCP"/>
-  <img src="https://img.shields.io/badge/REST-v3.5.2-orange.svg" alt="REST"/>
+  <img src="https://img.shields.io/badge/REST-v3.6.1-orange.svg" alt="REST"/>
   <img src="https://img.shields.io/badge/Tools-168-orange.svg" alt="MCP Tools"/>
-  <img src="https://img.shields.io/badge/Endpoints-48-orange.svg" alt="REST Endpoints"/>
+  <img src="https://img.shields.io/badge/Endpoints-58-orange.svg" alt="REST Endpoints"/>
   <img src="https://img.shields.io/badge/License-Apache--2.0-yellow.svg" alt="License"/>
-  <img src="https://img.shields.io/badge/Version-3.5.2-blue.svg" alt="Version"/>
+  <img src="https://img.shields.io/badge/Version-3.6.1-blue.svg" alt="Version"/>
 </p>
 
 ---
@@ -104,7 +104,7 @@ flowchart LR
 
     subgraph Gateway["tradex-hub 网关 (端口 8000)"]
         B1["MCP Server<br/>168 个工具<br/>JSON-RPC over HTTP"]
-        B2["FastAPI REST<br/>48 个端点<br/>统一包裹响应"]
+        B2["FastAPI REST<br/>58 个端点<br/>统一包裹响应"]
         B3["监控看板<br/>/dashboard<br/>Prometheus /metrics"]
         B1 -.共享.- B2
         B2 -.共享.- B3
@@ -130,7 +130,7 @@ flowchart LR
 | 协议 | 适用场景 | 接口形态 |
 |------|----------|----------|
 | **MCP** | AI Agent 对话式调用（工具描述可被 LLM 理解） | JSON-RPC over HTTP，168 个工具 |
-| **REST** | 看板 / 外部系统 / 自定义脚本 | 标准 HTTP + JSON，48 端点，包裹响应 `{code, data, msg}` |
+| **REST** | 看板 / 外部系统 / 自定义脚本 | 标准 HTTP + JSON，58 端点，包裹响应 `{code, data, msg}` |
 
 两个协议返回的数据**完全一致**（仅序列化差异：MCP 返 JSON 字符串、REST 返包裹 dict），契约严格对齐。
 
@@ -242,29 +242,38 @@ TDX_MCP_MIN_INTERVAL=0.8
 
 ## MCP 工具清单（168 个）
 
-完整工具清单详见 [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md)。按业务领域分组：
+完整工具清单详见 [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md)（由 `scripts/generate_tool_docs.py` 从源码 AST 生成，含每个工具的说明）。按业务领域分组：
 
 | 领域 | 工具数 | 代表工具 |
 |------|--------|----------|
 | 公司信息 | 4 | `get_company_info` / `get_company_profile` / `search_stock` / `get_competitors` |
-| 价格行情 | 6 | `get_realtime_quote` / `get_historical_price` / `get_intraday_data` / `get_market_capitalization` |
-| 板块行业 | 7 | `get_industry_list` / `get_industry_stocks` / `get_concept_list` / `get_industry_pe` |
-| 财务数据 | 12 | `get_income_statement` / `get_balance_sheet` / `get_cash_flow_statement` / `get_financial_indicators` |
-| 新闻公告 | 7 | `get_stock_news` / `get_company_announcements` / `search_news` / `get_telegraph_news` |
-| 资金流向 | 4 | `get_money_flow` / `get_north_bound_flow` / `get_sector_fund_flow` / `get_fund_flow_signal` |
-| 技术指标 | 6 | `calculate_macd` / `calculate_kdj` / `calculate_rsi` / `calculate_boll` / `calculate_atr` |
-| 涨停龙虎 | 8 | `get_limit_up_down` / `get_limit_up_board` / `get_limit_up_insight` / `get_dragon_tiger` |
+| 价格行情 | 5 | `get_realtime_quote` / `get_historical_price` / `get_intraday_data` / `get_market_capitalization` |
+| 板块行业 | 5 | `get_industry_list` / `get_industry_stocks` / `get_concept_list` / `get_industry_pe` |
+| 财务数据 | 8 | `get_income_statement` / `get_balance_sheet` / `get_cash_flow_statement` / `get_financial_indicators` |
+| 估值与持仓 | 4 | `get_valuation_metrics` / `get_dividend_data` / `get_institutional_holdings` |
+| 新闻公告 | 14 | `get_stock_news` / `get_company_announcements` / `search_news` / `get_telegraph_news` |
+| 市场总览与资金 | 7 | `get_market_overview` / `get_money_flow` / `get_north_bound_flow` / `get_dragon_tiger` |
+| 宏观与两融 | 10 | `get_macro_gdp` / `get_macro_cpi` / `get_macro_pmi` / `get_bond_yield_curve_official` |
+| 信号数据 | 17 | `get_limit_up_board` / `get_limit_up_insight` / `get_fund_flow_signal` / `get_cb_realtime_data` |
 | eltdx 专有 | 31 | 五档盘口 / 集合竞价 / 逐笔 / 分时 / F10 / 短线指标 / 题材 / 分类行情 等 |
+| 本地数据 | 2 | `get_local_kline` / `get_local_minute`（通达信盘后文件） |
+| 通达信官方 MCP | 3 | `natural_lang_screener` / `research_report` / `query_macro_indicator` |
 | 通达信 TQ（独占） | 2 | `get_l2_stats` / `run_tdx_formula`（L2 统计 / 公式生态桥，需客户端运行中） |
-| 决策支持 | 16 | `generate_trading_signal` / `analyze_stock_comprehensive` / `screen_stocks` / `calculate_factor_score` |
+| 独立备源 | 4 | `get_sina_fund_flow` / `get_baidu_kline` / `get_baostock_valuation` |
+| 交易所与巨潮官方 | 4 | `get_sse_dragon_tiger` / `get_szse_dragon_tiger` / `get_cninfo_announcement_backup` |
+| 事件驱动 | 17 | `get_earnings_forecast` / `get_institution_survey` / `get_holder_trades` / `get_share_buyback` |
+| 全球资讯 | 3 | `get_wallstreetcn_lives` / `get_cctv_news` / `get_macro_calendar` |
+| 产业链资讯 | 2 | `get_industry_news` / `list_industry_tracks`（106 源） |
+| 申万行业历史 | 2 | `get_sw_industry_history` / `get_sw_industry_as_of` |
+| 技术指标与绩效 | 8 | `calculate_macd` / `calculate_kdj` / `calculate_rsi` / `calculate_boll` / `calculate_performance` |
+| 决策支持 | 11 | `generate_trading_signal` / `analyze_stock_comprehensive` / `screen_stocks` / `calculate_factor_score` |
 | 诊断 | 5 | `health_check` / `get_data_source_health` / `get_data_source_dashboard` |
-| 其他 | 23 | 可转债 / ETF / 宏观 / 估值 / 持仓 / 研报 / 公告 等 |
 
 ---
 
 ## REST API
 
-48 个 REST 端点统一挂在 `/api/v1/*` 路径下，与 MCP 工具共享同一 service 层。
+58 个 REST 端点统一挂在 `/api/v1/*` 路径下，与 MCP 工具共享同一 service 层。
 
 ### 快速上手
 
