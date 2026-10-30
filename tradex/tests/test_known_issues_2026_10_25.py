@@ -345,3 +345,195 @@ class TestFinancialPeriodOrder:
         out = _latest_periods(df, 2)
 
         assert len(out) == 2
+
+
+# ══════════════════════════════════════════════════════════════════
+# 05 交易日历备源
+# ══════════════════════════════════════════════════════════════════
+
+class TestTradingCalendarFallback:
+    def test_builds_month_from_sina(self):
+        """深交所接口 404 后，sina 清单要能独立撑起整月日历。"""
+        from unittest.mock import patch
+
+        from tradex.data_sources.akshare_fetchers import fetch_trading_calendar
+
+        sina = pd.DataFrame({
+            "trade_date": pd.to_datetime(
+                ["2026-01-05", "2026-01-06", "2026-01-07", "2026-01-08",
+                 "2026-01-09", "2026-01-30"]
+            )
+        })
+        with patch("akshare.tool_trade_date_hist_sina", return_value=sina):
+            df = fetch_trading_calendar(year=2026, month=1)
+
+        assert len(df) == 31                      # 整月每一天都在
+        assert list(df.columns) == ["日期", "是否交易日", "节假日"]
+        marked = set(df[df["是否交易日"] == "是"]["日期"])
+        assert marked == {
+            "2026-01-05", "2026-01-06", "2026-01-07", "2026-01-08",
+            "2026-01-09", "2026-01-30",
+        }
+        # 周末要标出来，别让调用方以为是休市日
+        weekend = df[df["日期"] == "2026-01-03"].iloc[0]
+        assert weekend["是否交易日"] == "否"
+        assert weekend["节假日"] == "周末"
+        # 元旦假期是工作日但非交易日 → 标休市
+        holiday = df[df["日期"] == "2026-01-01"].iloc[0]
+        assert holiday["是否交易日"] == "否"
+        assert holiday["节假日"] == "休市"
+
+    def test_month_beyond_coverage_raises(self):
+        """sina 清单没覆盖到的月份必须报错，不能返回一张全「否」的假日历。"""
+        from unittest.mock import patch
+
+        from tradex.data_sources.akshare_fetchers import fetch_trading_calendar
+
+        sina = pd.DataFrame({"trade_date": pd.to_datetime(["2026-01-05"])})
+        with patch("akshare.tool_trade_date_hist_sina", return_value=sina):
+            with pytest.raises(RuntimeError, match="仅覆盖到"):
+                fetch_trading_calendar(year=2026, month=6)
+
+    def test_empty_source_raises(self):
+        from unittest.mock import patch
+
+        from tradex.data_sources.akshare_fetchers import fetch_trading_calendar
+
+        with patch("akshare.tool_trade_date_hist_sina", return_value=pd.DataFrame()):
+            with pytest.raises(RuntimeError, match="返回空"):
+                fetch_trading_calendar(year=2026, month=1)
+
+
+# ══════════════════════════════════════════════════════════════════
+# 06 打板情绪 schema
+# ══════════════════════════════════════════════════════════════════
+
+class TestBoardSentiment:
+    def _rows(self, codes, days=1, pct=10.0, industry="银行"):
+        return [
+            {"code": c, "name": c, "change_pct": pct, "latest_price": 10.0,
+             "deal_amount": 0, "float_mv": 0, "total_mv": 0, "turnover_rate": 0,
+             "sealed_capital": 0, "first_seal_time": "", "last_seal_time": "",
+             "break_count": 0, "limit_up_stats": "", "consecutive_days": days,
+             "industry": industry, "source": "test"}
+            for c in codes
+        ]
+
+    def test_envelope_has_data_key(self, monkeypatch):
+        """工具层读 result['data']，fetcher 必须给信封而不是裸 list。"""
+        from tradex.data_sources import akshare_fetchers as akf
+
+        monkeypatch.setattr(
+            akf, "_fetch_pool_rows", lambda bt, d: self._rows(["000001", "000002"])
+        )
+        out = akf.fetch_limit_up_board(board_type="zt", date="20261030")
+
+        assert out["board_type"] == "zt"
+        assert out["date"] == "20261030"
+        assert out["count"] == 2
+        assert out["data"][0]["code"] == "000001"
+
+    def test_sentiment_computes_rates(self, monkeypatch):
+        from tradex.data_sources import akshare_fetchers as akf
+
+        pools = {
+            "zt": self._rows(["000001", "000002", "000003"], days=2),
+            "zb": self._rows(["000004"]),
+            "dt": self._rows(["000005"]),
+            "prev_zt": self._rows(["000001", "000009"], days=1, pct=-2.0),
+        }
+        monkeypatch.setattr(akf, "_fetch_pool_rows", lambda bt, d: pools[bt])
+        out = akf.fetch_board_sentiment(date="20261030")
+
+        assert out["涨停数"] == 3
+        assert out["炸板数"] == 1
+        assert out["跌停数"] == 1
+        assert out["炸板率(%)"] == 25.0            # 1/(3+1)
+        assert out["连板梯队"] == {"2连板": 3}
+        assert out["最高连板"] == 2
+        assert out["晋级数"] == 1                  # 000001 晋级
+        assert out["晋级率(%)"] == 50.0            # 1/2
+        assert out["平均溢价(%)"] == -2.0
+        assert out["missing_pools"] == []
+
+    def test_aux_pool_failure_degrades_not_fatal(self, monkeypatch):
+        """辅助池挂了要降级并标注，不能把整条情绪链路拖死。"""
+        from tradex.data_sources import akshare_fetchers as akf
+
+        def fake(bt, d):
+            if bt == "zt":
+                return self._rows(["000001"])
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(akf, "_fetch_pool_rows", fake)
+        out = akf.fetch_board_sentiment(date="20261030")
+
+        assert out["涨停数"] == 1
+        assert set(out["missing_pools"]) == {"zb", "dt", "prev_zt"}
+        assert out["炸板率(%)"] is None            # 缺数据标 null，不填 0 冒充
+
+    def test_empty_zt_pool_raises(self, monkeypatch):
+        from tradex.data_sources import akshare_fetchers as akf
+
+        monkeypatch.setattr(akf, "_fetch_pool_rows", lambda bt, d: [])
+        with pytest.raises(RuntimeError, match="涨停池为空"):
+            akf.fetch_board_sentiment(date="20261030")
+
+    def test_unknown_board_type_raises(self):
+        from tradex.data_sources import akshare_fetchers as akf
+
+        with pytest.raises(ValueError, match="未知 board_type"):
+            akf.fetch_limit_up_board(board_type="xxx", date="20261030")
+
+
+# ══════════════════════════════════════════════════════════════════
+# 10 新闻聚合瘦身
+# ══════════════════════════════════════════════════════════════════
+
+class TestNewsAggregationSlim:
+    def test_output_has_exactly_five_fields(self):
+        from tradex.service.news_service import _unify_news_record
+
+        raw = {
+            "标题": "某标题", "内容": "正文", "文章来源": "财联社",
+            "新闻链接": "https://x", "发布日期": "2026-10-30",
+            "发布时间": "19:39:56",
+            # 源表其余几十列
+            "停牌时间": None, "复牌时间": None, "综合热度": None,
+        }
+        out = _unify_news_record(raw)
+
+        assert list(out) == ["标题", "时间", "来源", "链接", "摘要"]
+        assert out["时间"] == "2026-10-30 19:39:56"
+
+    def test_aliases_cover_sina_shape(self):
+        """新浪源把标题放在「新闻标题」、时间放在「发布时间」。"""
+        from tradex.service.news_service import _unify_news_record
+
+        out = _unify_news_record({
+            "标题": None, "新闻标题": "工行房贷贴息",
+            "新闻链接": "https://a", "发布时间": "2026-10-30 19:42",
+        })
+
+        assert out["标题"] == "工行房贷贴息"
+        assert out["链接"] == "https://a"
+        assert out["时间"] == "2026-10-30 19:42"
+
+    def test_iso_timestamp_normalized(self):
+        from tradex.service.news_service import _unify_news_record
+
+        out = _unify_news_record({"内容": "x", "发布时间": "2026-10-30T20:32:31+08:00"})
+        assert out["时间"] == "2026-10-30 20:32:31"
+
+    def test_source_tag_fills_missing_source_field(self):
+        from tradex.service.news_service import _SOURCE_TAG_COL, _unify_news_record
+
+        out = _unify_news_record({"标题": "x", _SOURCE_TAG_COL: "cls_telegraph"})
+        assert out["来源"] == "cls_telegraph"
+
+    def test_nan_strings_become_empty(self):
+        from tradex.service.news_service import _unify_news_record
+
+        out = _unify_news_record({"标题": "nan", "内容": None})
+        assert out["标题"] == ""
+        assert out["摘要"] == ""

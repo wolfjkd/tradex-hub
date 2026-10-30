@@ -7,7 +7,7 @@ Tools:
   - get_sse_dragon_tiger:         上交所官方龙虎榜（含营业部席位）
   - get_szse_dragon_tiger:        深交所官方龙虎榜
   - get_cninfo_announcement_backup: 深交所官方公告（深市备源）
-  - get_trading_calendar:         深交所官方交易日历（整月）
+  - get_trading_calendar:         交易日历（深交所官方 + sina 备源，整月）
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from mcp.server.fastmcp import FastMCP
 
 import pandas as pd
 from ..data_sources import get_router
-from ..utils.cache import TTL_DAILY, cache
+from ..utils.cache import TTL_DAILY, TTL_MACRO, cache
 from ..utils.formatter import df_to_json, error_response
 
 logger = logging.getLogger(__name__)
@@ -108,7 +108,7 @@ def register(mcp: FastMCP):
     @mcp.tool()
     async def get_trading_calendar(year: int = 0, month: int = 0) -> str:
         """
-        【官方一手】深交所交易日历（整月）。
+        交易日历（整月）。主源深交所官方，失效时自动走 sina 交易日清单备源。
 
         Args:
             year: 年份，默认当前年
@@ -118,12 +118,20 @@ def register(mcp: FastMCP):
             交易日历 (JSON)，含日期、是否交易日、节假日说明。
         """
         try:
+            # 按月缓存：日历一个月内不会变，没必要每次打外部接口
+            from datetime import datetime as _dt
+
+            cache_key = f"trading_calendar:{year or _dt.now().year}:{month or _dt.now().month}"
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return cached
+
             df, src = _router.route(
-                "trading_calendar",
-                source_name="szse_official",
-                year=year, month=month,
+                "trading_calendar", year=year, month=month
             )
-            return df_to_json(df)
+            output = df_to_json(df)
+            cache.set(cache_key, output, TTL_MACRO)
+            return output
         except Exception as e:
             return error_response(
                 f"获取交易日历失败: {e}", "get_trading_calendar"

@@ -30,6 +30,73 @@ def _df_to_records(df: pd.DataFrame, max_rows: int | None = None) -> list[dict]:
     return df_to_records(df, max_rows=max_rows)
 
 
+# 各新闻子源列名不一致，按语义归一到统一字段（顺序即优先级）
+_NEWS_TITLE_ALIASES = ("标题", "新闻标题", "名称")
+_NEWS_TIME_ALIASES = ("发布时间", "时间")
+_NEWS_DATE_ALIASES = ("发布日期", "日期")
+_NEWS_SOURCE_ALIASES = ("文章来源", "来源")
+_NEWS_URL_ALIASES = ("新闻链接", "链接", "url", "URL")
+_NEWS_SUMMARY_ALIASES = ("内容", "新闻内容", "摘要", "说明")
+
+
+_SOURCE_TAG_COL = "_tradex_来源"
+
+
+def _tag_source(df: pd.DataFrame, source: str) -> pd.DataFrame:
+    """给子源加上来源标记列。
+
+    瘦身会丢掉原始宽表，来源也随之丢失；在合并前打一列标记，
+    归一后就能填进 来源 字段，不至于让调用方分不清新闻出自哪家。
+    """
+    tagged = df.copy()
+    tagged[_SOURCE_TAG_COL] = str(source or "")
+    return tagged
+
+
+def _first_text(record: dict, aliases: tuple[str, ...]) -> str:
+    """按别名顺序取第一个非空文本值，顺手过滤 NaN/NaT 的字符串残留。"""
+    for key in aliases:
+        value = record.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text and text.lower() not in ("nan", "nat", "none"):
+            return text
+    return ""
+
+
+def _unify_news_record(record: dict) -> dict:
+    """把任意子源的一行归一成统一的 5 字段。
+
+    输出字段固定为 标题/时间/来源/链接/摘要 —— 不再输出源表里的其余 40 列。
+    """
+    time_text = _first_text(record, _NEWS_TIME_ALIASES)
+    date_text = _first_text(record, _NEWS_DATE_ALIASES)
+
+    if time_text and len(time_text) >= 16 and "-" in time_text:
+        stamp = time_text                      # 已是完整时间戳（新浪/期货）
+    elif date_text and time_text:
+        stamp = f"{date_text} {time_text}"     # 财联社：日期与时刻分两列
+    else:
+        stamp = time_text or date_text
+
+    # 去掉 ISO 的 T 与 +08:00 尾巴，统一成 "YYYY-MM-DD HH:MM:SS" 便于阅读与比较
+    if stamp:
+        stamp = stamp.replace("T", " ").split("+")[0].strip()
+        if stamp.endswith("Z"):
+            stamp = stamp[:-1].strip()
+        stamp = stamp[:19] if len(stamp) >= 19 else stamp
+
+    return {
+        "标题": _first_text(record, _NEWS_TITLE_ALIASES),
+        "时间": stamp,
+        "来源": _first_text(record, _NEWS_SOURCE_ALIASES)
+        or _first_text(record, (_SOURCE_TAG_COL,)),
+        "链接": _first_text(record, _NEWS_URL_ALIASES),
+        "摘要": _first_text(record, _NEWS_SUMMARY_ALIASES),
+    }
+
+
 def get_stock_news(symbol: str) -> dict[str, Any]:
     """个股相关新闻资讯。
 
@@ -121,7 +188,7 @@ def search_news(
         try:
             df, _src = _router.route("news_data", symbol=symbol)
             if df is not None and not df.empty:
-                all_dfs.append(df)
+                all_dfs.append(_tag_source(df, _src))
         except Exception as exc:
             logger.debug("个股新闻源失败(%s): %s", symbol, exc)
 
@@ -137,7 +204,7 @@ def search_news(
                 route_type, kwargs = source_cmd
                 df, _src = _router.route(route_type, **kwargs)
                 if df is not None and not df.empty:
-                    all_dfs.append(df)
+                    all_dfs.append(_tag_source(df, _src))
             except Exception as exc:
                 logger.debug("%s 源失败: %s", route_type, exc)
         # 百度交易提醒（多个 endpoint）
@@ -145,7 +212,7 @@ def search_news(
             for ep in ["suspend", "dividend", "report_time"]:
                 df, _src = _router.route("baidu_trade_notify", endpoint=ep, date="")
                 if df is not None and not df.empty:
-                    all_dfs.append(df)
+                    all_dfs.append(_tag_source(df, _src))
         except Exception as exc:
             logger.debug("百度交易提醒源失败: %s", exc)
 
@@ -156,52 +223,28 @@ def search_news(
 
     combined = pd.concat(all_dfs, ignore_index=True)
 
-    # 关键词过滤
-    _TEXT_COLS = {"标题", "内容", "新闻标题", "文章来源", "新闻内容", "名称", "说明", "摘要"}
-    _text_cols = [
-        c for c in combined.columns
-        if c in _TEXT_COLS or "标题" in c or "内容" in c or "名称" in c
-    ]
+    # 各子源 schema 不同，直接 union 会得到 40+ 列、绝大多数为 NaN 的宽表
+    # （单条约 500 字节无效负载，纯烧 LLM 上下文）。先归一到统一字段再过滤。
+    records = [_unify_news_record(rec) for rec in _df_to_records(combined)]
+
     keywords = [
         kw.strip() for kw in keyword.replace(",", " ").replace("，", " ").split()
         if kw.strip()
     ]
-    if keywords and _text_cols:
-        mask = pd.Series(False, index=combined.index)
-        for col in _text_cols:
-            for kw in keywords:
-                try:
-                    mask = mask | combined[col].astype(str).str.contains(
-                        kw, case=False, na=False
-                    )
-                except Exception:
-                    continue
-        combined = combined[mask]
 
-    # 文本列落空 → 全列兜底
-    if combined.empty and keywords:
-        mask = pd.Series(False, index=combined.index)
-        for col in combined.columns:
-            for kw in keywords:
-                try:
-                    mask = mask | combined[col].astype(str).str.contains(
-                        kw, case=False, na=False
-                    )
-                except Exception:
-                    continue
-        combined = combined[mask]
+    def _match(record: dict, kws: list[str]) -> bool:
+        haystack = f"{record['标题']} {record['摘要']}".lower()
+        return any(kw.lower() in haystack for kw in kws)
 
-    # 仍为空 → 返回未过滤前 num_results 条
-    if combined.empty:
-        combined = pd.concat(all_dfs, ignore_index=True).head(num_results)
+    matched = [r for r in records if _match(r, keywords)] if keywords else records
+    # 过滤后为空 → 退回未过滤结果（宁可给全量，也不返回空列表让上层误判无新闻）
+    news = (matched or records)[:num_results]
 
-    combined = combined.head(num_results)
-    records = _df_to_records(combined)
     result = {
         "keyword": keyword,
         "symbol": symbol,
-        "news": records,
-        "count": len(records),
+        "news": news,
+        "count": len(news),
     }
     cache.set(cache_key, result, TTL_REALTIME)
     return result

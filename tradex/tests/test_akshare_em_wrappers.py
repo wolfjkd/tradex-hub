@@ -311,11 +311,21 @@ class TestLimitUpBoardEm:
             with pytest.raises(RuntimeError, match="返回空"):
                 fetch_limit_up_board_em(date="20260925")
 
-    def test_missing_date_raises_value_error(self):
-        """date 必填，缺失抛 ValueError。"""
+    def test_missing_date_falls_back_to_latest_trading_day(self):
+        """date 缺省时自动回退到最近有数据的交易日（KNOWN-ISSUES #5 修复）。
+
+        旧行为是抛 ValueError 逼调用方自己算交易日 —— 而 akshare 该接口必须
+        传交易日，非交易日返回空表，等于把「猜交易日」的负担丢给上层。
+        """
         from tradex.data_sources.akshare_fetchers import fetch_limit_up_board_em
-        with pytest.raises(ValueError, match="必须传 date"):
-            fetch_limit_up_board_em(date="")
+        with patch(
+            "akshare.stock_zt_pool_em", return_value=_FAKE_ZT_POOL
+        ) as mock_fn:
+            result = fetch_limit_up_board_em(date="")
+        assert len(result) == 2
+        # 落到某个合法的 8 位交易日
+        used = mock_fn.call_args.kwargs.get("date")
+        assert used and len(used) == 8 and used.isdigit()
 
     def test_invalid_date_format_raises_value_error(self):
         """日期格式错误抛 ValueError（YYYYMMDD 8 位数字，去横杠后）。
@@ -349,5 +359,9 @@ class TestLimitUpBoardRegistration:
         with patch("akshare.stock_zt_pool_em", return_value=_FAKE_ZT_POOL):
             data, source = router.route("limit_up_board", date="20260925")
         assert source == "akshare_em"
-        assert len(data) == 2
-        assert data[0]["code"] == "000498"
+        # 2026-10-30 起统一为信封结构（工具层要 result["data"] / result["date"]）
+        assert data["board_type"] == "zt"
+        assert data["date"] == "20260925"
+        assert data["count"] == 2
+        assert len(data["data"]) == 2
+        assert data["data"][0]["code"] == "000498"

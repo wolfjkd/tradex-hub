@@ -239,7 +239,7 @@ def _do_register() -> None:
     router.register("lockup_expiry", "em_datacenter", asf.fetch_lockup_expiry, priority=999, exclusive=True)
     # limit_up_board：原 em_push2_clist 主源已删（push2 域名被封）→ 整类型失效
     # 2026-09-26 修复：补 akshare_em 主源（stock_zt_pool_em），独立于 push2 域名族
-    router.register("limit_up_board", "akshare_em", akf.fetch_limit_up_board_em, priority=1)
+    router.register("limit_up_board", "akshare_em", akf.fetch_limit_up_board, priority=1)
 
     # ── akshare 主 + tencent_http 备 ──
     router.register("profit_forecast", "akshare", akf.fetch_profit_forecast, priority=1)
@@ -459,6 +459,8 @@ def _do_register() -> None:
     router.register("st_stock_list", "baostock_tcp", baostock.fetch_baostock_st_list, priority=100)
     # 交易日历：深交所官方替换 eltdx 兜底
     router.register("trading_calendar", "szse_official", exchg.fetch_szse_trading_calendar, priority=50)
+    # 交易日历备源：sina 交易日清单（与深交所接口完全独立，覆盖 1990→当年年末）
+    router.register("trading_calendar", "akshare_sina", akf.fetch_trading_calendar, priority=100)
     # 深市公告：官方备源（与巨潮独立）
     router.register("cninfo_announcement", "szse_official", exchg.fetch_szse_announcement, priority=100)
     # 两融明细：交易所官方一手

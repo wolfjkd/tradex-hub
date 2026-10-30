@@ -253,7 +253,8 @@ class TestBackupSourceRegistration:
         #   → 157（SP-2026-09-23/25 数据源大扩充 + v3.3.15 备源补齐）
         #   → 145（2026-09-28 死源剥离：12 个注册点移除）
         #   → 148（SP-2026-10-13-001 tq 源 +3：realtime_quote/l2_stats/tdx_formula）
-        assert sum(len(v) for v in router._sources.values()) == 148
+        #   → 149（2026-10-30 KNOWN-ISSUES #1：trading_calendar 补 sina 备源）
+        assert sum(len(v) for v in router._sources.values()) == 149
 
     def test_new_sources_registered_with_priority(self, router):
         for data_type, name, prio in NEW_SOURCES:

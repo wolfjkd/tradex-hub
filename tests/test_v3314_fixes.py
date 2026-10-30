@@ -150,7 +150,8 @@ class TestIndependentBackupSources:
         #           → 145（2026-09-28 死源剥离：新浪期权 2 + 中证/国证 5 +
         #                  货币网 2 + 人行 1 + 互动 2，共 12 个注册点移除）
         #           → 148（SP-2026-10-13-001 tq 源 +3：realtime_quote/l2_stats/tdx_formula）
-        assert len(router.get_registry_report()) == 148
+        #           → 149（2026-10-30 KNOWN-ISSUES #1：trading_calendar 补 sina 备源）
+        assert len(router.get_registry_report()) == 149
 
     def test_unsupported_endpoint_raises(self):
         """备源只覆盖部分 endpoint，其余必须显式报错而非静默返回空。"""

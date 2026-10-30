@@ -1990,22 +1990,109 @@ def fetch_limit_up_board_em(*, date: str = "", **kwargs) -> list[dict]:
         - 所属行业：东财二级行业分类
 
     Raises:
-        ValueError: date 为空或格式错误
+        ValueError: date 格式错误
         RuntimeError: akshare 返回空（非交易日 / 数据未更新）
     """
-    if not date:
-        raise ValueError("fetch_limit_up_board_em 必须传 date 参数（YYYYMMDD）")
-    s = str(date).strip().replace("-", "")
-    if len(s) != 8 or not s.isdigit():
-        raise ValueError(f"date 参数格式错误：{date!r}（应为 YYYYMMDD 8 位数字）")
+    s = _normalize_board_date(date) if date else _latest_board_date()
 
     ak = _ak()
     df = ak.stock_zt_pool_em(date=s)
     if df is None or df.empty:
         raise RuntimeError(f"AKShare stock_zt_pool_em 返回空（date={s}，可能非交易日或数据未更新）")
-    result: list[dict] = []
+    return _map_pool_rows(df, "zt")
+
+
+# ============================================================
+# 涨停四池 + 打板情绪（2026-10-30 专项重构）
+#
+# 修复背景（KNOWN-ISSUES #5）：schema 不许传 date、底层又强校验 date 必填，
+# 调用方无解；且路由层只挂了一个只返回涨停池 list 的 fetcher，
+# 而工具期望 {"data": [...]} 信封 —— 整条链路上层也拿不到数据。
+# 现在改为：date 缺省自动回退到最近有数据的交易日，四池统一映射，
+# 情绪指标由四池现算（公式见 fetch_board_sentiment 文档）。
+# ============================================================
+
+# 四池原始列名不完全一致，按语义归一到统一字段
+_POOL_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
+    "sealed_capital": ("封板资金", "封单资金", "封单额"),
+    "first_seal_time": ("首次封板时间", "昨日封板时间"),
+    "last_seal_time": ("最后封板时间",),
+    "break_count": ("炸板次数", "开板次数"),
+    "consecutive_days": ("连板数", "昨日连板数", "连续跌停"),
+}
+
+_POOL_AK_FUNCS: dict[str, str] = {
+    "zt": "stock_zt_pool_em",
+    "zb": "stock_zt_pool_zbgc_em",
+    "dt": "stock_zt_pool_dtgc_em",
+    "prev_zt": "stock_zt_pool_previous_em",
+}
+
+_BOARD_TYPE_ALIASES = {
+    "zt": "zt", "涨停": "zt", "limit_up": "zt",
+    "zb": "zb", "炸板": "zb", "break": "zb",
+    "dt": "dt", "跌停": "dt", "limit_down": "dt",
+    "prev_zt": "prev_zt", "prev": "prev_zt", "昨日涨停": "prev_zt",
+}
+
+
+def _normalize_board_date(date: str) -> str:
+    """校验并归一日期为 YYYYMMDD（允许 YYYY-MM-DD）。"""
+    s = str(date or "").strip().replace("-", "")
+    if len(s) != 8 or not s.isdigit():
+        raise ValueError(f"date 参数格式错误：{date!r}（应为 YYYYMMDD 8 位数字）")
+    return s
+
+
+def _latest_board_date(max_back_days: int = 15) -> str:
+    """从今天往回找最近一个「涨停池有数据」的交易日。
+
+    非交易日（周末/长假）直接传当天会拿到空表，调用方还得自己猜哪天是交易日。
+    这里代劳：最多回溯 max_back_days 个自然日（覆盖春节/国庆长假）。
+    """
+    date_str, _rows = _latest_board_date_with_rows(max_back_days)
+    return date_str
+
+
+def _latest_board_date_with_rows(
+    max_back_days: int = 15,
+) -> tuple[str, list[dict]]:
+    """同 _latest_board_date，但顺带返回涨停池已取到的行，省一次重复请求。"""
+    ak = _ak()
+    today = datetime.now()
+    for back in range(max_back_days + 1):
+        candidate = (today - timedelta(days=back)).strftime("%Y%m%d")
+        try:
+            df = ak.stock_zt_pool_em(date=candidate)
+        except Exception:  # noqa: BLE001 - 单日探测失败继续回溯
+            continue
+        if df is not None and not df.empty:
+            return candidate, _map_pool_rows(df, "zt")
+    raise RuntimeError(
+        f"近 {max_back_days} 个自然日内未取到涨停池数据，无法推断最近交易日；"
+        "请显式传 date（YYYYMMDD）"
+    )
+
+
+def _pick_field(row, columns, aliases: tuple[str, ...], default=0):
+    """按别名顺序从行里取第一个存在的字段。"""
+    for name in aliases:
+        if name in columns:
+            value = row.get(name)
+            if value is not None and not (isinstance(value, float) and pd.isna(value)):
+                return value
+    return default
+
+
+def _map_pool_rows(df: pd.DataFrame, board_type: str) -> list[dict]:
+    """把某个池的原始表映射为统一字段结构。"""
+    if df is None or df.empty:
+        return []
+    columns = set(df.columns)
+    source = f"AKShare_{_POOL_AK_FUNCS.get(board_type, 'stock_zt_pool_em')}"
+    rows: list[dict] = []
     for _, row in df.iterrows():
-        result.append({
+        rows.append({
             "code": str(row.get("代码", "")).zfill(6),
             "name": str(row.get("名称", "")),
             "change_pct": float(row.get("涨跌幅", 0) or 0),
@@ -2014,14 +2101,238 @@ def fetch_limit_up_board_em(*, date: str = "", **kwargs) -> list[dict]:
             "float_mv": float(row.get("流通市值", 0) or 0),
             "total_mv": float(row.get("总市值", 0) or 0),
             "turnover_rate": float(row.get("换手率", 0) or 0),
-            "sealed_capital": float(row.get("封板资金", 0) or 0),
-            "first_seal_time": str(row.get("首次封板时间", "")),
-            "last_seal_time": str(row.get("最后封板时间", "")),
-            "break_count": int(row.get("炸板次数", 0) or 0),
+            "sealed_capital": float(
+                _pick_field(row, columns, _POOL_FIELD_ALIASES["sealed_capital"], 0) or 0
+            ),
+            "first_seal_time": str(
+                _pick_field(row, columns, _POOL_FIELD_ALIASES["first_seal_time"], "")
+            ),
+            "last_seal_time": str(
+                _pick_field(row, columns, _POOL_FIELD_ALIASES["last_seal_time"], "")
+            ),
+            "break_count": int(
+                _pick_field(row, columns, _POOL_FIELD_ALIASES["break_count"], 0) or 0
+            ),
             "limit_up_stats": str(row.get("涨停统计", "")),
-            "consecutive_days": int(row.get("连板数", 0) or 0),
+            "consecutive_days": int(
+                _pick_field(row, columns, _POOL_FIELD_ALIASES["consecutive_days"], 0) or 0
+            ),
             "industry": str(row.get("所属行业", "")),
-            "source": "AKShare_stock_zt_pool_em",
+            "source": source,
         })
-    return result
+    return rows
+
+
+def _fetch_pool_rows(board_type: str, date: str) -> list[dict]:
+    """取单个池（日期已归一）。空表返回空列表，不抛。"""
+    func_name = _POOL_AK_FUNCS.get(board_type)
+    if func_name is None:
+        raise ValueError(
+            f"未知 board_type：{board_type!r}（可选 zt/zb/dt/prev_zt/sentiment）"
+        )
+    ak = _ak()
+    df = getattr(ak, func_name)(date=date)
+    return _map_pool_rows(df, board_type)
+
+
+def fetch_limit_up_board(
+    *,
+    board_type: str = "zt",
+    date: str = "",
+    **kwargs,
+) -> dict:
+    """涨停四池（统一信封）—— limit_up_board 路由入口。
+
+    board_type: zt(涨停) / zb(炸板) / dt(跌停) / prev_zt(昨日涨停) / sentiment(打板情绪)
+
+    Returns:
+        {"board_type","date","count","data":[...]}；sentiment 见 fetch_board_sentiment
+    """
+    bt = _BOARD_TYPE_ALIASES.get(str(board_type or "zt").strip().lower())
+    if str(board_type or "").strip().lower() == "sentiment":
+        return fetch_board_sentiment(date=date)
+
+    if bt is None:
+        raise ValueError(
+            f"未知 board_type：{board_type!r}（可选 zt/zb/dt/prev_zt/sentiment）"
+        )
+
+    s = _normalize_board_date(date) if date else _latest_board_date()
+    rows = _fetch_pool_rows(bt, s)
+    if not rows:
+        raise RuntimeError(f"{bt} 池返回空（date={s}，可能非交易日或数据未更新）")
+    return {"board_type": bt, "date": s, "count": len(rows), "data": rows}
+
+
+def fetch_board_sentiment(*, date: str = "", **kwargs) -> dict:
+    """打板情绪速算（由涨停四池现算，不依赖已失效的 push2 clist）。
+
+    指标口径（写在代码里，避免以后又变成口头传说）：
+      - 炸板率 = 炸板数 / (涨停数 + 炸板数)，反映封板强度
+      - 连板梯队 = 涨停池中连板数 ≥2 的分档计数
+      - 晋级率 = 今日涨停 ∩ 昨日涨停池 / 昨日涨停池数量
+      - 平均溢价 = 昨日涨停股「今日」涨跌幅均值（打板次日收益的近似）
+      - 热门题材 = 涨停池按所属行业计数 Top5
+
+    涨停池取不到直接抛错（核心口径不可缺）；其余三池缺失时降级为空并标注
+    missing，绝不拿 0 冒充有效值。
+    """
+    s = _normalize_board_date(date) if date else ""
+
+    from collections import Counter
+    from concurrent.futures import ThreadPoolExecutor
+
+    if s:
+        zt_rows = _fetch_pool_rows("zt", s)
+    else:
+        s, zt_rows = _latest_board_date_with_rows()
+
+    if not zt_rows:
+        raise RuntimeError(f"涨停池为空（date={s}），无法计算打板情绪")
+
+    missing: list[str] = []
+    aux: dict[str, list[dict]] = {}
+    # 三个辅助池并发取：串行 4 池会把路由的单次尝试超时（12s）顶穿
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures = {key: pool.submit(_fetch_pool_rows, key, s) for key in ("zb", "dt", "prev_zt")}
+        for key, future in futures.items():
+            try:
+                aux[key] = future.result(timeout=10)
+            except Exception as exc:  # noqa: BLE001 - 辅助池失败只降级不拦截
+                logger.warning("board_sentiment: %s 池获取失败(%s): %s", key, s, exc)
+                aux[key] = []
+                missing.append(key)
+
+    zb_rows, dt_rows, prev_rows = aux["zb"], aux["dt"], aux["prev_zt"]
+
+    # 辅助池缺失时计数必须是 None —— 用 0 会算出「炸板率 0%」这种伪造的强封板信号
+    limit_up_count = len(zt_rows)
+    broken_count = None if "zb" in missing else len(zb_rows)
+    limit_down_count = None if "dt" in missing else len(dt_rows)
+    seal_base = (
+        limit_up_count + broken_count if broken_count is not None else None
+    )
+    broken_rate = (
+        round(broken_count / seal_base * 100, 2) if seal_base else None
+    )
+
+    ladder_counter = Counter(
+        row["consecutive_days"] for row in zt_rows if row["consecutive_days"] >= 2
+    )
+    ladder = {
+        f"{days}连板": ladder_counter[days]
+        for days in sorted(ladder_counter, reverse=True)
+    }
+    max_consecutive = max((row["consecutive_days"] for row in zt_rows), default=0)
+
+    prev_codes = {row["code"] for row in prev_rows}
+    today_codes = {row["code"] for row in zt_rows}
+    promoted = None if "prev_zt" in missing else len(prev_codes & today_codes)
+    promotion_rate = (
+        round(promoted / len(prev_codes) * 100, 2)
+        if promoted is not None and prev_codes
+        else None
+    )
+
+    premium_values = [row["change_pct"] for row in prev_rows]
+    avg_premium = (
+        round(sum(premium_values) / len(premium_values), 2) if premium_values else None
+    )
+
+    hot_industries = [
+        {"题材": name, "涨停数": count}
+        for name, count in Counter(
+            row["industry"] for row in zt_rows if row["industry"]
+        ).most_common(5)
+    ]
+
+    return {
+        "date": s,
+        "涨停数": limit_up_count,
+        "炸板数": broken_count,
+        "跌停数": limit_down_count,
+        "炸板率(%)": broken_rate,
+        "最高连板": max_consecutive,
+        "连板梯队": ladder,
+        "昨日涨停数": len(prev_rows),
+        "晋级数": promoted,
+        "晋级率(%)": promotion_rate,
+        "平均溢价(%)": avg_premium,
+        "热门题材": hot_industries,
+        "missing_pools": missing,
+        "source": "akshare_em(zt/zb/dt/prev_zt)",
+    }
+
+
+# ============================================================
+# trading_calendar 备源 —— sina 交易日清单（2026-10-30 专项重构 #1）
+#
+# 背景：深交所官方接口 2026-10 起返 404，而全仓只有它一个源、没有兜底，
+# 交易日判定整条能力直接失效，只能靠提示词层的降级链硬撑。
+# 备源走 akshare 的 sina 交易日清单（1990→当年年末），与深交所完全独立。
+# ============================================================
+
+def fetch_trading_calendar(year: int = 0, month: int = 0, **kwargs) -> pd.DataFrame:
+    """交易日历（sina 交易日清单备源，整月口径与深交所主源对齐）。
+
+    Args:
+        year: 年份，默认当前年
+        month: 月份，默认当前月
+
+    Returns:
+        DataFrame with columns: 日期(YYYY-MM-DD)、是否交易日(是/否)、节假日
+
+    Raises:
+        RuntimeError: sina 清单尚未覆盖该月份（不猜、不伪造交易日）
+    """
+    if not year:
+        year = datetime.now().year
+    if not month:
+        month = datetime.now().month
+
+    ak = _ak()
+    df = ak.tool_trade_date_hist_sina()
+    if df is None or df.empty:
+        raise RuntimeError("sina 交易日清单返回空")
+    if "trade_date" not in df.columns:
+        raise RuntimeError(
+            f"sina 交易日清单结构变化，缺少 trade_date 列：{list(df.columns)}"
+        )
+
+    trade_days = pd.to_datetime(df["trade_date"], errors="coerce").dropna()
+    if trade_days.empty:
+        raise RuntimeError("sina 交易日清单无有效日期")
+
+    max_day = trade_days.max().date()
+    last_day_of_month = calendar.monthrange(year, month)[1]
+    # 覆盖性按「月份」判定，不按最后一天：清单只含交易日，
+    # 若月末恰是周末/节假日，用「月末 > 最后交易日」会误判成未覆盖。
+    if (year, month) > (max_day.year, max_day.month):
+        raise RuntimeError(
+            f"sina 交易日清单仅覆盖到 {max_day}，无法判定 {year}-{month:02d}；"
+            "请改用其他来源或等待清单更新"
+        )
+
+    trade_set = set(trade_days.dt.date)
+    rows = []
+    for day_num in range(1, last_day_of_month + 1):
+        cur = datetime(year, month, day_num).date()
+        is_trade = cur in trade_set
+        if is_trade:
+            memo = ""
+        elif cur.weekday() >= 5:
+            memo = "周末"
+        else:
+            memo = "休市"
+        rows.append({
+            "日期": cur.strftime("%Y-%m-%d"),
+            "是否交易日": "是" if is_trade else "否",
+            "节假日": memo,
+        })
+
+    if not any(r["是否交易日"] == "是" for r in rows):
+        raise RuntimeError(f"{year}-{month:02d} 无任何交易日，sina 清单可能滞后")
+    return pd.DataFrame(rows)
+
+
 

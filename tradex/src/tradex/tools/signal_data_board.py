@@ -57,17 +57,18 @@ def register(mcp: FastMCP):
     # ----------------------------------------------------------------
 
     @mcp.tool()
-    async def get_limit_up_board(board_type: str = "zt") -> str:
+    async def get_limit_up_board(board_type: str = "zt", date: str = "") -> str:
         """
-        获取涨停板数据（东财 push2ex）。
+        获取涨停板数据（东财 akshare 四池）。
 
         支持四种类型：涨停池/炸板池/跌停池/昨日涨停池。
 
         Args:
             board_type: 板类型，可选 zt(涨停)/zb(炸板)/dt(跌停)/prev_zt(昨日涨停)。
+            date: 交易日 YYYYMMDD，默认自动回退到最近有数据的交易日。
 
         Returns:
-            板数据 (JSON)，含股票列表及对应字段。
+            板数据 (JSON)，含 date、count 与 data（股票列表）。
         """
         board_type = board_type.lower().strip()
         if board_type not in ["zt", "zb", "dt", "prev_zt"]:
@@ -76,14 +77,16 @@ def register(mcp: FastMCP):
                 "get_limit_up_board",
             )
 
-        cache_key = f"limit_up_board:{board_type}"
+        cache_key = f"limit_up_board:{board_type}:{date or 'auto'}"
         cached = cache.get(cache_key)
         if cached is not None:
             return cached
 
         try:
             # limit_up_board: board_type → get_limit_up_board_json(board_type)
-            result, _src = _router.route("limit_up_board", board_type=board_type)
+            result, _src = _router.route(
+                "limit_up_board", board_type=board_type, date=date, timeout=25
+            )
             output = dict_to_json(result)
             if result.get("data"):
                 cache.set(cache_key, output, TTL_REALTIME)
@@ -97,26 +100,29 @@ def register(mcp: FastMCP):
             )
 
     @mcp.tool()
-    async def get_board_sentiment() -> str:
+    async def get_board_sentiment(date: str = "") -> str:
         """
         获取打板情绪数据（炸板率/连板梯队/晋级率）。
 
-        综合涨停四池数据，计算市场打板情绪指标：炸板率、连板梯队、
-        昨日涨停晋级率、平均溢价、热门题材等。
+        由涨停四池现算：炸板率、连板梯队、昨日涨停晋级率、平均溢价、热门题材。
+
+        Args:
+            date: 交易日 YYYYMMDD，默认自动回退到最近有数据的交易日。
 
         Returns:
-            打板情绪数据 (JSON)，含涨停数/炸板数/跌停数/炸板率/
+            打板情绪数据 (JSON)，含 date/涨停数/炸板数/跌停数/炸板率/
             连板梯队/晋级率/平均溢价/热门题材。
         """
-        cache_key = "board_sentiment"
+        cache_key = f"board_sentiment:{date or 'auto'}"
         cached = cache.get(cache_key)
         if cached is not None:
             return cached
 
         try:
-            # limit_up_board: board_type="sentiment" → get_board_sentiment_json()
+            # limit_up_board: board_type="sentiment" → fetch_board_sentiment()
+            # 四池并发取，单次尝试超时放宽到 30s（默认 12s 会被慢源顶穿）
             result, _src = _router.route(
-                "limit_up_board", board_type="sentiment"
+                "limit_up_board", board_type="sentiment", date=date, timeout=30
             )
             output = dict_to_json(result)
             if not result.get("error"):
