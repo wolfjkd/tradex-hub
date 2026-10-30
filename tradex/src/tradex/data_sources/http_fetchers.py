@@ -82,6 +82,8 @@ def fetch_realtime_quote_tencent(symbol: str = "", code: str = "", **kwargs):
         "总市值": float(vals[45]) * 1e8 if len(vals) > 45 and vals[45] else 0,
         "流通市值": float(vals[44]) * 1e8 if len(vals) > 44 and vals[44] else 0,
         "市盈率": float(vals[39]) if len(vals) > 39 and vals[39] else 0,
+        # 腾讯字段 46 = 市净率（2026-10-30 实证 sh600170：0.58，与百度估值源 0.59 吻合）
+        "市净率": float(vals[46]) if len(vals) > 46 and vals[46] else 0,
     }])
 
 

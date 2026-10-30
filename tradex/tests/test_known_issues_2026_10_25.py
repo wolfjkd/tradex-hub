@@ -537,3 +537,110 @@ class TestNewsAggregationSlim:
         out = _unify_news_record({"标题": "nan", "内容": None})
         assert out["标题"] == ""
         assert out["摘要"] == ""
+
+    def test_get_stock_news_same_shape_as_search(self, monkeypatch):
+        """两个新闻工具的返回结构必须一致，否则调用方要按工具分别适配。"""
+        from tradex.service import news_service
+        from tradex.utils.cache import cache
+
+        cache.clear()
+        df = pd.DataFrame([{
+            "关键词": "600170",
+            "新闻标题": "上海建工中标",
+            "新闻内容": "中标金额 10 亿",
+            "发布时间": "2026-10-30 09:30:00",
+            "文章来源": "东方财富",
+            "新闻链接": "https://x",
+        }])
+
+        class _Router:
+            def route(self, route_type, **kwargs):
+                return df, "akshare"
+
+        monkeypatch.setattr(news_service, "_router", _Router())
+
+        out = news_service.get_stock_news("600170")
+
+        assert out["count"] if "count" in out else True
+        record = out["news"][0]
+        assert list(record) == ["标题", "时间", "来源", "链接", "摘要"]
+        assert record["标题"] == "上海建工中标"
+        assert record["来源"] == "东方财富"
+        assert record["时间"] == "2026-10-30 09:30:00"
+
+
+# ══════════════════════════════════════════════════════════════════
+# 07 实时行情补估值字段
+# ══════════════════════════════════════════════════════════════════
+
+class TestRealtimeQuoteValuation:
+    """主源（eltdx）不带估值字段 → 服务层补一层，取不到必须是 null 不是 0。"""
+
+    def _router(self, main_row, valuation_row=None, main_fails=False):
+        class _R:
+            def route(self, route_type, **kwargs):
+                if kwargs.get("source_name") == "tencent_http":
+                    if valuation_row is None:
+                        raise RuntimeError("tencent down")
+                    return pd.DataFrame([valuation_row]), "tencent_http"
+                if main_fails:
+                    raise RuntimeError("primary down")
+                return pd.DataFrame([main_row]), "eltdx"
+
+        return _R()
+
+    def test_fills_pe_pb_from_backup(self, monkeypatch):
+        from tradex.service import price_service
+        from tradex.utils.cache import cache
+
+        cache.clear()
+        monkeypatch.setattr(
+            price_service,
+            "_router",
+            self._router(
+                {"代码": "600170", "最新价": 11.64}, {"市盈率": 21.5, "市净率": 0.58}
+            ),
+        )
+
+        out = price_service.get_realtime_quote("600170")
+
+        assert out["quote"]["市盈率"] == 21.5
+        assert out["quote"]["市净率"] == 0.58
+        assert "valuation_note" not in out
+
+    def test_missing_valuation_is_null_not_zero(self, monkeypatch):
+        """备源也失败时必须是 null + 说明，绝不能填 0 冒充。"""
+        from tradex.service import price_service
+        from tradex.utils.cache import cache
+
+        cache.clear()
+        monkeypatch.setattr(
+            price_service,
+            "_router",
+            self._router({"代码": "600170", "最新价": 11.64}, valuation_row=None),
+        )
+
+        out = price_service.get_realtime_quote("600170")
+
+        assert out["quote"]["市盈率"] is None
+        assert out["quote"]["市净率"] is None
+        assert "valuation_note" in out
+
+    def test_zero_pe_treated_as_missing(self, monkeypatch):
+        """上游空字段被适配器写成 0，0 不能当成「PE=0 极度低估」。"""
+        from tradex.service import price_service
+        from tradex.utils.cache import cache
+
+        cache.clear()
+        monkeypatch.setattr(
+            price_service,
+            "_router",
+            self._router(
+                {"代码": "600170", "最新价": 11.64}, {"市盈率": 0, "市净率": 0.58}
+            ),
+        )
+
+        out = price_service.get_realtime_quote("600170")
+
+        assert out["quote"]["市盈率"] is None
+        assert out["quote"]["市净率"] == 0.58

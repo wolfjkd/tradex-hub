@@ -178,6 +178,40 @@ def _filter_by_date(
     return df.sort_values(date_col, ascending=True)
 
 
+def _fetch_valuation_snapshot(symbol: str) -> dict[str, float | None]:
+    """补取市盈率/市净率（实时行情主源 eltdx 不带估值字段）。
+
+    为什么单独走腾讯：一次 HTTP 就能同时拿到 PE(val[39]) 与 PB(val[46])，
+    比连打百度估值两次便宜得多；且按日缓存，同一标的当天只补一次。
+
+    取不到就留 None —— 绝不填 0，0 会被当成「PE=0 极度低估」这种假信号。
+    """
+    cache_key = f"valuation_snapshot:{symbol}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    snapshot: dict[str, float | None] = {"市盈率": None, "市净率": None}
+    try:
+        df, _src = _router.route(
+            "realtime_quote", source_name="tencent_http", symbol=symbol
+        )
+        if df is not None and not df.empty:
+            row = df.iloc[0]
+            for field in ("市盈率", "市净率"):
+                value = row.get(field)
+                if value is None or pd.isna(value):
+                    continue
+                numeric = float(value)
+                # 上游空字段在该适配器里被写成 0，0 视为缺失而非真实估值
+                snapshot[field] = numeric if numeric != 0 else None
+    except Exception as exc:  # noqa: BLE001 - 估值补取失败不影响行情主流程
+        logger.debug("估值补取失败(%s): %s", symbol, exc)
+
+    cache.set(cache_key, snapshot, TTL_DAILY)
+    return snapshot
+
+
 def get_realtime_quote(symbol: str) -> dict[str, Any]:
     """实时报价（A 股 6 位代码或全球行情代码 usDJI/hkHSI 等）。
 
@@ -234,12 +268,24 @@ def get_realtime_quote(symbol: str) -> dict[str, Any]:
     else:
         row = df
     records = df_to_records(row)
+    quote = records[0] if records else {}
+    # 主源不带估值字段 → 补一层（按日缓存，失败留 None）
+    missing = [field for field in ("市盈率", "市净率") if quote.get(field) in (None, "")]
+    if missing:
+        snapshot = _fetch_valuation_snapshot(symbol)
+        for field in missing:
+            quote[field] = snapshot.get(field)
     result = {
-        "quote": records[0] if records else {},
+        "quote": quote,
         "symbol": symbol,
         "is_index": is_index,
         "source": _src,
     }
+    if any(quote.get(field) is None for field in ("市盈率", "市净率")):
+        result["valuation_note"] = (
+            "市盈率/市净率缺失：实时行情主源不带估值字段，估值备源当日亦未取到；"
+            "需要时改用 get_valuation_metrics"
+        )
     cache.set(cache_key, result, TTL_REALTIME)
     return result
 

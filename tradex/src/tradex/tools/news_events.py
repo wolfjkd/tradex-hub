@@ -68,7 +68,7 @@ def register(mcp: FastMCP):
             symbol: 6位股票代码，如 "600519"
 
         Returns:
-            新闻列表 (JSON)，包含新闻标题、发布时间、来源、摘要、链接等。
+            新闻列表 (JSON)，每条固定 5 字段：标题、时间、来源、链接、摘要。
         """
         try:
             result = news_service.get_stock_news(symbol=symbol)
@@ -234,7 +234,7 @@ def register(mcp: FastMCP):
             num_results: 最大返回条数，默认20
 
         Returns:
-            匹配的新闻列表 (JSON)，包含标题、时间、来源、摘要等。
+            匹配的新闻列表 (JSON)，每条固定 5 字段：标题、时间、来源、链接、摘要。
         """
         try:
             result = news_service.search_news(

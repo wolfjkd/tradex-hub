@@ -104,7 +104,8 @@ def get_stock_news(symbol: str) -> dict[str, Any]:
         symbol: 6 位股票代码。
 
     Returns:
-        dict：含 news（list，最多 30 条）。
+        dict：含 news（list，最多 30 条，每条固定 5 字段：
+        标题/时间/来源/链接/摘要）。
 
     Raises:
         Exception: 数据源异常。
@@ -117,7 +118,12 @@ def get_stock_news(symbol: str) -> dict[str, Any]:
         return json.loads(cached) if isinstance(cached, str) else cached
 
     df, _src = _router.route("news_data", symbol=symbol)
-    records = _df_to_records(df, max_rows=30)
+    # 与 search_news 用同一套归一：两个新闻工具的返回结构必须一致，
+    # 否则调用方要按工具分别适配字段（2026-10-30 专项重构统一）
+    records = [
+        _unify_news_record(rec)
+        for rec in _df_to_records(_tag_source(df, _src), max_rows=30)
+    ]
     result = {"symbol": symbol, "news": records, "source": _src}
     cache.set(cache_key, result, TTL_REALTIME)
     return result
