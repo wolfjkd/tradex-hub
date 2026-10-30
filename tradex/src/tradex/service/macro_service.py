@@ -17,6 +17,7 @@ import pandas as pd
 
 from ..data_sources import get_router
 from ..utils.cache import TTL_DAILY, cache
+from ..utils.formatter import df_to_records
 
 logger = logging.getLogger(__name__)
 _router = get_router()
@@ -27,7 +28,7 @@ def _df_to_records(df: pd.DataFrame, max_rows: int | None = None) -> list[dict]:
         return []
     if max_rows is not None:
         df = df.head(max_rows)
-    return df.where(pd.notnull(df), None).to_dict(orient="records")
+    return df_to_records(df, max_rows=max_rows)
 
 
 def get_pmi() -> dict[str, Any]:

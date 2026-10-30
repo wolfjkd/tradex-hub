@@ -19,7 +19,7 @@ import pandas as pd
 
 from ..data_sources import get_router
 from ..utils.cache import TTL_DAILY, TTL_REALTIME, cache
-from ..utils.formatter import df_to_json
+from ..utils.formatter import df_to_json, df_to_records
 from ..utils.symbol import normalize_symbol
 
 logger = logging.getLogger(__name__)
@@ -27,11 +27,7 @@ _router = get_router()
 
 
 def _df_to_records(df: pd.DataFrame, max_rows: int | None = None) -> list[dict]:
-    if df is None or df.empty:
-        return []
-    if max_rows is not None:
-        df = df.head(max_rows)
-    return df.where(pd.notnull(df), None).to_dict(orient="records")
+    return df_to_records(df, max_rows=max_rows)
 
 
 def get_stock_news(symbol: str) -> dict[str, Any]:

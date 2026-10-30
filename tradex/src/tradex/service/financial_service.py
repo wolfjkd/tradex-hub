@@ -23,6 +23,7 @@ from ..utils.formatter import (
     CASHFLOW_STATEMENT_COLS,
     INCOME_STATEMENT_COLS,
     df_to_json,
+    df_to_records,
     slim_df,
     slim_financial_df,
 )
@@ -33,12 +34,26 @@ _router = get_router()
 
 
 def _df_to_records(df: pd.DataFrame, max_rows: int | None = None) -> list[dict]:
-    """DataFrame → list of dict（NaN → None）。"""
+    """DataFrame → list of dict（NaN → None，时间类值转 ISO 字符串）。"""
+    return df_to_records(df, max_rows=max_rows)
+
+
+def _latest_periods(df: pd.DataFrame, num_periods: int) -> pd.DataFrame:
+    """按报告期取**最近** N 期。
+
+    坑：stock_financial_analysis_indicator 返回的是按报告期**升序**排的，
+    直接 ``head(n)`` 取到的是上市初期最早几期——表面上「有数据」，实际全是
+    三十年前的。2026-10-30 核验 #4 修复后才暴露（此前工具整体崩溃，无人察觉）。
+    """
     if df is None or df.empty:
-        return []
-    if max_rows is not None:
-        df = df.head(max_rows)
-    return df.where(pd.notnull(df), None).to_dict(orient="records")
+        return df
+    date_col = next(
+        (c for c in df.columns if "日期" in str(c) or "报告" in str(c)), None
+    )
+    if date_col is None:
+        return df.head(num_periods) if num_periods > 0 else df
+    ordered = df.sort_values(date_col, ascending=False)
+    return ordered.head(num_periods) if num_periods > 0 else ordered
 
 
 def get_income_statement(symbol: str, num_quarters: int = 8) -> dict[str, Any]:
@@ -195,8 +210,7 @@ def get_financial_indicators(symbol: str, num_periods: int = 8) -> dict[str, Any
     df, _src = _router.route("financial_stmt", endpoint="indicator", symbol=symbol)
     if df is None or df.empty:
         raise ValueError(f"财务指标数据为空 ({symbol})")
-    if num_periods > 0:
-        df = df.head(num_periods)
+    df = _latest_periods(df, num_periods)
     df = slim_df(df)
     records = _df_to_records(df)
     result = {"symbol": symbol, "indicators": records, "source": _src}
@@ -226,8 +240,7 @@ def get_growth_rates(symbol: str, num_periods: int = 8) -> dict[str, Any]:
             "数据源表结构可能已变化"
         )
     df = df[growth_cols]
-    if num_periods > 0:
-        df = df.head(num_periods)
+    df = _latest_periods(df, num_periods)
     df = slim_df(df)
     records = _df_to_records(df)
     result = {"symbol": symbol, "growth": records, "source": _src}
@@ -254,8 +267,7 @@ def get_per_share_data(symbol: str, num_periods: int = 8) -> dict[str, Any]:
             "数据源表结构可能已变化"
         )
     df = df[share_cols]
-    if num_periods > 0:
-        df = df.head(num_periods)
+    df = _latest_periods(df, num_periods)
     df = slim_df(df)
     records = _df_to_records(df)
     result = {"symbol": symbol, "per_share": records, "source": _src}

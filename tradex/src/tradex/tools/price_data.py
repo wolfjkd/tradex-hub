@@ -86,15 +86,18 @@ def register(mcp: FastMCP):
         获取A股股票历史K线数据 (OHLCV)。
 
         Args:
-            symbol: 6位股票代码，如 "600519"
+            symbol: 6位股票代码，如 "600519"；或带交易所前缀的指数代码
+                （sh000001 上证指数 / sz399001 深证成指 / sz399006 创业板指 /
+                sh000300 沪深300 / sh000688 科创50 / sh000905 中证500 /
+                sz399852 中证1000）。**指数必须带前缀**——裸代码 000001 会被
+                解析为平安银行（深市个股），与上证指数撞号。
             period: K线周期，可选 "daily"（日线）, "weekly"（周线）, "monthly"（月线）
-            start_date: 开始日期，格式 "YYYYMMDD"，如 "20240101"。默认为空返回所有数据。
-            end_date: 结束日期，格式 "YYYYMMDD"，如 "20241231"。默认为空返回至今。
+            start_date: 开始日期，格式 "YYYYMMDD"，如 "20240101"。默认为空表示不设下界。
+            end_date: 结束日期，格式 "YYYYMMDD"，如 "20241231"。默认为空表示到最新。
             adjust: 复权类型，"qfq"（前复权）, "hfq"（后复权）, ""（不复权）
 
         Returns:
-            K线数据 (JSON)，包含日期、开盘价、收盘价、最高价、最低价、
-            成交量、成交额、振幅、涨跌幅、涨跌额、换手率。
+            K线数据 (JSON)，包含 symbol、is_index（是否指数）、bar_count 与 bars。
         """
         try:
             result = price_service.get_historical_price(

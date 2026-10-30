@@ -186,6 +186,85 @@ def slim_df(df: pd.DataFrame) -> pd.DataFrame:
 # Core serializers
 # ──────────────────────────────────────────────────────────────────
 
+def json_safe_value(value: Any) -> Any:
+    """把单个值收敛成 JSON 原生类型（str / int / float / bool / None / 容器）。
+
+    为什么需要它：pandas 取数会带出 ``Timestamp`` / ``datetime.date`` / ``np.int64``
+    等非原生对象，工具出口 ``json.dumps`` 会直接抛 ``TypeError``。
+    2026-10-25 的 ``search_news``、``get_financial_indicators`` 两处「工具返回失败」
+    都源于此，属同一类缺陷，必须在这一层统一收口，避免逐工具打补丁。
+
+    NaN / Inf / NaT 一律转 None（RFC 8259 不允许裸 NaN）。
+    """
+    if value is None:
+        return None
+    # bool 是 int 子类，必须先于数值分支返回
+    if isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        return None if (math.isnan(value) or math.isinf(value)) else value
+    if isinstance(value, dict):
+        return {str(k): json_safe_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [json_safe_value(v) for v in value]
+
+    # 走到这里是非容器对象：先排除 NaT / NA / numpy 缺失值
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+
+    # datetime / date / Timestamp / Timedelta
+    isoformat = getattr(value, "isoformat", None)
+    if callable(isoformat):
+        try:
+            return isoformat()
+        except (TypeError, ValueError):
+            pass
+
+    # numpy 标量（np.int64 / np.float32 等）
+    item = getattr(value, "item", None)
+    if callable(item):
+        try:
+            return json_safe_value(item())
+        except (TypeError, ValueError):
+            pass
+
+    return str(value)
+
+
+def df_to_records(df: pd.DataFrame, max_rows: int | None = None) -> list[dict]:
+    """DataFrame → 可直接 JSON 序列化的记录列表（MCP 工具的统一出口）。
+
+    替代各 service 模块里重复的
+    ``df.where(pd.notnull(df), None).to_dict(orient="records")``——
+    那一版只把缺失值换成 None，仍会带出 Timestamp/date 导致序列化崩溃。
+
+    Args:
+        df: 源 DataFrame。
+        max_rows: 只取前 N 行，None 表示全部。
+
+    Returns:
+        记录列表，值均为 JSON 原生类型。
+    """
+    if df is None or df.empty:
+        return []
+    if max_rows is not None:
+        df = df.head(max_rows)
+    raw = df.where(pd.notnull(df), None).to_dict(orient="records")
+    return [{k: json_safe_value(v) for k, v in record.items()} for record in raw]
+
+
+def to_json_safe(data: Any) -> str:
+    """把任意结构序列化为合法 JSON 字符串（工具响应的唯一推荐出口）。
+
+    相比直接 ``json.dumps``：先做类型收敛再序列化，时间类值统一为 ISO 字符串，
+    不会出现「工具随机因为某行数据是 Timestamp 就整体失败」。
+    """
+    return json.dumps(json_safe_value(data), ensure_ascii=False, default=str)
+
+
 def df_to_json(
     df: pd.DataFrame,
     orient: str = "records",
@@ -242,7 +321,7 @@ def dict_to_json(data: dict[str, Any] | list[dict[str, Any]]) -> str:
     """
     Convert a dict or list of dicts to a JSON string.
 
-    NaN/Inf 值会被清洗为 null，保证输出始终是合法 JSON。
+    NaN/Inf/NaT 会被清洗为 null，时间类值转 ISO 字符串，保证输出始终是合法 JSON。
 
     Args:
         data: Dictionary or list of dictionaries to convert.
@@ -250,7 +329,7 @@ def dict_to_json(data: dict[str, Any] | list[dict[str, Any]]) -> str:
     Returns:
         JSON string.
     """
-    return json.dumps(_sanitize_nan(data), ensure_ascii=False, default=str)
+    return to_json_safe(data)
 
 
 def error_response(message: str, tool_name: str = "") -> str:

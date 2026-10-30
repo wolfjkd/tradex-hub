@@ -21,7 +21,7 @@ import pandas as pd
 from ..data_sources import get_router
 from ..data_sources.akshare_fetchers import fetch_index_daily_amount
 from ..utils.cache import TTL_DAILY, TTL_REALTIME, cache
-from ..utils.formatter import slim_df
+from ..utils.formatter import df_to_records, slim_df
 from ..utils.symbol import normalize_symbol
 
 logger = logging.getLogger(__name__)
@@ -290,19 +290,5 @@ def _df_to_records(df: pd.DataFrame, max_rows: int | None = None) -> list[dict]:
     """
     if df is None or df.empty:
         return []
-    if max_rows is not None:
-        df = df.head(max_rows)
-    # NaN → None；日期/时间对象 → ISO 字符串
-    def _norm(v):
-        if v is None or pd.isna(v):
-            return None
-        if isinstance(v, pd.Timestamp):
-            return v.isoformat()
-        if hasattr(v, "isoformat") and not isinstance(v, (str, int, float)):
-            return v.isoformat()
-        return v
-    out = df.where(pd.notnull(df), None).to_dict(orient="records")
-    for row in out:
-        for k, v in list(row.items()):
-            row[k] = _norm(v)
-    return out
+    # 统一走 formatter.df_to_records：NaN → None，时间类值 → ISO 字符串
+    return df_to_records(df, max_rows=max_rows)

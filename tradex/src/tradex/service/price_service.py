@@ -16,17 +16,27 @@ MCP 工具和 REST 路由各自薄包装，共享同一份代码（契约一致�
 from __future__ import annotations
 
 import logging
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import pandas as pd
 
 from ..data_sources import get_router
 from ..utils.cache import TTL_DAILY, TTL_REALTIME, cache
-from ..utils.formatter import df_to_json, dict_to_json, slim_df
-from ..utils.symbol import normalize_symbol
+from ..utils.formatter import df_to_json, df_to_records, dict_to_json, slim_df
+from ..utils.symbol import (
+    format_with_exchange,
+    is_index_code,
+    normalize_symbol,
+)
 
 logger = logging.getLogger(__name__)
 _router = get_router()
+
+# 单次 K 线最多取多少根（各数据源 count 上限已在此收敛）
+_MAX_BARS = 1000
+# 返回给调用方的最大根数（防止长区间把响应撑爆）
+_RESPONSE_BAR_CAP = 500
 
 
 def _is_global_code(symbol: str) -> bool:
@@ -48,6 +58,124 @@ def _find_code_col(df) -> str:
         if "代码" in c or "code" in c.lower() or "symbol" in c.lower():
             return c
     return df.columns[0]
+
+
+def _resolve_symbol(symbol: str) -> tuple[str, bool]:
+    """解析出路由用代码，并标记是否为指数。
+
+    指数代码**必须保留交易所前缀**：eltdx 的 ``_normalize_code`` 见到 sh/sz/bj
+    前缀会原样使用，而剥成 6 位裸码后 ``000001`` 会被判成深市个股（平安银行）——
+    与 ``sh000001``（上证指数）撞号。这正是 2026-10-25 那次「传指数、静默拿到
+    11 元档个股数据」的根因。
+
+    个股仍归一为 6 位纯代码，保持既有行为不变。
+
+    Returns:
+        (路由用代码, 是否指数)
+    """
+    raw = str(symbol or "").strip()
+    if is_index_code(raw):
+        return format_with_exchange(raw), True
+    return normalize_symbol(raw), False
+
+
+def _parse_date(value: str, field: str) -> date | None:
+    """解析 YYYYMMDD / YYYY-MM-DD；空值返回 None，非法格式抛 ValueError。"""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    for fmt in ("%Y%m%d", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    raise ValueError(f"{field} 格式非法：{value!r}（应为 YYYYMMDD 或 YYYY-MM-DD）")
+
+
+def _estimate_bar_count(
+    period: str,
+    start: date | None,
+    end: date | None,
+) -> int | None:
+    """按日期区间估算需要向数据源索取多少根 K 线。
+
+    主源（eltdx/tdx_mcp）的语义是「最近 N 根」，不是「区间内全部」——所以要覆盖
+    到区间起点，必须**从今天往回**数够根数，再靠 _filter_by_date 精确裁剪。
+    用 end_date 当锚点会算出一个只覆盖最近若干根的窗口，历史区间永远筛不到数据。
+
+    Returns:
+        需要的根数；无需调整时返回 None。
+    """
+    if start is None and end is None:
+        return None
+
+    if start is not None and end is not None and start > end:
+        raise ValueError(
+            f"start_date 不能晚于 end_date（{start} > {end}）"
+        )
+
+    # 覆盖到区间起点所需的最早边界
+    anchor_start = start or end
+    span_days = max((date.today() - anchor_start).days, 1)
+    period_key = str(period or "").strip().lower()
+
+    if period_key in ("weekly", "week", "w", "1w"):
+        bars = span_days / 7 + 5
+    elif period_key in ("monthly", "month", "m", "1m"):
+        bars = span_days / 30 + 3
+    else:
+        bars = span_days * 0.75 + 10  # 交易日约占自然日 75%
+    return max(1, min(int(bars) + 1, _MAX_BARS))
+
+
+def _find_date_col(df: pd.DataFrame) -> str | None:
+    """定位 K 线日期列（各源列名不一致）。
+
+    只认明确的日期语义列名——不做「列数==2 就改名」这类猜测，猜错会把不相关
+    结构当成 K 线塞给调用方（2026-10-25 估值 bug 的同类教训）。
+    """
+    for col in df.columns:
+        name = str(col).strip().lower()
+        if name in ("日期", "date", "时间", "time", "day", "trade_date"):
+            return col
+    for col in df.columns:
+        if "日期" in str(col) or "date" in str(col).lower():
+            return col
+    return None
+
+
+def _filter_by_date(
+    df: pd.DataFrame,
+    start: date | None,
+    end: date | None,
+) -> pd.DataFrame:
+    """按日期区间裁剪并按日期升序排列。
+
+    区间为空时原样返回（仅做升序归一），确保未传日期时行为不变。
+    """
+    if df is None or df.empty:
+        return df
+
+    date_col = _find_date_col(df)
+    if date_col is None:
+        if start is not None or end is not None:
+            raise ValueError(
+                f"数据源未返回可识别的日期列，无法按区间裁剪：{list(df.columns)}"
+            )
+        return df
+
+    df = df.copy()
+    parsed = pd.to_datetime(df[date_col], errors="coerce")
+    df = df.assign(**{date_col: parsed})
+    df = df.dropna(subset=[date_col])
+    if df.empty:
+        return df
+
+    if start is not None:
+        df = df[df[date_col].dt.date >= start]
+    if end is not None:
+        df = df[df[date_col].dt.date <= end]
+    return df.sort_values(date_col, ascending=True)
 
 
 def get_realtime_quote(symbol: str) -> dict[str, Any]:
@@ -79,14 +207,14 @@ def get_realtime_quote(symbol: str) -> dict[str, Any]:
         if row.empty:
             raise ValueError(f"未找到代码 {symbol} 的全球行情")
         # 取首条记录（兼容 df_to_json 行为）
-        records = row.where(pd.notnull(row), None).to_dict(orient="records")
+        records = df_to_records(row)
         result = {"quote": records[0] if records else {}, "source": _src}
         # 缓存为 dict（统一 service 层契约）
         cache.set(cache_key, result, TTL_REALTIME)
         return result
 
     # A 股分支
-    symbol = normalize_symbol(symbol)
+    symbol, is_index = _resolve_symbol(symbol)
     cache_key = f"realtime_quote:{symbol}"
     cached = cache.get(cache_key)
     if cached is not None:
@@ -98,13 +226,20 @@ def get_realtime_quote(symbol: str) -> dict[str, Any]:
         raise ValueError(f"获取实时行情失败 ({symbol}): 数据源返回空数据")
     code_col = _find_code_col(df)
     if len(df) > 1:
-        row = df[df[code_col].astype(str).str.strip() == symbol]
+        # 数据源回填的代码可能不带交易所前缀，两种形态都要认
+        wanted = {symbol, normalize_symbol(symbol)}
+        row = df[df[code_col].astype(str).str.strip().isin(wanted)]
         if row.empty:
             raise ValueError(f"未找到股票 {symbol} 的实时行情")
     else:
         row = df
-    records = row.where(pd.notnull(row), None).to_dict(orient="records")
-    result = {"quote": records[0] if records else {}, "symbol": symbol, "source": _src}
+    records = df_to_records(row)
+    result = {
+        "quote": records[0] if records else {},
+        "symbol": symbol,
+        "is_index": is_index,
+        "source": _src,
+    }
     cache.set(cache_key, result, TTL_REALTIME)
     return result
 
@@ -119,49 +254,71 @@ def get_historical_price(
     """历史 K 线数据（OHLCV）。
 
     Args:
-        symbol: 6 位股票代码。
+        symbol: 6 位股票代码，或带交易所前缀的指数代码（sh000001 / sz399001 等）。
         period: "daily" / "weekly" / "monthly"。
-        start_date: "YYYYMMDD" 格式，空返回所有。
-        end_date: "YYYYMMDD" 格式，空返回至今。
+        start_date: "YYYYMMDD" 格式，空表示不设下界。
+        end_date: "YYYYMMDD" 格式，空表示到最新。
         adjust: "qfq" / "hfq" / ""。
 
     Returns:
-        dict：含 bars（list of dict，单条含 日期/开盘/收盘/最高/最低/成交量/成交额/振幅/涨跌幅/涨跌额/换手率）。
+        dict：含 bars（list of dict）、bar_count、is_index、source。
 
     Raises:
+        ValueError: 日期格式非法 / 区间颠倒 / 数据源未返回可识别日期列。
         Exception: 数据源异常时向上抛。
     """
-    symbol = normalize_symbol(symbol)
-    cache_key = f"hist_price:{symbol}:{period}:{start_date}:{end_date}:{adjust}"
+    code, is_index = _resolve_symbol(symbol)
+    start = _parse_date(start_date, "start_date")
+    end = _parse_date(end_date, "end_date")
+    if start is not None and end is not None and start > end:
+        raise ValueError(f"start_date 不能晚于 end_date（{start_date} > {end_date}）")
+
+    cache_key = f"hist_price:{code}:{period}:{start_date}:{end_date}:{adjust}"
     cached = cache.get(cache_key)
     if cached is not None:
         import json
         return json.loads(cached) if isinstance(cached, str) else cached
 
-    df, _src = _router.route(
-        "historical_kline",
-        symbol=symbol,
-        period=period,
-        start_date=start_date,
-        end_date=end_date,
-        adjust=adjust,
-    )
+    route_kwargs: dict[str, Any] = {
+        "symbol": code,
+        "period": period,
+        "start_date": start_date,
+        "end_date": end_date,
+        "adjust": adjust,
+    }
+    # 只认 count 不认日期区间的主源（eltdx/tdx_mcp）靠估算根数覆盖目标区间
+    estimate = _estimate_bar_count(period, start, end)
+    if estimate is not None:
+        route_kwargs["count"] = estimate
+
+    df, _src = _router.route("historical_kline", **route_kwargs)
     if df is None or df.empty:
-        result = {"symbol": symbol, "period": period, "bars": [], "source": _src}
+        result = {
+            "symbol": code,
+            "period": period,
+            "is_index": is_index,
+            "bars": [],
+            "source": _src,
+        }
     else:
-        df_limited = df.head(500)
-        bars = df_limited.where(pd.notnull(df_limited), None).to_dict(orient="records")
-        # 修复：日期列可能是 pandas Timestamp，json.dumps 不能直接序列化。
-        # 历史上 akshare/eltdx 返回的「日期」列有 datetime/string 两种形态，
-        # 统一在 service 层规整为字符串。
+        df = _filter_by_date(df, start, end)
+        if df.empty:
+            raise ValueError(
+                f"区间内无 K 线数据（{code}，{start_date or '不限'}~{end_date or '最新'}）；"
+                f"若区间距今过远，可能超出单次可取根数上限 {_MAX_BARS}"
+            )
+        # 升序后取尾部：长区间下保留最近的一段，而不是最早的一段
+        bars = df_to_records(df.tail(_RESPONSE_BAR_CAP))
+        # 日期列统一截到 YYYY-MM-DD，避免把 15:00 的收盘时刻当成日线日期
         for bar in bars:
             for k, v in list(bar.items()):
-                if hasattr(v, "isoformat"):
-                    bar[k] = v.isoformat()[:10]  # 截到 YYYY-MM-DD
+                if isinstance(v, str) and "T" in v and len(v) >= 10:
+                    bar[k] = v[:10]
         result = {
-            "symbol": symbol,
+            "symbol": code,
             "period": period,
             "adjust": adjust,
+            "is_index": is_index,
             "bar_count": len(bars),
             "bars": bars,
             "source": _src,
@@ -174,25 +331,25 @@ def get_intraday_data(symbol: str) -> dict[str, Any]:
     """当日分时数据（1 分钟 K 线）。
 
     Args:
-        symbol: 6 位股票代码。
+        symbol: 6 位股票代码，或带交易所前缀的指数代码。
 
     Returns:
-        dict：含 code/point_count/points（list of {time, price, avg_price, volume}）。
+        dict：含 code/point_count/points/is_index/source。
 
     Raises:
         ValueError: 无有效数据点。
         Exception: 数据源异常时向上抛。
     """
-    symbol = normalize_symbol(symbol)
-    cache_key = f"intraday:{symbol}"
+    code, is_index = _resolve_symbol(symbol)
+    cache_key = f"intraday:{code}"
     cached = cache.get(cache_key)
     if cached is not None:
         import json
         return json.loads(cached) if isinstance(cached, str) else cached
 
-    df, _src = _router.route("minute_data", symbol=symbol)
+    df, _src = _router.route("minute_data", symbol=code)
     if df is None or df.empty:
-        raise ValueError(f"获取分时数据失败 ({symbol}): 数据源返回空数据")
+        raise ValueError(f"获取分时数据失败 ({code}): 数据源返回空数据")
 
     # 兼容 akshare(时间/开盘/收盘/均价/成交量) 与 eltdx(时间/价格/均价/成交量) 列名
     col_map = {
@@ -223,10 +380,11 @@ def get_intraday_data(symbol: str) -> dict[str, Any]:
             })
 
     if not points:
-        raise ValueError(f"获取分时数据失败 ({symbol}): 无有效数据点")
+        raise ValueError(f"获取分时数据失败 ({code}): 无有效数据点")
 
     result = {
-        "code": symbol,
+        "code": code,
+        "is_index": is_index,
         "point_count": len(points),
         "points": points,
         "source": _src,

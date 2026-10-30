@@ -19,7 +19,7 @@ import pandas as pd
 
 from ..data_sources import get_router
 from ..utils.cache import TTL_COMPANY, cache
-from ..utils.formatter import df_to_json, dict_to_json, slim_df
+from ..utils.formatter import df_to_json, df_to_records, dict_to_json, slim_df
 
 logger = logging.getLogger(__name__)
 _router = get_router()
@@ -58,7 +58,7 @@ def search_stock(keyword: str) -> dict[str, Any]:
         "name"
     ].str.contains(keyword, case=False, na=False)
     matched = df[mask].head(20)
-    records = matched.where(pd.notnull(matched), None).to_dict(orient="records")
+    records = df_to_records(matched)
     result = {"keyword": keyword, "matches": records, "source": _src}
     cache.set(cache_key, result, TTL_COMPANY)
     return result
@@ -107,7 +107,7 @@ def get_company_info(symbol: str) -> dict[str, Any]:
     row = df[df[code_col].astype(str).str.strip() == symbol]
     if row.empty:
         raise ValueError(f"未找到股票 {symbol} 的公司信息")
-    records = row.where(pd.notnull(row), None).to_dict(orient="records")
+    records = df_to_records(row)
     result = {"symbol": symbol, "info": records[0] if records else {}, "source": _src}
     cache.set(cache_key, result, TTL_COMPANY)
     return result
@@ -137,7 +137,7 @@ def get_company_profile(symbol: str) -> dict[str, Any]:
     if df is None or df.empty:
         result = {"symbol": symbol, "segments": [], "source": _src}
     else:
-        records = df.where(pd.notnull(df), None).to_dict(orient="records")
+        records = df_to_records(df)
         result = {"symbol": symbol, "segments": records, "source": _src}
     cache.set(cache_key, result, TTL_COMPANY)
     return result
@@ -205,7 +205,7 @@ def get_competitors(symbol: str, industry: str = "") -> dict[str, Any]:
         "industry_data", endpoint="board_industry_cons_em", industry=industry
     )
     df = slim_df(df)
-    records = df.where(pd.notnull(df), None).to_dict(orient="records")[:30]
+    records = df_to_records(df)[:30]
     result = {"symbol": symbol, "industry": industry, "peers": records, "source": _src}
     cache.set(cache_key, result, TTL_COMPANY)
     return result

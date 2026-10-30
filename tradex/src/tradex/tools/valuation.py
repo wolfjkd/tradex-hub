@@ -13,6 +13,8 @@ Data source routing (via SmartRouter):
 
 from __future__ import annotations
 
+import logging
+
 from mcp.server.fastmcp import FastMCP
 
 import pandas as pd
@@ -22,6 +24,35 @@ from ..utils.formatter import df_to_json, error_response, slim_df
 from ..utils.symbol import normalize_symbol
 
 _router = get_router()
+logger = logging.getLogger("tradex")
+
+# 百度股市通 stock_zh_valuation_baidu 真实支持的指标集。
+#
+# 历史坑（2026-10-25 实测事故）：这里原本还请求「市销率(TTM)」，而百度并不支持
+# 该指标 → akshare 抛错 → SmartRouter 降级到 eltdx 备源 → 备源返回的是完全无关
+# 的结构（num/total_num）→ 旧代码用「列数==2 就改名成 date」的兜底硬凑 → 外连接
+# 在 date 列上拼出 datetime.date 与 str 混列 → 排序崩溃，整个工具对任意股票必失败。
+#
+# 现在只请求真实存在的指标；PS（市销率）此源无数据，返回值中不出现。
+_BAIDU_INDICATORS: tuple[str, ...] = ("总市值", "市盈率(TTM)", "市净率", "市现率")
+_DATE_ALIASES = {"date", "日期", "time", "时间", "day"}
+
+
+def _pick_date_and_value(df: pd.DataFrame) -> tuple[str | None, str | None]:
+    """识别估值表的日期列与唯一数值列。
+
+    只接受「一列日期 + 一列数值」的规整结构。列数对不上就返回 (None, None)
+    让调用方跳过——绝不做「列数==2 就改名」的猜测，猜错等于把无关结构当估值数据。
+    """
+    date_col = next(
+        (c for c in df.columns if str(c).strip().lower() in _DATE_ALIASES), None
+    )
+    if date_col is None:
+        return None, None
+    value_cols = [c for c in df.columns if c != date_col]
+    if len(value_cols) != 1:
+        return None, None
+    return date_col, value_cols[0]
 
 
 def register(mcp: FastMCP):
@@ -33,17 +64,20 @@ def register(mcp: FastMCP):
         num_periods: int = 100,
     ) -> str:
         """
-        获取股票历史估值指标（PE、PB、PS等市盈率/市净率/市销率时间序列）。
+        获取股票历史估值指标（PE、PB、市值等时间序列）。
 
         可用于估值分析、历史百分位计算、可比公司估值对比等。
+
+        注意：数据源（百度股市通）不提供「市销率(PS)」，返回体中不会有该字段；
+        需要 PS 请改用财务报表工具自行计算。
 
         Args:
             symbol: 6位股票代码，如 "600519"
             num_periods: 返回最近几个交易日的数据，默认100
 
         Returns:
-            估值指标时间序列 (JSON)，包含日期、PE、PB、PS、总市值、
-            流通市值等。
+            估值指标时间序列 (JSON)，包含日期、总市值、市盈率(TTM)、
+            市净率、市现率。
         """
         symbol = normalize_symbol(symbol)
         cache_key = f"valuation:{symbol}:{num_periods}"
@@ -52,40 +86,50 @@ def register(mcp: FastMCP):
             return cached
 
         try:
-            indicators = ["总市值", "市盈率(TTM)", "市净率", "市销率(TTM)"]
-            frames = []
-            for ind in indicators:
+            frames: list[pd.DataFrame] = []
+            for ind in _BAIDU_INDICATORS:
                 try:
                     df, _src = _router.route(
                         "valuation", endpoint="baidu", symbol=symbol, indicator=ind
                     )
-                    if df is not None and not df.empty:
-                        # Rename value column to indicator name
-                        if "value" in df.columns:
-                            df = df.rename(columns={"value": ind})
-                        elif len(df.columns) == 2:
-                            df.columns = ["date", ind]
-                        frames.append(df)
-                except Exception:
+                except Exception as exc:
+                    logger.warning("valuation %s 获取失败(%s): %s", ind, symbol, exc)
                     continue
+                if df is None or df.empty:
+                    continue
+
+                date_col, value_col = _pick_date_and_value(df)
+                if date_col is None or value_col is None:
+                    logger.warning(
+                        "valuation %s 返回结构不符合预期(列=%s)，已跳过",
+                        ind,
+                        list(df.columns),
+                    )
+                    continue
+
+                part = df[[date_col, value_col]].rename(
+                    columns={date_col: "date", value_col: ind}
+                )
+                part["date"] = pd.to_datetime(part["date"], errors="coerce")
+                part = part.dropna(subset=["date"])
+                if not part.empty:
+                    frames.append(part)
 
             if not frames:
                 return error_response(
-                    f"估值指标数据为空 ({symbol})", "get_valuation_metrics"
+                    f"估值指标数据为空 ({symbol})：所有指标均未取到有效数据",
+                    "get_valuation_metrics",
                 )
 
-            # Merge all indicators on date
+            # 各指标日期已统一为 datetime64，合并不会再出现混类型列
             result_df = frames[0]
-            for f in frames[1:]:
-                date_col = result_df.columns[0]
-                f_date_col = f.columns[0]
-                if date_col != f_date_col:
-                    f = f.rename(columns={f_date_col: date_col})
-                result_df = pd.merge(result_df, f, on=date_col, how="outer")
+            for frame in frames[1:]:
+                result_df = pd.merge(result_df, frame, on="date", how="outer")
 
-            result_df = result_df.sort_values(result_df.columns[0], ascending=False)
+            result_df = result_df.sort_values("date", ascending=False)
             if num_periods > 0:
                 result_df = result_df.head(num_periods)
+            result_df["date"] = result_df["date"].dt.strftime("%Y-%m-%d")
             result = df_to_json(result_df)
             cache.set(cache_key, result, TTL_DAILY)
             return result
