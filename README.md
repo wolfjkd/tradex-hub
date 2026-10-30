@@ -11,11 +11,11 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.13+-blue.svg" alt="Python"/>
   <img src="https://img.shields.io/badge/MCP-1.0-green.svg" alt="MCP"/>
-  <img src="https://img.shields.io/badge/REST-v3.6.1-orange.svg" alt="REST"/>
+  <img src="https://img.shields.io/badge/REST-v3.7.0-orange.svg" alt="REST"/>
   <img src="https://img.shields.io/badge/Tools-168-orange.svg" alt="MCP Tools"/>
   <img src="https://img.shields.io/badge/Endpoints-58-orange.svg" alt="REST Endpoints"/>
   <img src="https://img.shields.io/badge/License-Apache--2.0-yellow.svg" alt="License"/>
-  <img src="https://img.shields.io/badge/Version-3.6.1-blue.svg" alt="Version"/>
+  <img src="https://img.shields.io/badge/Version-3.7.0-blue.svg" alt="Version"/>
 </p>
 
 ---
@@ -522,7 +522,7 @@ cat VERSION                    # 最简：发布版本号单一真源
 | 信号 | 位置 | 含义 | 可靠性 |
 |------|------|------|--------|
 | `VERSION` | 仓库根 | 发布版本号，发版时四处同步的源头 | 权威 |
-| `git describe` | `.git/` | 形如 `v3.6.1-2-gabc1234`：v3.6.1 之后还有 2 个未发布提交 | 权威 |
+| `git describe` | `.git/` | 形如 `v3.7.0-2-gabc1234`：v3.7.0 之后还有 2 个未发布提交 | 权威 |
 | `tradex/pyproject.toml` | `project.version` | 打包版本号，应与 VERSION 一致 | 权威 |
 | `CHANGELOG.md` | 顶部条目 | 最近一次发布记录 | 展示层 |
 | `README` 徽章 | 文件头 | 易滞后，`version.py` 会指出漂移 | 展示层 |
@@ -539,6 +539,7 @@ cat VERSION                    # 最简：发布版本号单一真源
 
 | 版本 | 日期 | 关键里程碑 |
 |------|------|-----------|
+| **v3.7.0** | 2026-10-30 | 数据正确性专项：① `get_historical_price` 支持带前缀指数代码（`sh000001` 不再静默返回平安银行）并真正遵循 `start_date`/`end_date`；② `get_valuation_metrics` 修复全股票必崩（剔除非法指标名 + 删除猜测式改名兜底）；③ `get_realtime_quote` 补齐市盈率/市净率；④ `get_board_sentiment` 解除 schema 死锁，改由四池现算炸板率/连板梯队/晋级率；⑤ `get_trading_calendar` 补 sina 备源（深交所 404 时自动接管）；⑥ 新闻工具统一输出 5 字段、序列化护栏收敛到 `formatter.df_to_records`；⑦ 财务/成长/每股指标改为取最近 N 期 |
 | **v3.6.1** | 2026-10-18 | `fetch_sina_fund_flow` 增加新浪 MoneyFlow 降级：东财 `push2his` 的 `fflow/daykline` 接口已被风控封禁（直连 curl 56、akshare 同源一并失效），主路径失败时改走新浪 MoneyFlow 当日快照（`_sina_moneyflow_snapshot`，字段口径与主路径同构），保住「资金流向」当日数据。**限制**：备源仅提供当日单日快照，多日历史仍不可得 |
 | **v3.6.0** | 2026-09-29 | 全项目代码审计（修复 47+ 处「异常吞成空表」、腾讯行情单位错标 P0、限流/代理直连化/健康分锁等 14 项）+ 死源剥离（上游已死的期权/指数/社融/LPR/互动 10 类型全链路移除，工具 176→166、端点 58）+ SDK 2.0.0（修命名碰撞、路径化方法名、59 端点重生成） |
 | **v3.5.2** | 2026-09-28 | 修复 fetch_market_overview_tencent 腾讯指数成交额错标：字段 37（万元）原样标「成交额(元)」，下游拿到数值差 1 万倍；现 ×1e4 换算为真元，与分类榜 amount_wan*1e4 口径对齐（实证 sh000001 → 8045.4 亿） |

@@ -1,7 +1,7 @@
 # MCP 工具清单
 
 > 本文件由 `scripts/generate_tool_docs.py` 从源码 AST 生成（`tradex/src/tradex/tools/*.py`
-> 中带 `@mcp.tool` 装饰器的函数），**请勿手工编辑**。当前版本 **v3.6.1**，共 **168 个工具**。
+> 中带 `@mcp.tool` 装饰器的函数），**请勿手工编辑**。当前版本 **v3.7.0**，共 **168 个工具**。
 > 工具增删后重跑脚本即可：`python scripts/generate_tool_docs.py`。
 
 ## 总览
@@ -65,7 +65,7 @@
 | `get_analyst_rating` | 获取分析师评级和盈利预测数据。 |
 | `get_dividend_data` | 获取股票历史分红派息详情。 |
 | `get_institutional_holdings` | 获取机构持股/十大流通股东数据。 |
-| `get_valuation_metrics` | 获取股票历史估值指标（PE、PB、PS等市盈率/市净率/市销率时间序列）。 |
+| `get_valuation_metrics` | 获取股票历史估值指标（PE、PB、市值等时间序列）。 |
 
 ### 新闻公告（14 个）
 
@@ -143,7 +143,7 @@
 | 工具 | 说明 |
 |------|------|
 | `get_board_sentiment` | 获取打板情绪数据（炸板率/连板梯队/晋级率）。 |
-| `get_limit_up_board` | 获取涨停板数据（东财 push2ex）。 |
+| `get_limit_up_board` | 获取涨停板数据（东财 akshare 四池）。 |
 | `get_limit_up_insight` | 获取涨停揭秘数据（同花顺）。 |
 
 ### 信号数据 · ETF（2 个）
@@ -234,7 +234,7 @@
 | `get_cninfo_announcement_backup` | 【官方备源】深交所官方公告（与巨潮信息网独立）。 |
 | `get_sse_dragon_tiger` | 【官方一手】上交所龙虎榜（含营业部席位明细）。 |
 | `get_szse_dragon_tiger` | 【官方一手】深交所龙虎榜。 |
-| `get_trading_calendar` | 【官方一手】深交所交易日历（整月）。 |
+| `get_trading_calendar` | 交易日历（整月）。主源深交所官方，失效时自动走 sina 交易日清单备源。 |
 
 ### 事件驱动（东财 datacenter）（17 个）
 

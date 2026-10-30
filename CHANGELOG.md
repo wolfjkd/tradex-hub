@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ---
 
+## [3.7.0] - 2026-10-30（数据正确性专项 · 已知问题清单闭环）
+
+### Added
+- `get_historical_price` 支持带交易所前缀的指数代码（`sh000001` 上证、`sz399001` 深成、
+  `sz399006` 创业板、`sh000300`/`sh000688`/`sh000905`、`sz399852`），返回体新增 `is_index` 标识。
+- `get_historical_price` 新增 `start_date` / `end_date` 的**真实裁剪**：按「最近 N 根」语义
+  估算 `count` 后精确截取，非法格式与颠倒区间显式报错。
+- `get_board_sentiment` 新增可选 `date` 参数，缺省自动回退到最近有数据的交易日；
+  情绪指标改由涨停四池现算（炸板率 / 连板梯队 / 晋级率 / 平均溢价 / 热门题材）。
+- `get_trading_calendar` 新增 sina 交易日清单备源（`akshare_sina`），深交所官方源失效时自动接管；
+  按月缓存，覆盖性按月份判定。
+- `get_realtime_quote` 补齐 `市盈率` / `市净率`：主源无估值字段时由腾讯一次 HTTP 补取，按日缓存。
+- `formatter` 新增 `json_safe_value` / `df_to_records` / `to_json_safe`，作为工具响应的统一出口。
+
+### Changed
+- **`search_news` / `get_stock_news` 输出结构变更**：由各子源宽表（40+ 列、含大量 NaN）
+  统一为固定 5 字段 `标题 / 时间 / 来源 / 链接 / 摘要`。下游若按旧列名取值需同步调整。
+- `limit_up_board` 路由返回统一信封 `{board_type, date, count, data}`（原为裸 list）。
+- 财务/成长/每股指标改取**最近 N 期**（此前数据源按报告期升序，`head(n)` 实际取到上市初期）。
+- 腾讯行情适配器补 `市净率` 映射（字段 46）。
+
+### Fixed
+- `get_historical_price` 传指数代码时**静默返回同号个股**（`sh000001` → 平安银行数据）。
+- `get_valuation_metrics` 对任意股票必崩：`'<' not supported between datetime.date and str`。
+  根因为请求了数据源不支持的 `市销率(TTM)` → 降级到结构无关的备源 → 「列数==2 就改名」兜底
+  拼出混类型列。现只请求真实支持的指标，并在结构不符时显式跳过。
+- `search_news` / `get_financial_indicators` 序列化崩溃（`Object of type Timestamp/date is not
+  JSON serializable`）。
+- `get_board_sentiment` schema 与底层 `date` 必填约束互锁，调用方无解。
+
+### Security
+- 无
+
 ## [3.6.1] - 2026-10-18
 
 ### Fixed
