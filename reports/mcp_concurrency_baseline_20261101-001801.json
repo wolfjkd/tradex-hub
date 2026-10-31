@@ -1,0 +1,71 @@
+{
+  "config": {
+    "url": "http://127.0.0.1:8000/mcp",
+    "levels": [
+      1,
+      8
+    ],
+    "rounds": 1,
+    "tools": [
+      "local_fast",
+      "network_fast",
+      "network_slow"
+    ]
+  },
+  "results": {
+    "local_fast": {
+      "1": {
+        "wall_clock_median": 0.024638000000777538,
+        "p50_median": 0.024578800001108903,
+        "p95_median": 0.024578800001108903,
+        "error_rate_median": 0.0,
+        "rounds": 1,
+        "speedup": 1.0
+      },
+      "8": {
+        "wall_clock_median": 0.020888499999273336,
+        "p50_median": 0.02118940000036673,
+        "p95_median": 0.02138799999920593,
+        "error_rate_median": 0.0,
+        "rounds": 1,
+        "speedup": 9.41
+      }
+    },
+    "network_fast": {
+      "1": {
+        "wall_clock_median": 0.34167060000072524,
+        "p50_median": 0.34169629999996687,
+        "p95_median": 0.34169629999996687,
+        "error_rate_median": 0.0,
+        "rounds": 1,
+        "speedup": 1.0
+      },
+      "8": {
+        "wall_clock_median": 0.643095399998856,
+        "p50_median": 0.6430430000000342,
+        "p95_median": 0.6434236000004603,
+        "error_rate_median": 0.0,
+        "rounds": 1,
+        "speedup": 4.25
+      }
+    },
+    "network_slow": {
+      "1": {
+        "wall_clock_median": 1.685713399998349,
+        "p50_median": 1.6856972000005044,
+        "p95_median": 1.6856972000005044,
+        "error_rate_median": 0.0,
+        "rounds": 1,
+        "speedup": 1.0
+      },
+      "8": {
+        "wall_clock_median": 11.7543612999998,
+        "p50_median": 11.754478650000237,
+        "p95_median": 11.754571400000714,
+        "error_rate_median": 0.0,
+        "rounds": 1,
+        "speedup": 1.15
+      }
+    }
+  }
+}
