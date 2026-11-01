@@ -41,6 +41,30 @@ _ROUTE_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
     max_workers=8, thread_name_prefix="smartrouter"
 )
 
+# 失败分级（工单 04，2026-11-01）：
+#   rate_limit — 上游限流（如 akshare 1.20.7+ RateLimitError 立即抛不重试）。
+#                源本身没坏，属临时性失败，轻罚且不触发拉黑，避免东财限流
+#                把好源打进黑名单长期降权。
+#   timeout    — 请求超时（路由层掐断或上游抛 Timeout 家族异常）。
+#   hard       — 其余失败（接口失效/异常等），按原逻辑重罚。
+_FAILURE_KINDS = ("rate_limit", "timeout", "hard")
+
+
+def _classify_failure(exc: BaseException) -> str:
+    """把源失败归入 rate_limit / timeout / hard 三类。
+
+    用异常类名判定而非 import 上游包：SmartRouter 是通用路由器，
+    不依赖 akshare/requests 等具体数据源库的异常类型树。
+    requests 的 ReadTimeout/ConnectTimeout、内置 TimeoutError（3.10+ 即
+    socket.timeout）、akshare RateLimitError 的类名均命中下述模式。
+    """
+    name = type(exc).__name__
+    if "RateLimit" in name:
+        return "rate_limit"
+    if "Timeout" in name:
+        return "timeout"
+    return "hard"
+
 
 @dataclass
 class SourceHealth:
@@ -102,15 +126,32 @@ class SourceHealth:
             elif latency_ms > 5000:
                 self.score = max(0, self.score - 5)
 
-    def record_failure(self):
+    def record_failure(self, kind: str = "hard"):
+        """记录一次失败，按 kind 分级惩罚（工单 04，2026-11-01）。
+
+        - "rate_limit"：上游限流（临时性失败）。不计入 consecutive_fails、
+          不触发连败拉黑，仅轻罚 2 分 —— 限流恢复后源无需走冷却半开探测。
+        - "timeout"：请求超时。计入连败（源可能真的慢/挂），单次轻罚 5 分；
+          连吃 5 次超时仍按原逻辑归零拉黑。
+        - "hard"（默认）：接口失效等硬失败，按原逻辑重罚（-20×连败系数，
+          5 次归零拉黑）。
+        """
         with self._mutex:
             self.total_calls += 1
             self.fail_count += 1
-            self.consecutive_fails += 1
             self.last_fail_ts = time.time()
-            # 失败惩罚：连续失败加重
-            penalty = 20 * min(self.consecutive_fails, 5)
-            self.score = max(0, self.score - penalty)
+            if kind == "rate_limit":
+                # 限流轻罚：不推进连败计数，源不进黑名单
+                self.score = max(0, self.score - 2)
+                return
+            self.consecutive_fails += 1
+            if kind == "timeout":
+                # 超时轻罚：计入连败但不乘连败系数
+                self.score = max(0, self.score - 5)
+            else:
+                # 失败惩罚：连续失败加重
+                penalty = 20 * min(self.consecutive_fails, 5)
+                self.score = max(0, self.score - penalty)
             # 连续5次失败直接归零并拉黑(冷却期后自动半开探测)
             if self.consecutive_fails >= 5:
                 self.score = 0.0
@@ -269,7 +310,8 @@ class SmartRouter:
                         result = fut.result(timeout=timeout)
                     except concurrent.futures.TimeoutError:
                         latency_ms = (time.time() - t0) * 1000
-                        health.record_failure()
+                        # 路由层掐断的超时：计入连败但单次轻罚（工单 04）
+                        health.record_failure("timeout")
                         _record_data_source_metric(source_name, latency_ms / 1000.0, healthy=False)
                         errors.append(f"{source_name}: timeout({timeout}s)")
                         logger.warning(
@@ -311,13 +353,27 @@ class SmartRouter:
                 if isinstance(e, (KeyboardInterrupt, SystemExit, asyncio.CancelledError)):
                     raise
                 latency_ms = (time.time() - t0) * 1000
-                health.record_failure()
+                failure_kind = _classify_failure(e)
+                health.record_failure(failure_kind)
                 _record_data_source_metric(source_name, latency_ms / 1000.0, healthy=False)
                 errors.append(f"{source_name}: {type(e).__name__}: {e}")
-                logger.warning(
-                    "SmartRouter: %s via %s FAILED: %s: %s",
-                    data_type, source_name, type(e).__name__, e,
-                )
+                # 日志措辞区分限流/超时/硬失败（工单 04）：运维可一眼分辨
+                # 「临时限流等会就好」与「接口真坏了」。
+                if failure_kind == "rate_limit":
+                    logger.warning(
+                        "SmartRouter: %s via %s RATE-LIMITED (transient, light penalty): %s: %s",
+                        data_type, source_name, type(e).__name__, e,
+                    )
+                elif failure_kind == "timeout":
+                    logger.warning(
+                        "SmartRouter: %s via %s UPSTREAM TIMEOUT (%.0fms): %s: %s",
+                        data_type, source_name, latency_ms, type(e).__name__, e,
+                    )
+                else:
+                    logger.warning(
+                        "SmartRouter: %s via %s FAILED: %s: %s",
+                        data_type, source_name, type(e).__name__, e,
+                    )
                 # 独占源失败不降级，直接 raise
                 if exclusive:
                     raise RuntimeError(

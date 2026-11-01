@@ -704,8 +704,14 @@ def fetch_finance_batch(codes="", symbol: str = "", **kwargs):
     """批量财务字段（eltdx 源，v3.3.7 新增）。
 
     通过 corporate.finance_batch 一次拉取多只股票的财务字段：
-    总股本/流通股本/总资产/净利润/每股收益/行业等。量化选股估值利器。
+    总股本/流通股本/总资产/净利润/每股收益/行业等。
     codes 支持逗号分隔多只股票。
+
+    工单 05（2026-11-01）：eltdx 3.3.x 批量接口默认 on_missing="raise"，
+    个别代码在主站无数据（停牌/退市/新上市/非 A 股）会让整批失败。
+    本入口接受用户传入的任意代码列表，属直接暴露面，改用 on_missing="skip"：
+    缺失码跳过并 WARNING 记录（不静默丢弃），其余代码照常返回；
+    全批无数据仍显式报错，不返回空表冒充成功。
     """
     import pandas as pd
     client = _get_client()
@@ -717,8 +723,23 @@ def fetch_finance_batch(codes="", symbol: str = "", **kwargs):
     norm_codes = _parse_codes_arg(raw)
     if not norm_codes:
         raise RuntimeError("no valid stock codes")
-    batch = client.corporate.finance_batch(norm_codes)
+    batch = client.corporate.finance_batch(norm_codes, on_missing="skip")
     records = getattr(batch, "records", None) or ()
+    # 缺失对账：请求码不在返回行中即视为缺失。norm_codes 是前缀式（"sh600170"），
+    # full_code 是后缀式（"600170.SH"），统一取 6 位纯码做子串匹配。
+    # 显式 WARNING 留痕，调用方也可用返回行的「代码」列与请求列表自行 diff（工单 05 验收项）。
+    ret_codes = [str(getattr(r, "full_code", "") or "") for r in records]
+    missing = [c for c in norm_codes if not any(c[-6:] in rc for rc in ret_codes)]
+    if missing:
+        logger.warning(
+            "fetch_finance_batch: %d/%d codes missing on eltdx (skipped): %s",
+            len(missing), len(norm_codes), ", ".join(missing),
+        )
+    if not records:
+        raise RuntimeError(
+            f"finance_batch: no data for all {len(norm_codes)} requested codes "
+            f"({', '.join(norm_codes[:10])}{'...' if len(norm_codes) > 10 else ''})"
+        )
     rows = []
     for r in records:
         rows.append({

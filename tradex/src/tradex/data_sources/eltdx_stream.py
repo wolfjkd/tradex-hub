@@ -226,13 +226,21 @@ class EltdxStreamManager:
             push = {}
             if client is not None:
                 try:
-                    snap = client.transport.push_snapshot()
-                    if snap is not None:
+                    # 2026-11-01 修既存缺陷：3.2.x/3.3.x 的 transport 均无
+                    # push_snapshot()（旧调用被 try/except 吞掉，推送统计恒空）。
+                    # 改为自适应读取 3.3.x 实际暴露的 push 缓冲指标：
+                    #   pool transport：push_queue_size() / push_queue_bytes()
+                    #   socket transport：push_dropped 计数字段
+                    # 全部缺失时保持空 dict（与「无推送」语义一致）。
+                    transport = client.transport
+                    q_size = getattr(transport, "push_queue_size", None)
+                    q_bytes = getattr(transport, "push_queue_bytes", None)
+                    dropped = getattr(transport, "push_dropped", None)
+                    if callable(q_size) or callable(q_bytes) or dropped is not None:
                         push = {
-                            "frame_count": snap.frame_count,
-                            "byte_count": snap.byte_count,
-                            "dropped_total": snap.dropped_total,
-                            "closed": snap.closed,
+                            "queue_size": q_size() if callable(q_size) else None,
+                            "queue_bytes": q_bytes() if callable(q_bytes) else None,
+                            "dropped_total": dropped if isinstance(dropped, int) else None,
                         }
                 except Exception:  # noqa: BLE001
                     pass

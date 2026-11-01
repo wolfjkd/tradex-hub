@@ -50,9 +50,25 @@ def _prev_quarter_end(today: "datetime | None" = None) -> str:
 # 这把拿全局副作用换来的锁自然失去存在理由。
 
 
+_AK_TIMEOUT_APPLIED = False
+
+
 def _ak():
-    """延迟导入 akshare，避免模块加载时副作用。"""
+    """延迟导入 akshare，避免模块加载时副作用。
+
+    工单 04（2026-11-01）：akshare 1.20.4 起对所有 requests 接口启用全局
+    默认硬超时 (连接 10s / 读取 60s)，此前本项目从未显式管理超时，升级即
+    被动继承隐含默认值。此处显式设定，不再依赖库的隐含行为：
+      - 连接 10s：与上游默认一致，容忍慢握手；
+      - 读取 30s：全市场 spot / 龙虎榜翻页等大表耗时 3–15s 量级，30s 留足
+        余量；走 SmartRouter 的调用另有 12s 路由超时先行掐断（二者取小），
+        本值主要保护 fetcher 内部 fallback 链等非路由直调场景。
+    """
+    global _AK_TIMEOUT_APPLIED
     import akshare as ak
+    if not _AK_TIMEOUT_APPLIED:
+        ak.set_timeout((10, 30))
+        _AK_TIMEOUT_APPLIED = True
     return ak
 
 
