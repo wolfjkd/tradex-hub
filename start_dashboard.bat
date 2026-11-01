@@ -9,6 +9,13 @@ REM     start_dashboard.bat              default port 8765
 REM     start_dashboard.bat 9000         custom port
 REM     start_dashboard.bat --check      probe interpreter + dep versions only
 REM
+REM  2026-11-01 (#19 dep-baseline): probe order updated. The uv project
+REM  environment now lives at tradex\.venv (uv default), so it is probed
+REM  FIRST. The repo-root .venv is kept as the next candidate because
+REM  source installs per README still create it with plain pip. This
+REM  keeps dev/prod on the lock-synced tradex\.venv and avoids drift
+REM  between the two environments.
+REM
 REM  v3.3.13 fixes (both caused this script to be unusable):
 REM   1) Interpreter probe. The old script ran `where python` and took the
 REM      first hit -- on this machine that is a bare interpreter
@@ -36,10 +43,18 @@ set "TRADEX_DASHBOARD_PORT=%PORT%"
 REM ---------- locate a python that can actually import tradex ----------
 set "PYEXE="
 
-REM candidate 1: project-local .venv
-if exist "%~dp0.venv\Scripts\python.exe" (
-    "%~dp0.venv\Scripts\python.exe" -c "import tradex.dashboard,eltdx,akshare" >nul 2>&1
-    if not errorlevel 1 set "PYEXE=%~dp0.venv\Scripts\python.exe"
+REM candidate 1: uv project environment tradex\.venv (lock-synced, dev/prod)
+if exist "%~dp0tradex\.venv\Scripts\python.exe" (
+    "%~dp0tradex\.venv\Scripts\python.exe" -c "import tradex.dashboard,eltdx,akshare" >nul 2>&1
+    if not errorlevel 1 set "PYEXE=%~dp0tradex\.venv\Scripts\python.exe"
+)
+
+REM candidate 1b: repo-root .venv (plain-pip source installs per README)
+if not defined PYEXE (
+    if exist "%~dp0.venv\Scripts\python.exe" (
+        "%~dp0.venv\Scripts\python.exe" -c "import tradex.dashboard,eltdx,akshare" >nul 2>&1
+        if not errorlevel 1 set "PYEXE=%~dp0.venv\Scripts\python.exe"
+    )
 )
 
 REM candidate 2: WorkBuddy managed env (the one the MCP server uses)
@@ -66,7 +81,8 @@ if not defined PYEXE (
     echo [ERROR] No Python interpreter with "tradex" installed was found.
     echo.
     echo   Tried, in order:
-    echo     1^) "%~dp0.venv\Scripts\python.exe"
+    echo     1^) "%~dp0tradex\.venv\Scripts\python.exe"
+    echo     1b^) "%~dp0.venv\Scripts\python.exe"
     echo     2^) "%USERPROFILE%\.workbuddy\binaries\python\envs\default\Scripts\python.exe"
     echo     3^) every "python" on PATH
     echo.

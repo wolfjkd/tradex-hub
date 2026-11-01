@@ -1,0 +1,5 @@
+# Batch files must stay CRLF on checkout (2026-11-01, bat rules §2/§8):
+# a global `* text=auto eol=lf` elsewhere would silently flip them to bare LF
+# and make cmd misparse them. These exceptions must come after any `*` rule.
+*.bat text eol=crlf
+*.cmd text eol=crlf
