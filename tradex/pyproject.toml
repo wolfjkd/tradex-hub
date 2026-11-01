@@ -27,11 +27,12 @@ classifiers = [
 dependencies = [
     # mcp 2.x 移除了 mcp.server.fastmcp.FastMCP v1 API（本项目 15+ 模块在用），锁定 1.x
     "mcp>=1.0.0,<2",
-    # akshare 1.20.18 对齐生产 venv：1.20.x 含 TLS 证书校验恢复、pandas 弃用清理、
-    # 东财 push2 限流立即抛错不再盲重试等实质修复；1.19 起移除 stock_margin_em，
-    # 已改用 stock_margin_sse（见 akshare_fetchers.py）。
+    # akshare 1.20.21 对齐生产 venv：1.20.x 含 TLS 证书校验恢复、pandas 弃用清理、
+    # 东财 push2 限流立即抛错不再盲重试等实质修复（1.19 起移除 stock_margin_em，
+    # 已改用 stock_margin_sse，见 akshare_fetchers.py）；
+    # 1.20.19-21 无接口删除/签名变更，且不命中本项目调用面（2026-11-01 审计）。
     # 注意：1.20.4 起全局默认硬超时（连接 10s/读取 60s），超时策略见 akshare_fetchers.py 模块头。
-    "akshare>=1.20.18",
+    "akshare>=1.20.21",
     # eltdx 3.3.2 对齐生产 venv（3.3.1 引用环修复、完整分页 raw_payload 变空——本项目均不命中）
     "eltdx>=3.3.2",
     # 2.2.2 为 akshare 1.20.8 起的硬性要求，低于此值装不上 akshare 1.20.x

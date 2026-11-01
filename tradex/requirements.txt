@@ -1,6 +1,6 @@
 mcp>=1.0.0,<2
 # 2026-11-01 与 pyproject.toml 对齐（此前两套下界并存，uv.lock 更落后详见 AUDIT.md §6.1）
-akshare>=1.20.18
+akshare>=1.20.21
 eltdx>=3.3.2
 pandas>=2.2.2
 pydantic>=2.0.0
