@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ---
 
+## [3.8.0] - 2026-11-01（依赖基线收口 · 运行时语义对齐）
+
+### Changed
+- **依赖下界提升（破坏性）**：`pandas>=2.0.0` → `>=2.2.2`（akshare 1.20.8 起硬要求）、
+  `akshare>=1.19.1` → `>=1.20.21`、`eltdx>=3.2.3` → `>=3.3.2`；声明四方
+  （pyproject / requirements / uv.lock / venv 实装）对齐生产值——此前 uv.lock 锁死
+  1.18.97/3.2.2（低于 pyproject 下界），按 lock 重装会无感回退两个 minor。
+- akshare 全局超时显式化：`_ak()` 统一 `ak.set_timeout((10, 30))`（连接 10s / 读取 30s），
+  不再被动继承 1.20.4+ 隐含默认 (10, 60)；走 SmartRouter 的调用仍由 12s 路由超时先行掐断，
+  30s 主要保护 fetcher 内部 fallback 等非路由直调场景。
+- SmartRouter 失败分级：`RateLimitError` 类限流轻罚 -2 且不推进连败、永不触发拉黑
+  （原逻辑任何失败 -20×连败系数，东财限流连吃 3 次即把好源打进黑名单长期降权）；
+  超时类 -5 计入连败（连吃 5 次仍归零）；其余硬失败保持原重罚。日志措辞区分
+  RATE-LIMITED / UPSTREAM TIMEOUT / FAILED，运维可一眼分辨临时限流与接口失效。
+- `eltdx_get_finance_batch` 改用 `on_missing="skip"`：批量财务查询个别代码主站无数据
+  （停牌/退市/新上市/非 A 股）不再整批失败，缺失码 WARNING 留痕，全批无数据仍显式报错。
+- 启动探针（`start_dashboard.bat`）探测顺序：candidate 1 改为 `tradex\.venv`（uv 默认
+  项目环境，与 uv.lock 同步），仓库根 `.venv` 降为 candidate 1b（保留给按 README pip
+  安装的用户），消除双环境漂移。
+
+### Fixed
+- `eltdx_stream.health()` 调用不存在的 `transport.push_snapshot()`（3.2.x/3.3.x 均无
+  此方法，被 try/except 静默吞掉致推送统计恒空）→ 改为自适应读取 3.3.x 实际暴露的
+  `push_queue_size` / `push_queue_bytes` / `push_dropped`。
+
+### Added
+- 新增 15 例测试：路由失败分级 11 例（限流不拉黑 / 三档惩罚数值 / 限流→降级→备源路径）
+  + 批量财务缺失策略 4 例（全部有效 / 部分缺失 / 全部缺失 / 缺失告警留痕）。
+- 新增 `.gitattributes`：`*.bat` / `*.cmd` 强制 `eol=crlf` 例外。
+
+### 验证
+- pytest -m "not network"：**977 passed / 5 skipped**（v3.7.0 基线同规模全绿）；
+  akshare 1.20.21 升级后复跑 976 passed / 1 failed——两次失败集不重叠且单跑复验通过，
+  根因为本机 DNS 对 cninfo 间歇解析失败（既存环境问题 + 真实网络测试未标 network 的
+  既有分类债），非升级引入。
+- 真实联网冒烟：market_overview（akshare 562 行）/ northbound（ths_hsgt 4 行）/
+  industry_comparison 正常；eltdx 批量财务 0.1s 返回、交易日历 MCP 链路全通。
+  fund_flow 冒烟临时失败，直调底层接口归因为东财 push2 对本机 IP 临时限流
+  （`Push2RateLimitError`，发版当日高频测试自造，非版本问题）——限流立即抛错、
+  秒级降级恰为本版新语义的实际表现。8000 网关重启加载新代码，守护 10s 内自动重拉。
+
+---
+
 ## [3.7.0] - 2026-10-30（数据正确性专项 · 已知问题清单闭环）
 
 ### Added
