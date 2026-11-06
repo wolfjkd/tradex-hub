@@ -325,6 +325,25 @@ _ENDPOINTS: tuple[EndpointMeta, ...] = (
         status="implemented",
     ),
     EndpointMeta(
+        id="shortline.turnover_top",
+        title="全市场成交额榜",
+        description=(
+            "收盘后下载通达信官网盘后包（g4day，约 2.7MB，17:00 后发布），解析全市场"
+            "日线含成交额，产出成交额前 N；包未发布/下载失败时降级为实时榜并标「此刻榜」。"
+            "当日榜与历史榜由 kind / as_of 区分。"
+        ),
+        params=("date", "limit", "kind"),
+        fields=("kind", "date", "as_of", "source", "count", "stocks", "degradation"),
+        source="tdx_official（备：category_quotes 实时榜）",
+        compliance="cn-public",
+        phase="postclose",
+        cache_policy="package_long",
+        compute="tradex.service.turnover_service:get_turnover_top",
+        mcp_tool="get_shortline_turnover_top",
+        rest_path="/api/v1/shortline/turnover-top",
+        status="implemented",
+    ),
+    EndpointMeta(
         id="shortline.close_fetch",
         title="收盘定稿落库",
         description=(

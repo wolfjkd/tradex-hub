@@ -8,12 +8,13 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 
 from ...api.schemas import (
+    ERR_BAD_REQUEST,
     ERR_DATA_SOURCE_UNREACHABLE,
     ERR_INTERNAL,
     Envelope,
     envelope_ok,
 )
-from ...service import bigcaps_service
+from ...service import bigcaps_service, turnover_service
 from ...shortline.catalog import build_catalog
 
 router = APIRouter(prefix="/shortline", tags=["shortline"])
@@ -41,6 +42,31 @@ def bigcaps(
     try:
         return envelope_ok(
             bigcaps_service.get_bigcaps(min_mktcap_yi=min_mktcap_yi, limit=limit)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"数据源不可达: {e}",
+            headers={"X-ErrCode": str(ERR_DATA_SOURCE_UNREACHABLE)},
+        )
+
+
+@router.get("/turnover-top", response_model=Envelope[dict])
+def turnover_top(
+    date: str = Query("", description="交易日 YYYYMMDD，默认今天"),
+    limit: int = Query(20, description="返回前 N 只（上限 500）"),
+    kind: str = Query("auto", description="auto / history / realtime"),
+) -> Envelope[dict]:
+    """全市场成交额榜（通达信盘后包主源，失败降级实时榜）。"""
+    try:
+        return envelope_ok(
+            turnover_service.get_turnover_top(date=date, limit=limit, kind=kind)
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=str(e),
+            headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
         )
     except Exception as e:
         raise HTTPException(

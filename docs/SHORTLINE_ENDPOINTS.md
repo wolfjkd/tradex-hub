@@ -3,7 +3,7 @@
 > 本文件由 `scripts/gen_shortline_catalog.py` 依据 `tradex.shortline.meta` 声明生成，请勿手改。
 
 - schema_version: **1.0**
-- 端点数量: **11**
+- 端点数量: **12**
 - 声明校验: 全绿
 
 | 端点 id | 标题 | 阶段 | 缓存策略 | 来源 | 合规 | MCP 工具 | REST 路径 | 状态 |
@@ -19,6 +19,7 @@
 | shortline.live | 盘中情绪 | intraday | live_15s（15s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_live | /api/v1/shortline/live | planned |
 | shortline.settled | 昨日涨停股当日表现 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_settled | /api/v1/shortline/settled | planned |
 | shortline.structure | 涨停结构 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_structure | /api/v1/shortline/structure | planned |
+| shortline.turnover_top | 全市场成交额榜 | postclose | package_long（2592000s） | tdx_official（备：category_quotes 实时榜） | cn-public | get_shortline_turnover_top | /api/v1/shortline/turnover-top | implemented |
 
 ## 口径说明
 
@@ -87,6 +88,12 @@
 涨停结构（板块/制度占比）+ 四池上游字段清单（防假断点）。
 
 - 参数：date ｜ 产出字段：structure, upstream_fields, missing_reason ｜ 计算函数：`tradex.shortline.compute:structure`
+
+### `shortline.turnover_top` — 全市场成交额榜
+
+收盘后下载通达信官网盘后包（g4day，约 2.7MB，17:00 后发布），解析全市场日线含成交额，产出成交额前 N；包未发布/下载失败时降级为实时榜并标「此刻榜」。当日榜与历史榜由 kind / as_of 区分。
+
+- 参数：date, limit, kind ｜ 产出字段：kind, date, as_of, source, count, stocks, degradation ｜ 计算函数：`tradex.service.turnover_service:get_turnover_top`
 
 ## 缓存策略总表
 

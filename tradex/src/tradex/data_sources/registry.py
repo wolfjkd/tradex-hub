@@ -90,6 +90,7 @@ from . import wallstreetcn_fetchers as wscn           # 华尔街见闻
 from . import cctv_news_fetchers as cctv              # 央视新闻联播
 from . import sw_industry_fetchers as swind           # 申万行业变迁
 from . import industry_news_fetchers as indnews       # 产业链资讯 RSS
+from . import tdx_package_fetchers as tdxpkg          # 通达信官网盘后包（H5）
 
 logger = logging.getLogger("tradex.data_sources")
 
@@ -246,6 +247,12 @@ def _do_register() -> None:
     # 备源东财全市场快照（stock_zh_a_spot_em），与主源不同接口，失败才降级。
     router.register("bigcaps", "sina_bigcaps", sina.fetch_sina_bigcaps, priority=1)
     router.register("bigcaps", "akshare_em", akf.fetch_bigcaps_em, priority=100)
+
+    # ── 通达信盘后包（工单 H5，2026-11-06）──
+    # 官方每日增量包 g4day（约 2.7MB，17:00 后发布），全市场日线含成交额。
+    # 只挂一个源：packet 下载/解析失败时由 service 层降级到实时成交额榜。
+    router.register("tdx_daily_package", "tdx_official",
+                    tdxpkg.fetch_tdx_daily_package, priority=1)
 
     # ── akshare 主 + tencent_http 备 ──
     router.register("profit_forecast", "akshare", akf.fetch_profit_forecast, priority=1)
