@@ -65,7 +65,13 @@ def get_bigcaps(min_mktcap_yi: float = 500, limit: int = 0) -> dict:
         },
     }
     if decision.enabled:
-        cache.set(key, result, decision.ttl_seconds)
+        # 缓存全量名单副本：_apply_limit 会改 result 的 stocks/returned，
+        # 若直接缓存同一个 dict，内存缓存里的名单会被第一次调用的 limit 截断。
+        cache.set(
+            key,
+            {**result, "stocks": list(result["stocks"])},
+            decision.ttl_seconds,
+        )
     return _apply_limit(result, limit)
 
 

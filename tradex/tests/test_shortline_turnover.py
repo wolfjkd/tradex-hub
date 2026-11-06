@@ -237,6 +237,25 @@ class TestTurnoverService:
         assert second["returned"] == 3
         assert len(fake.calls) == 1
 
+    def test_cache_not_truncated_by_first_limit(self, monkeypatch):
+        """回归：第一次 limit=2 的截断不能污染缓存里的全量榜单。"""
+        fake = _FakeRouter(package_payload=_package_payload())
+        monkeypatch.setattr(turnover_service, "_router", fake)
+        first = turnover_service.get_turnover_top(date=_YMD, limit=2)
+        assert first["returned"] == 2
+        second = turnover_service.get_turnover_top(date=_YMD, limit=10)
+        assert second["cache_hit"] is True
+        assert second["returned"] == 3  # 样本包共 3 只 A 股
+
+    def test_realtime_cache_not_truncated(self, monkeypatch):
+        fake = _FakeRouter(package_error=ValueError("未发布"), df=_realtime_df())
+        monkeypatch.setattr(turnover_service, "_router", fake)
+        first = turnover_service.get_turnover_top(limit=1)
+        assert first["kind"] == "realtime" and first["returned"] == 1
+        second = turnover_service.get_turnover_top(limit=5)
+        assert second["cache_hit"] is True
+        assert second["returned"] == 2  # 实时样本里 2 只 A 股（剔除债券）
+
     def test_package_missing_degrades_to_realtime(self, monkeypatch):
         fake = _FakeRouter(
             package_error=ValueError("2026-11-06 没有通达信盘后包"),

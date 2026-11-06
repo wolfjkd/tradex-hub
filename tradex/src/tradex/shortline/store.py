@@ -111,7 +111,9 @@ def health() -> dict:
 # ---------------------------------------------------------------- 落库
 
 
-def _should_write(existing: dict | None, new_status: str, force: bool) -> tuple[bool, str]:
+def _should_write(
+    existing: dict | None, new_status: str, force: bool, new_schema: int = SCHEMA_VERSION
+) -> tuple[bool, str]:
     """幂等/防覆盖判定。"""
     if existing is None:
         return True, "首次落库"
@@ -119,6 +121,11 @@ def _should_write(existing: dict | None, new_status: str, force: bool) -> tuple[
     if existing_status == "final":
         if new_status != "final":
             return False, "已存在 final，拒绝 partial 覆盖"
+        old_schema = int(existing.get("schema_version") or 0)
+        if old_schema < new_schema:
+            # schema 升级（如 v1→v2 新增 theme_counts）：不带 force 也必须重算升级，
+            # 否则旧结构会永久卡住历史（轮动永远「—」）。新记录同样必须是 final。
+            return True, f"schema 升级 {old_schema}→{new_schema}，重算覆盖 final"
         if not force:
             return False, "已存在 final，幂等跳过（force=true 可重算）"
         return True, "force 重算并覆盖 final"

@@ -152,7 +152,7 @@ def get_turnover_top(date: str = "", limit: int = 20, kind: str = "auto") -> dic
         return _slice(result, limit_n)
 
     df, source = _router.route(
-        "category_quotes", sort_by="成交额", count=max(50, limit_n), timeout=20
+        "category_quotes", sort_by="成交额", count=max(_MAX_CACHE_ROWS, limit_n), timeout=20
     )
     result = {
         "endpoint": ENDPOINT_ID,
@@ -163,7 +163,7 @@ def get_turnover_top(date: str = "", limit: int = 20, kind: str = "auto") -> dic
         "source_note": "实时成交额榜按此刻成交额排序，非当日定稿；盘中读数会继续变化",
         "compliance": _COMPLIANCE,
         "count": None,
-        "stocks": _rank_realtime(df, limit_n),
+        "stocks": _rank_realtime(df, _MAX_CACHE_ROWS),
         "degradation": {
             "from": "history",
             "to": "realtime",
@@ -174,7 +174,9 @@ def get_turnover_top(date: str = "", limit: int = 20, kind: str = "auto") -> dic
     }
     result["count"] = len(result["stocks"])
     if decision.enabled:
-        cache.set(key, result, decision.ttl_seconds)
+        # 缓存全量榜单副本：_slice 会截断 result["stocks"]，
+        # 直接缓存同一 dict 会让后续更大的 limit 拿不到全量。
+        cache.set(key, {**result, "stocks": list(result["stocks"])}, decision.ttl_seconds)
     return _slice(result, limit_n)
 
 
@@ -217,7 +219,8 @@ def _try_history(date: str, meta) -> dict | str | None:
         "cache": {"policy": meta.cache_policy, "ttl_seconds": decision.ttl_seconds},
     }
     if decision.enabled:
-        cache.set(key, result, decision.ttl_seconds)
+        # 同上：缓存副本，避免第一次调用的 limit 把缓存榜单截断
+        cache.set(key, {**result, "stocks": list(result["stocks"])}, decision.ttl_seconds)
     return result
 
 

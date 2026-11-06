@@ -143,6 +143,17 @@ class TestBigcapsService:
         assert result["returned"] == 1
         assert len(result["stocks"]) == 1
 
+    def test_cache_not_truncated_by_first_limit(self, monkeypatch):
+        """回归：第一次 limit=1 的截断不能污染缓存里的全量名单。"""
+        fake = _FakeRouter(_payload())
+        monkeypatch.setattr(bigcaps_service, "_router", fake)
+        first = bigcaps_service.get_bigcaps(limit=1)
+        assert first["returned"] == 1
+        second = bigcaps_service.get_bigcaps(limit=0)
+        assert second["cache_hit"] is True
+        assert second["returned"] == 2
+        assert len(second["stocks"]) == 2
+
     def test_threshold_param_passed_through(self, monkeypatch):
         fake = _FakeRouter(_payload())
         monkeypatch.setattr(bigcaps_service, "_router", fake)

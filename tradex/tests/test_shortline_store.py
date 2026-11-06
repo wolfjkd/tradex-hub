@@ -173,6 +173,23 @@ class TestCloseFetch:
         assert "disk full" in health["last_error"]
         assert health["last_error_at"]
 
+    def test_schema_upgrade_rewrites_final(self, monkeypatch):
+        """回归：旧 schema 的 final 记录必须能被新 schema 自动升级，否则历史永久卡住。"""
+        monkeypatch.setattr(shortline_service, "_router", _FakeRouter())
+        store.close_fetch(date=_DEFAULT_DATE)
+        path = store.record_path(_DEFAULT_DATE)
+        record = json.loads(path.read_text(encoding="utf-8"))
+        record["schema_version"] = 1
+        record.pop("theme_counts", None)
+        path.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+
+        result = store.close_fetch(date=_DEFAULT_DATE)  # 不带 force
+        assert result["written"] is True
+        assert "schema 升级" in result["reason"]
+        upgraded = store.load(_DEFAULT_DATE)
+        assert upgraded["schema_version"] == 2
+        assert "theme_counts" in upgraded
+
 
 class TestHistory:
     def _seed_dates(self, monkeypatch, dates):
