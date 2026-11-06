@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ---
 
+## [3.8.7] - 2026-11-06（短线数据底座 · vibe-astock 借鉴批次 7 张工单）
+
+### Added
+- **H1 声明式元数据层**：17 个短线端点统一登记 id / 口径 / 缓存 TTL / 适用阶段 /
+  合规分级 / 计算函数 / 产出字段；CATALOG 三通道（MCP `get_shortline_catalog`、
+  REST `/api/v1/shortline/catalog`、`docs/SHORTLINE_ENDPOINTS.md`），生成脚本幂等；
+  缓存策略由元数据解析（closed_long / live_15s / partial 不缓存）。
+- **H4 大市值名单**：`get_shortline_bigcaps`，新浪 bigcaps 主源（按总市值降序翻页）
+  + 东财全市场快照兜底；门槛可配（默认 500 亿）、1 小时缓存、停牌/缺市值不丢整只并写原因。
+- **H5 全市场成交额榜**：`get_shortline_turnover_top`，解析通达信官网盘后包 g4day
+  （.cod 150B / .md1 512B，约 2.7MB，17:00 后发布），A 股过滤 + 元→亿元；
+  包未发布/下载失败自动降级实时成交额榜并标 `kind=realtime` / 「此刻榜」。
+- **H2 四池基础读数**：emotion / cycle / daily / settled / live / ladder /
+  board_ladder / structure 八端点，统一返回 `result + text + computation`；
+  炸板率、晋级率、连板溢价、1进2、封板率、梯队断层口径全部落单测。
+- **H3 收盘定稿落库**：幂等 `shortline_close_fetch` + `get_shortline_history`；
+  按日 `data/shortline/close/YYYYMMDD.json` 落盘（schema_version=2）、原子写 + 按日锁、
+  partial 不覆盖 final、缺数写 `missing_reason`、写失败 ERROR 留痕 + health 可查。
+- **H6 题材四件套**：themes（问财优先、缺 key/失败自动切同花顺并标 source）、
+  firstboard（按首封时间排序 + 反包单标）、facts（封板质量 / 亏钱效应 / 反馈矩阵）、
+  theme_rotation（近 N 日只数/名次/连续/回流，缺天画「—」不当 0）。
+- **H7 数据源韧性**：四池字段漂移检测（新增/消失列 + 语义别名缺口 + 可疑 0 清单）；
+  行业资金新增新浪第三独立上游（`metric=amount_change`，口径差异写明）；
+  数据源健康看板接入 `store.health()` + `field_drift`。
+- 新增 8 个测试文件（shortline 元数据/口径/服务/落库/题材/韧性 + 大市值 + 成交额榜），
+  另补 akshare 行业资金列名漂移回归 3 例。
+
+### Changed
+- MCP 工具 **168 → 186**；REST `/api/v1` 路径 **58 → 77**（其中 `/shortline/*` 19 条）。
+- 数据源注册 **149 → 153**：新增 bigcaps（sina_bigcaps P1 / akshare_em P100）、
+  tdx_daily_package（tdx_official）、industry_comparison（sina_industry P300）；
+  数据类型 **107 → 109**。
+- `fetch_limit_up_board` 信封新增 `fields`（上游原始列名，向后兼容），供
+  structure 端点与 H7 字段漂移使用。
+
+### Fixed
+- 复核修复三处一致性隐患：① 大市值/成交额榜缓存被首次 `limit` 截断 → 改为缓存
+  全量副本；② 实时榜二次更大 `limit` 拿不到全量 → 取数/排名统一 500 条；
+  ③ 旧 schema 的 final 记录会永久卡住历史 → schema 升级时允许 final 自动重算升级。
+- **行业资金 akshare 主源列名漂移（发布冒烟发现）**：akshare 1.20.21 把
+  「板块/涨跌幅/领涨股票」改成「名称/今日涨跌幅/今日主力净流入最大股」，旧映射
+  把所有行业读成 `"" / 0.0`（典型的假 0）→ 改为别名兜底；别名全不匹配时显式抛错，
+  由 SmartRouter 降级到 ths_flow / sina_industry，不再把空数据交给下游。
+
+### 验证
+- `pytest -m "not network"`：**1115 passed / 5 skipped / 7 deselected / 0 failed**
+  （v3.8.0 基线 977 passed，净增 138 项）。
+- 真实联网冒烟（WorkBuddy 运行时 venv）：market_overview akshare 562 行
+  （上证 3649.1774）；涨停池 32 家（002578 闽发铝业 5 连板）；通达信盘后包 52569 行
+  （上证指数 close 3689.9109）；行业资金修复后返回 公用事业 +0.55% / 长江电力；
+  短线每日读数与落库一致；大市值 344 只（建设银行 31156.61 亿）。
+- 直连审计：数据源 socket 层 `proxy hits: []`（无流量绕行 Clash）。
+- 网关重启后 `/health` 返回 `tools=186`，19 条 `/shortline/*` 路由实测 200。
+
+---
+
 ## [3.8.0] - 2026-11-01（依赖基线收口 · 运行时语义对齐）
 
 ### Changed
