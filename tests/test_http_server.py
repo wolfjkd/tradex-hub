@@ -47,7 +47,7 @@ def test_health_ok():
     assert body["status"] == "ok"
     assert body["service"] == "tradex-mcp"
     assert body["version"]  # 非空即满足（版本由 VERSION 单一事实源驱动）
-    assert body["tools"] == 168  # SP-2026-10-13-001: tq 源工具 +2（166→168）
+    assert body["tools"] == 186  # 2026-11-06 shortline 批次 +18（168→186）
     assert body["uptime_seconds"] >= 0
 
 

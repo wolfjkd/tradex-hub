@@ -57,7 +57,9 @@
   | wencai_news          | iwencai_openapi    |               |               |           |                |
   | market_breadth       | (裸类型)          |               |               |           | (push2ex 已删) |
   | industry_quotes      | (裸类型)          |               |               |           | (push2 已删)   |
-  | limit_up_board       | (裸类型)          |               |               |           | (push2_clist 已删) |
+  | limit_up_board       | akshare_em (P1)     |               |               |           | (push2_clist 已删) |
+  | bigcaps              | sina_bigcaps        | akshare_em    |               |           |                |
+  | tdx_daily_package    | tdx_official        |               |               |           |                |
   | stock_boards         | (裸类型)          |               |               |           | (slist 已删)   |
 """
 

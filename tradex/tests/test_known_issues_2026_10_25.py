@@ -424,7 +424,8 @@ class TestBoardSentiment:
         from tradex.data_sources import akshare_fetchers as akf
 
         monkeypatch.setattr(
-            akf, "_fetch_pool_rows", lambda bt, d: self._rows(["000001", "000002"])
+            akf, "_fetch_pool_with_fields",
+            lambda bt, d: (self._rows(["000001", "000002"]), ["代码", "名称"]),
         )
         out = akf.fetch_limit_up_board(board_type="zt", date="20261030")
 

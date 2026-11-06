@@ -1,7 +1,7 @@
 # MCP 工具清单
 
 > 本文件由 `scripts/generate_tool_docs.py` 从源码 AST 生成（`tradex/src/tradex/tools/*.py`
-> 中带 `@mcp.tool` 装饰器的函数），**请勿手工编辑**。当前版本 **v3.8.0**，共 **168 个工具**。
+> 中带 `@mcp.tool` 装饰器的函数），**请勿手工编辑**。当前版本 **v3.8.0**，共 **186 个工具**。
 > 工具增删后重跑脚本即可：`python scripts/generate_tool_docs.py`。
 
 ## 总览
@@ -10,9 +10,9 @@
 |------|--------|
 | L1 数据获取 | 144 |
 | L2 计算引擎 | 8 |
-| L3 决策支持 | 11 |
+| L3 决策支持 | 29 |
 | 系统诊断 | 5 |
-| **合计** | **168** |
+| **合计** | **186** |
 
 ## L1 数据获取（144 个）
 
@@ -300,7 +300,7 @@
 | `calculate_performance` | 计算完整的策略绩效指标。 |
 | `list_performance_metrics` | 列出所有支持的绩效指标清单。 |
 
-## L3 决策支持（11 个）
+## L3 决策支持（29 个）
 
 ### 交易信号生成（3 个）
 
@@ -337,6 +337,29 @@
 | 工具 | 说明 |
 |------|------|
 | `analyze_technical` | 5 维度技术分析引擎（均线/趋势/量价/筹码/形态）。 |
+
+### 短线读数与收盘落库（18 个）
+
+| 工具 | 说明 |
+|------|------|
+| `get_shortline_bigcaps` | 获取大市值名单（总市值 ≥ 门槛的 A 股）。 |
+| `get_shortline_board_ladder` | 获取连板天梯：今日各连板高度名单 + 低一层没接上的票去向。 |
+| `get_shortline_catalog` | 获取短线端点目录（声明式元数据）。 |
+| `get_shortline_cycle` | 获取短线情绪周期：近 N 日涨停数 / 最高板 / 炸板率的窗口分位。 |
+| `get_shortline_daily` | 获取短线每日读数：涨停数 / 最高板 / 炸板率 / 昨日涨停今日中位 / 1进2。 |
+| `get_shortline_emotion` | 获取短线情绪四项：赚钱效应 / 晋级率 / 连板溢价 / 梯队断层。 |
+| `get_shortline_facts` | 获取盘面事实：封板质量 / 亏钱效应 / 强势股反馈矩阵。 |
+| `get_shortline_field_drift` | 获取四池字段漂移报告（区分「真 0」与「字段变了」）。 |
+| `get_shortline_firstboard` | 获取首板名单：按首次封板时间升序，反包票单标。 |
+| `get_shortline_history` | 读取短线收盘定稿历史（已落库的全部交易日）。 |
+| `get_shortline_ladder` | 获取昨日梯队：昨日全部涨停股按连板数分组排列。 |
+| `get_shortline_live` | 获取盘中情绪：此刻涨停 / 炸板 / 跌停家数、封板率、1进2。 |
+| `get_shortline_settled` | 获取昨日涨停股当日表现明细（涨停样本原料）。 |
+| `get_shortline_structure` | 获取涨停结构（板块/ST/首板占比）+ 四池上游字段清单（防假断点）。 |
+| `get_shortline_theme_rotation` | 获取题材轮动：近 N 日各题材只数 / 名次 / 连续天数 / 回流。 |
+| `get_shortline_themes` | 获取题材事件树（涨停原因归组）。 |
+| `get_shortline_turnover_top` | 获取全市场成交额榜（通达信盘后包主源，实时榜降级）。 |
+| `shortline_close_fetch` | 收盘定稿取数并落库（幂等）。由 TradeX scheduler 在 15:35 调用。 |
 
 ## 系统诊断（5 个）
 

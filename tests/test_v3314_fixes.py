@@ -151,7 +151,9 @@ class TestIndependentBackupSources:
         #                  货币网 2 + 人行 1 + 互动 2，共 12 个注册点移除）
         #           → 148（SP-2026-10-13-001 tq 源 +3：realtime_quote/l2_stats/tdx_formula）
         #           → 149（2026-10-30 KNOWN-ISSUES #1：trading_calendar 补 sina 备源）
-        assert len(router.get_registry_report()) == 149
+        #           → 153（2026-11-06 shortline 批次：bigcaps 2 + tdx_daily_package 1
+        #                  + industry_comparison sina_industry 1）
+        assert len(router.get_registry_report()) == 153
 
     def test_unsupported_endpoint_raises(self):
         """备源只覆盖部分 endpoint，其余必须显式报错而非静默返回空。"""
