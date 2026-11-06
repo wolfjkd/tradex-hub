@@ -19,6 +19,7 @@ from ..service.shortline_service import (
     get_structure,
 )
 from ..service.turnover_service import get_turnover_top
+from ..shortline import store
 from ..shortline.catalog import build_catalog
 from ..utils.formatter import dict_to_json, error_response
 
@@ -218,3 +219,42 @@ def register(mcp: FastMCP):
             return dict_to_json(get_structure(date=date))
         except Exception as e:
             return error_response(f"获取涨停结构失败: {e}", "get_shortline_structure")
+
+    # ---------------- H3：收盘定稿落库 + 历史回读 ----------------
+
+    @mcp.tool()
+    async def shortline_close_fetch(date: str = "", force: bool = False) -> str:
+        """
+        收盘定稿取数并落库（幂等）。由 TradeX scheduler 在 15:35 调用。
+
+        把当日四池读数（情绪/每日/昨日表现/梯队/天梯/结构）按日期落本机，
+        对抗东财四池约一个月保留期。同一日重复调用不重复写；partial 不会覆盖 final。
+
+        Args:
+            date: 交易日 YYYYMMDD，默认今天。
+            force: 强制重算（仍拒绝 partial 覆盖 final）。
+
+        Returns:
+            落库结果 JSON（date / status / written / reason / schema_version / missing_reasons）。
+        """
+        try:
+            return dict_to_json(store.close_fetch(date=date, force=force))
+        except Exception as e:
+            return error_response(f"收盘落库失败: {e}", "shortline_close_fetch")
+
+    @mcp.tool()
+    async def get_shortline_history(date: str = "", days: int = 5) -> str:
+        """
+        读取短线收盘定稿历史（已落库的全部交易日）。
+
+        Args:
+            date: 截止日期 YYYYMMDD，默认今天。
+            days: 最近 N 条落库记录，默认 5。
+
+        Returns:
+            历史 JSON（count / dates / records / missing_dates / schema_version）。
+        """
+        try:
+            return dict_to_json(store.history(days=days, date=date))
+        except Exception as e:
+            return error_response(f"读取收盘历史失败: {e}", "get_shortline_history")

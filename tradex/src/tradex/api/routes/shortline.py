@@ -15,6 +15,7 @@ from ...api.schemas import (
     envelope_ok,
 )
 from ...service import bigcaps_service, shortline_service, turnover_service
+from ...shortline import store
 from ...shortline.catalog import build_catalog
 
 router = APIRouter(prefix="/shortline", tags=["shortline"])
@@ -144,3 +145,30 @@ def board_ladder(date: str = Query("", description="交易日 YYYYMMDD")) -> Env
 def structure(date: str = Query("", description="交易日 YYYYMMDD")) -> Envelope[dict]:
     """涨停结构 + 四池上游字段清单。"""
     return _call(lambda: shortline_service.get_structure(date=date))
+
+
+# ---------------------------------------------------------------- H3 落库 / 历史
+
+
+@router.post("/close-fetch", response_model=Envelope[dict])
+def close_fetch(
+    date: str = Query("", description="交易日 YYYYMMDD，默认今天"),
+    force: bool = Query(False, description="强制重算（仍拒绝 partial 覆盖 final）"),
+) -> Envelope[dict]:
+    """收盘定稿取数 + 落库（幂等）。"""
+    return _call(lambda: store.close_fetch(date=date, force=force))
+
+
+@router.get("/history", response_model=Envelope[dict])
+def history(
+    date: str = Query("", description="截止日期 YYYYMMDD"),
+    days: int = Query(5, description="最近 N 条落库记录"),
+) -> Envelope[dict]:
+    """收盘定稿历史回读。"""
+    return _call(lambda: store.history(days=days, date=date))
+
+
+@router.get("/store-health", response_model=Envelope[dict])
+def store_health() -> Envelope[dict]:
+    """落库健康状态（写次数 / 跳过次数 / 最近错误）。"""
+    return envelope_ok(store.health())

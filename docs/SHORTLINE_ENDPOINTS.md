@@ -10,11 +10,11 @@
 |---|---|---|---|---|---|---|---|---|
 | shortline.bigcaps | 大市值名单 | anytime | hourly（3600s） | sina_bigcaps（备源：akshare_em） | cn-public | get_shortline_bigcaps | /api/v1/shortline/bigcaps | implemented |
 | shortline.board_ladder | 连板天梯 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_board_ladder | /api/v1/shortline/board-ladder | implemented |
-| shortline.close_fetch | 收盘定稿落库 | postclose | none（不缓存） | akshare_em(zt/zb/dt/prev_zt) | cn-public | shortline_close_fetch | /api/v1/shortline/close-fetch | planned |
+| shortline.close_fetch | 收盘定稿落库 | postclose | none（不缓存） | akshare_em(zt/zb/dt/prev_zt) | cn-public | shortline_close_fetch | /api/v1/shortline/close-fetch | implemented |
 | shortline.cycle | 情绪周期 | close | closed_long（604800s） | shortline_store + akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_cycle | /api/v1/shortline/cycle | implemented |
 | shortline.daily | 每日读数 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_daily | /api/v1/shortline/daily | implemented |
 | shortline.emotion | 情绪四项 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_emotion | /api/v1/shortline/emotion | implemented |
-| shortline.history | 收盘历史回读 | anytime | closed_long（604800s） | shortline_store | cn-public | get_shortline_history | /api/v1/shortline/history | planned |
+| shortline.history | 收盘历史回读 | anytime | closed_long（604800s） | shortline_store | cn-public | get_shortline_history | /api/v1/shortline/history | implemented |
 | shortline.ladder | 昨日梯队 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_ladder | /api/v1/shortline/ladder | implemented |
 | shortline.live | 盘中情绪 | intraday | live_15s（15s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_live | /api/v1/shortline/live | implemented |
 | shortline.settled | 昨日涨停股当日表现 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_settled | /api/v1/shortline/settled | implemented |

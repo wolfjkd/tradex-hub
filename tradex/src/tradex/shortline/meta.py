@@ -367,6 +367,7 @@ _ENDPOINTS: tuple[EndpointMeta, ...] = (
         compute="tradex.shortline.store:close_fetch",
         mcp_tool="shortline_close_fetch",
         rest_path="/api/v1/shortline/close-fetch",
+        status="implemented",
     ),
     EndpointMeta(
         id="shortline.history",
@@ -381,6 +382,7 @@ _ENDPOINTS: tuple[EndpointMeta, ...] = (
         compute="tradex.shortline.store:history",
         mcp_tool="get_shortline_history",
         rest_path="/api/v1/shortline/history",
+        status="implemented",
     ),
 )
 
