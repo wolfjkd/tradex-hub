@@ -13,10 +13,14 @@ from ..service.shortline_service import (
     get_cycle,
     get_daily,
     get_emotion,
+    get_facts,
+    get_firstboard,
     get_ladder,
     get_live,
     get_settled,
     get_structure,
+    get_theme_rotation,
+    get_themes,
 )
 from ..service.turnover_service import get_turnover_top
 from ..shortline import store
@@ -219,6 +223,78 @@ def register(mcp: FastMCP):
             return dict_to_json(get_structure(date=date))
         except Exception as e:
             return error_response(f"获取涨停结构失败: {e}", "get_shortline_structure")
+
+    # ---------------- H6：题材 / 首板 / 盘面事实 / 题材轮动 ----------------
+
+    @mcp.tool()
+    async def get_shortline_themes(date: str = "") -> str:
+        """
+        获取题材事件树（涨停原因归组）。
+
+        问财优先，缺 key / 失败自动切同花顺涨停归因，并标 reason_source。
+        产出：事件（整条原因归组）+ 关键词热度 + 未归因名单。
+
+        Args:
+            date: 交易日 YYYYMMDD，默认最近有数据的交易日。
+
+        Returns:
+            题材 JSON（reason_source / events / keywords / unattributed / missing_reason）。
+        """
+        try:
+            return dict_to_json(get_themes(date=date))
+        except Exception as e:
+            return error_response(f"获取题材事件树失败: {e}", "get_shortline_themes")
+
+    @mcp.tool()
+    async def get_shortline_firstboard(date: str = "") -> str:
+        """
+        获取首板名单：按首次封板时间升序，反包票单标。
+
+        Args:
+            date: 交易日 YYYYMMDD，默认最近有数据的交易日。
+
+        Returns:
+            名单 JSON（count / stocks / reversal_count）。
+        """
+        try:
+            return dict_to_json(get_firstboard(date=date))
+        except Exception as e:
+            return error_response(f"获取首板名单失败: {e}", "get_shortline_firstboard")
+
+    @mcp.tool()
+    async def get_shortline_facts(date: str = "") -> str:
+        """
+        获取盘面事实：封板质量 / 亏钱效应 / 强势股反馈矩阵。
+
+        Args:
+            date: 交易日 YYYYMMDD，默认最近有数据的交易日。
+
+        Returns:
+            事实 JSON（seal_quality / losing_effect / feedback_matrix / missing_reason）。
+        """
+        try:
+            return dict_to_json(get_facts(date=date))
+        except Exception as e:
+            return error_response(f"获取盘面事实失败: {e}", "get_shortline_facts")
+
+    @mcp.tool()
+    async def get_shortline_theme_rotation(days: int = 5, date: str = "") -> str:
+        """
+        获取题材轮动：近 N 日各题材只数 / 名次 / 连续天数 / 回流。
+
+        历史来自收盘定稿落库；缺天显示「—」，不当 0。
+
+        Args:
+            days: 窗口天数（2~60），默认 5。
+            date: 交易日 YYYYMMDD，默认最近有数据的交易日。
+
+        Returns:
+            轮动 JSON（days / rows（含 counts/display/ranks/streak/is_returning）/ missing_dates）。
+        """
+        try:
+            return dict_to_json(get_theme_rotation(days=days, date=date))
+        except Exception as e:
+            return error_response(f"获取题材轮动失败: {e}", "get_shortline_theme_rotation")
 
     # ---------------- H3：收盘定稿落库 + 历史回读 ----------------
 

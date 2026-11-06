@@ -27,10 +27,10 @@ from ..shortline.compute import PoolSnapshot
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # v2（H6）：新增 themes 读数 + theme_counts（题材轮动的历史原料）
 
-# 落定的读数（H6 的题材轮动会再扩，届时 schema +1）
-_READINGS = ("emotion", "daily", "settled", "ladder", "board_ladder", "structure")
+# 落定的读数（H6 起含题材；后续再扩必须 schema +1）
+_READINGS = ("emotion", "daily", "settled", "ladder", "board_ladder", "structure", "themes")
 
 _state_guard = threading.Lock()
 _date_locks: dict[str, threading.Lock] = {}
@@ -165,6 +165,19 @@ def close_fetch(date: str = "", force: bool = False) -> dict:
         payload, text = fn(snapshot)
         results[name] = {"result": payload, "text": text}
 
+    # 题材归因走外部源（问财→同花顺）；取不到不算落库失败，但要写明原因
+    try:
+        reasons, reason_source, reason_problems = shortline_service.fetch_reasons(snapshot.date)
+    except Exception as exc:  # noqa: BLE001
+        reasons, reason_source, reason_problems = {}, "无", [f"归因异常：{exc}"]
+    theme_result, theme_text = compute.themes(snapshot, reasons, reason_source)
+    if reason_problems and not theme_result.get("missing_reason"):
+        theme_result["missing_reason"] = reason_problems
+    results["themes"] = {"result": theme_result, "text": theme_text}
+    theme_counts = {
+        item["theme"]: item["count"] for item in theme_result.get("keywords", [])
+    }
+
     missing_reasons: dict = {"pools": dict(snapshot.reasons)}
     for name in _READINGS:
         endpoint_missing = results[name]["result"].get("missing_reason")
@@ -181,6 +194,7 @@ def close_fetch(date: str = "", force: bool = False) -> dict:
         "compliance": "cn-public",
         "readings": results,
         "daily_metrics": _daily_metrics(results["daily"]["result"]),
+        "theme_counts": theme_counts,
         "raw_fields": {pool: list(snapshot.fields.get(pool) or []) for pool in ("zt", "zb", "dt", "prev_zt")},
         "missing_reason": missing_reasons,
     }
@@ -296,6 +310,8 @@ def history(days: int = 5, date: str = "") -> dict:
             "limit_up_count": metrics.get("limit_up_count"),
             "max_board": metrics.get("max_board"),
             "break_rate": metrics.get("break_rate"),
+            # v1 记录没有 theme_counts → None（轮动显示「—」），不伪造成 0
+            "theme_counts": record.get("theme_counts"),
             "missing_reason": record.get("missing_reason"),
         })
 

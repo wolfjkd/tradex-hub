@@ -69,6 +69,13 @@ class _FakeRouter:
 
 
 @pytest.fixture(autouse=True)
+def _isolated_store(tmp_path, monkeypatch):
+    """隔离落库目录：避免真实的 data/shortline 影响 cycle 的「无历史」断言。"""
+    monkeypatch.setenv("SHORTLINE_DATA_DIR", str(tmp_path / "shortline"))
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _clean_cache():
     today = shortline_service.datetime.now().strftime("%Y%m%d")
     for endpoint in (

@@ -92,17 +92,19 @@ class TestCloseFetch:
 
         assert result["written"] is True
         assert result["status"] == "final"
-        assert result["schema_version"] == 1
+        assert result["schema_version"] == 2
 
         record = store.load(_DEFAULT_DATE)
-        assert record["schema_version"] == 1
+        assert record["schema_version"] == 2
         assert record["status"] == "final"
         assert set(record["readings"]) == {
-            "emotion", "daily", "settled", "ladder", "board_ladder", "structure",
+            "emotion", "daily", "settled", "ladder", "board_ladder", "structure", "themes",
         }
         assert record["daily_metrics"]["limit_up_count"] == 3
+        assert record["theme_counts"] == {}  # 测试 router 无归因源 → 空表，不当 0
         assert record["raw_fields"]["zt"] == _FIELDS["zt"]
         assert record["missing_reason"]["pools"] == {}
+        assert record["missing_reason"]["themes"]  # 归因缺失必须写原因
 
     def test_idempotent_second_call_does_not_rewrite(self, monkeypatch, _isolated_store):
         monkeypatch.setattr(shortline_service, "_router", _FakeRouter())
@@ -184,7 +186,7 @@ class TestHistory:
         assert result["count"] == 2
         assert result["dates"] == ["20261102", "20261105"]
         assert result["missing_dates"] == ["20261103", "20261104"]
-        assert result["schema_version"] == 1
+        assert result["schema_version"] == 2
         assert result["records"][0]["limit_up_count"] == 3
 
     def test_history_respects_days_window(self, monkeypatch):
@@ -252,4 +254,4 @@ class TestChannels:
 
         health = client.get("/api/v1/shortline/store-health")
         assert health.status_code == 200
-        assert health.json()["data"]["schema_version"] == 1
+        assert health.json()["data"]["schema_version"] == 2

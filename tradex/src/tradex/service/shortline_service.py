@@ -251,7 +251,7 @@ def get_cycle(days: int = 5, date: str = "") -> dict:
         return result
 
     snapshot = collect_snapshot(date=date, need=("zt", *_AUX_POOLS))
-    history, missing_dates, history_note = _load_history(window_days)
+    history, missing_dates, history_note = _load_history(window_days, end_date=snapshot.date)
     payload, text = compute.cycle(snapshot, days=window_days, history=history, missing_dates=missing_dates)
 
     partial = bool(snapshot.missing) or not history or _is_intraday(snapshot.date)
@@ -291,11 +291,243 @@ def get_cycle(days: int = 5, date: str = "") -> dict:
     return envelope
 
 
-def _load_history(days: int) -> tuple[list[dict], list[str], str | None]:
-    """从收盘定稿库读历史（H3 实现前为空，标 missing_reason）。"""
+def _load_history(days: int, end_date: str = "") -> tuple[list[dict], list[str], str | None]:
+    """从收盘定稿库读历史。
+
+    只取 ``end_date`` 之前的记录：当日读数由实时快照给出，历史里同日记录会重复计数。
+    """
     try:
-        from ..shortline import store  # 延迟导入：H2 阶段该模块可能尚未实现
-        payload = store.history(days=days)
-        return payload.get("records", []), payload.get("missing_dates", []), None
+        from ..shortline import store
+        payload = store.history(days=max(1, days) + 1, date=end_date)
+        records = [
+            record for record in payload.get("records", [])
+            if not end_date or str(record.get("date")) < str(end_date)
+        ][-max(1, days):]
+        return records, payload.get("missing_dates", []), None
     except Exception as exc:  # noqa: BLE001
         return [], [], f"历史不可读：{exc}"
+
+
+# ---------------------------------------------------------------- H6：题材归因
+
+
+def fetch_reasons(date: str = "") -> tuple[dict[str, str], str, list[str]]:
+    """取涨停原因映射：问财优先，失败/缺 key 切同花顺，并标注 source。
+
+    Returns:
+        (reasons_by_code, source, problems)
+    """
+    problems: list[str] = []
+    try:
+        reasons = _reasons_from_wencai(date)
+        if reasons:
+            return reasons, "问财", []
+        problems.append("问财返回空（无 key 或未覆盖）")
+    except Exception as exc:  # noqa: BLE001 - 缺 key/依赖缺失都走兜底
+        problems.append(f"问财不可用：{exc}")
+
+    try:
+        reasons = _reasons_from_ths(date)
+        if reasons:
+            return reasons, "同花顺涨停归因", problems
+        problems.append("同花顺归因为空")
+    except Exception as exc:  # noqa: BLE001
+        problems.append(f"同花顺归因不可用：{exc}")
+    return {}, "无（问财与同花顺均失败）", problems
+
+
+def _reasons_from_wencai(date: str) -> dict[str, str]:
+    """问财：查询当日涨停原因。返回空表 / 缺列都当失败（触发同花顺兜底）。"""
+    query = f"{date or datetime.now().strftime('%Y%m%d')}涨停股票 涨停原因"
+    df, _src = _router.route("wencai_query", query=query, timeout=40)
+    if df is None or getattr(df, "empty", True):
+        return {}
+    columns = [str(c) for c in df.columns]
+    code_col = next((c for c in columns if "代码" in c), None)
+    reason_col = next((c for c in columns if "涨停原因" in c or "原因" in c), None)
+    if not code_col or not reason_col:
+        raise RuntimeError(f"问财返回缺少代码/原因列（{columns[:6]}）")
+    reasons: dict[str, str] = {}
+    for _, row in df.iterrows():
+        code = str(row.get(code_col) or "")[-6:]
+        reason = str(row.get(reason_col) or "").strip()
+        if code and reason:
+            reasons[code] = reason
+    return reasons
+
+
+def _reasons_from_ths(date: str) -> dict[str, str]:
+    """同花顺：涨停归因（hot_money 全市场）。"""
+    payload, _src = _router.route("hot_money", code="", date=_date_dash(date), timeout=25)
+    if not isinstance(payload, dict):
+        raise RuntimeError("同花顺归因返回结构异常")
+    if payload.get("error"):
+        raise RuntimeError(str(payload["error"]))
+    reasons = {
+        str(row.get("code") or "")[-6:]: str(row.get("reason") or "").strip()
+        for row in (payload.get("stocks") or [])
+        if row.get("code") and row.get("reason")
+    }
+    return reasons
+
+
+def _date_dash(date: str) -> str:
+    s = str(date or "").replace("-", "")
+    if not s:
+        return datetime.now().strftime("%Y-%m-%d")
+    return f"{s[:4]}-{s[4:6]}-{s[6:]}"
+
+
+_THEME_DEFINITIONS = {
+    "题材事件树": "涨停股按涨停原因整体归组；关键词按原因拆分（、，+等分隔）",
+    "首板": "连板数=1 的涨停股，按首次封板时间升序",
+    "反包": "涨停统计（今涨停数/近N日涨停数）中 N>1 的首板票",
+    "封板质量": "平均封单额 / 封板时间中位 / 平均炸板次数 / 封板率",
+    "亏钱效应": "昨日涨停股今日下跌占比 + 中位涨跌幅 + 跌停数",
+    "题材轮动": "近 N 日各题材只数与名次；连续天数与回流；缺天画「—」",
+}
+
+
+def _themes_envelope(endpoint_id: str, date: str) -> dict:
+    meta = get_endpoint(endpoint_id)
+    key = cache_key(endpoint_id, date=_effective_date(date))
+    cached = cache.get(key)
+    if cached is not None:
+        result = dict(cached)
+        result["cache_hit"] = True
+        return result
+
+    snapshot = collect_snapshot(date=date, need=("zt",))
+    reasons, source, problems = fetch_reasons(snapshot.date)
+    payload, text = compute.themes(snapshot, reasons, source)
+    partial = _is_intraday(snapshot.date) or not reasons
+
+    decision = resolve_cache(meta.cache_policy, partial=partial)
+    reasons_map: dict = dict(snapshot.reasons)
+    if problems:
+        reasons_map["theme_source"] = problems
+    envelope = {
+        "endpoint": endpoint_id,
+        "date": snapshot.date,
+        "as_of": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "source": source,
+        "compliance": _COMPLIANCE,
+        "partial": partial,
+        "missing_reason": reasons_map or None,
+        "result": payload,
+        "text": text,
+        "computation": {
+            "params": {"date": date or "auto"},
+            "pools_used": ["zt"],
+            "missing_pools": list(snapshot.missing),
+            "definitions": {"题材事件树": _THEME_DEFINITIONS["题材事件树"]},
+            "computed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        },
+        "cache": {
+            "policy": meta.cache_policy,
+            "ttl_seconds": decision.ttl_seconds,
+            "reason": decision.reason,
+        },
+        "cache_hit": False,
+    }
+    if decision.enabled:
+        cache.set(key, envelope, decision.ttl_seconds)
+    return envelope
+
+
+def get_themes(date: str = "") -> dict:
+    """题材事件树（问财优先 / 同花顺兜底）。"""
+    return _themes_envelope("shortline.themes", date)
+
+
+def get_firstboard(date: str = "") -> dict:
+    """首板名单（按首封时间排序，反包单标）。"""
+    return _serve("shortline.firstboard", date, ("zt",), compute.firstboard)
+
+
+def get_facts(date: str = "") -> dict:
+    """盘面事实（封板质量 / 亏钱效应 / 反馈矩阵）。"""
+    return _serve("shortline.facts", date, ("zt", "zb", "dt", "prev_zt"), compute.facts)
+
+
+_ROTATION_SCAN_DAYS = 60
+
+
+def get_theme_rotation(days: int = 5, date: str = "") -> dict:
+    """题材轮动（近 N 日只数/名次/连续/回流，缺天画「—」）。"""
+    try:
+        window = max(2, min(int(days or 5), _ROTATION_SCAN_DAYS))
+    except (TypeError, ValueError):
+        window = 5
+    meta = get_endpoint("shortline.theme_rotation")
+    key = cache_key("shortline.theme_rotation", date=_effective_date(date), days=window)
+    cached = cache.get(key)
+    if cached is not None:
+        result = dict(cached)
+        result["cache_hit"] = True
+        return result
+
+    snapshot = collect_snapshot(date=date, need=("zt",))
+    reasons, source, problems = fetch_reasons(snapshot.date)
+    payload, text = compute.themes(snapshot, reasons, source)
+    today_counts = {item["theme"]: item["count"] for item in payload.get("keywords", [])}
+
+    history, missing_dates, history_note = _load_history(window + 1, end_date=snapshot.date)
+    days_records: list[dict] = []
+    for record in history:
+        if str(record.get("date")) == snapshot.date:
+            continue  # 今日一律用实时快照重算，避免历史里的同日记录重复成两天
+        counts = record.get("theme_counts")
+        days_records.append({
+            "date": record.get("date"),
+            "available": counts is not None,
+            "theme_counts": counts,
+        })
+    days_records.append({
+        "date": snapshot.date,
+        "available": bool(today_counts),
+        "theme_counts": today_counts,
+    })
+    days_records = days_records[-window:]
+
+    rotation, text = compute.theme_rotation(days_records, missing_dates=missing_dates)
+
+    partial = _is_intraday(snapshot.date) or not today_counts or not history
+    reasons_map: dict = dict(snapshot.reasons)
+    if problems:
+        reasons_map["theme_source"] = problems
+    if history_note:
+        reasons_map["history"] = history_note
+    if partial:
+        reasons_map.setdefault("endpoint", []).append(
+            "题材轮动窗口不完整（历史缺天或今日归因缺失），缺天显示「—」"
+        )
+
+    decision = resolve_cache(meta.cache_policy, partial=partial)
+    envelope = {
+        "endpoint": "shortline.theme_rotation",
+        "date": snapshot.date,
+        "as_of": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "source": f"{source} + shortline_store",
+        "compliance": _COMPLIANCE,
+        "partial": partial,
+        "missing_reason": reasons_map or None,
+        "result": rotation,
+        "text": text,
+        "computation": {
+            "params": {"days": window, "date": date or "auto"},
+            "pools_used": ["zt"],
+            "missing_pools": list(snapshot.missing),
+            "definitions": {"题材轮动": _THEME_DEFINITIONS["题材轮动"]},
+            "computed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        },
+        "cache": {
+            "policy": meta.cache_policy,
+            "ttl_seconds": decision.ttl_seconds,
+            "reason": decision.reason,
+        },
+        "cache_hit": False,
+    }
+    if decision.enabled:
+        cache.set(key, envelope, decision.ttl_seconds)
+    return envelope

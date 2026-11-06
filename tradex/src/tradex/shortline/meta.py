@@ -33,6 +33,9 @@ class CachePolicy:
     description: str
 
 
+# 缓存键命名空间版本：shortline 输出结构变更时 +1（让旧文件缓存整体失效）
+CACHE_NAMESPACE = "shortline-v2"
+
 CACHE_POLICIES: dict[str, CachePolicy] = {
     "live_15s": CachePolicy(
         name="live_15s",
@@ -104,8 +107,12 @@ def resolve_cache(policy_name: str, *, partial: bool = False) -> CacheDecision:
 
 
 def cache_key(endpoint_id: str, **params: Any) -> str:
-    """生成稳定的端点缓存键（参数按 key 排序，空值忽略）。"""
-    parts = [endpoint_id]
+    """生成稳定的端点缓存键（参数按 key 排序，空值忽略）。
+
+    键前缀带命名空间版本：代码升级改变了输出结构时 +1，让旧的长 TTL 文件缓存
+    自然失效（否则升级后最长 7 天仍在读旧 schema 的缓存）。
+    """
+    parts = [CACHE_NAMESPACE, endpoint_id]
     for key in sorted(params):
         value = params[key]
         if value in (None, "", 0):
@@ -311,6 +318,72 @@ _ENDPOINTS: tuple[EndpointMeta, ...] = (
         compute="tradex.shortline.compute:structure",
         mcp_tool="get_shortline_structure",
         rest_path="/api/v1/shortline/structure",
+        status="implemented",
+    ),
+    EndpointMeta(
+        id="shortline.themes",
+        title="题材事件树",
+        description=(
+            "涨停原因归组：问财优先，缺 key/失败自动切同花顺并标 source；"
+            "产出事件（整条原因归组）+ 关键词热度 + 未归因名单。"
+        ),
+        params=("date",),
+        fields=("reason_source", "events", "keywords", "unattributed", "missing_reason"),
+        source="问财（备：同花顺涨停归因）",
+        compliance="cn-public",
+        phase="close",
+        cache_policy="closed_long",
+        compute="tradex.shortline.compute:themes",
+        mcp_tool="get_shortline_themes",
+        rest_path="/api/v1/shortline/themes",
+        status="implemented",
+    ),
+    EndpointMeta(
+        id="shortline.firstboard",
+        title="首板名单",
+        description="首板（连板数=1）名单，按首次封板时间升序；涨停统计近N日>1 的票单标反包。",
+        params=("date",),
+        fields=("count", "stocks", "reversal_count"),
+        source=_POOL_SOURCE,
+        compliance="cn-public",
+        phase="close",
+        cache_policy="closed_long",
+        compute="tradex.shortline.compute:firstboard",
+        mcp_tool="get_shortline_firstboard",
+        rest_path="/api/v1/shortline/firstboard",
+        status="implemented",
+    ),
+    EndpointMeta(
+        id="shortline.facts",
+        title="盘面事实",
+        description="封板质量（均封单/封板时间中位/炸板次数/封板率）+ 亏钱效应 + 强势股反馈矩阵。",
+        params=("date",),
+        fields=("seal_quality", "losing_effect", "feedback_matrix"),
+        source=_POOL_SOURCE,
+        compliance="cn-public",
+        phase="close",
+        cache_policy="closed_long",
+        compute="tradex.shortline.compute:facts",
+        mcp_tool="get_shortline_facts",
+        rest_path="/api/v1/shortline/facts",
+        status="implemented",
+    ),
+    EndpointMeta(
+        id="shortline.theme_rotation",
+        title="题材轮动",
+        description=(
+            "近 N 日题材轮动：每天只数 / 名次 / 连续天数 / 回流；"
+            "历史缺天画「—」不当 0（数据来自收盘定稿落库）。"
+        ),
+        params=("days", "date"),
+        fields=("days", "rows", "missing_dates"),
+        source="题材归因 + shortline_store",
+        compliance="cn-public",
+        phase="close",
+        cache_policy="closed_long",
+        compute="tradex.shortline.compute:theme_rotation",
+        mcp_tool="get_shortline_theme_rotation",
+        rest_path="/api/v1/shortline/theme-rotation",
         status="implemented",
     ),
     EndpointMeta(

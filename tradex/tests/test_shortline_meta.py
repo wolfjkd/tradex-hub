@@ -61,6 +61,10 @@ class TestRegistry:
             "shortline.ladder",
             "shortline.board_ladder",
             "shortline.structure",
+            "shortline.themes",  # 工单 H6
+            "shortline.firstboard",  # 工单 H6
+            "shortline.facts",  # 工单 H6
+            "shortline.theme_rotation",  # 工单 H6
             "shortline.bigcaps",  # 工单 H4 新增（只改声明）
             "shortline.turnover_top",  # 工单 H5 新增（只改声明）
             "shortline.close_fetch",
@@ -101,7 +105,7 @@ class TestCachePolicy:
 
     def test_cache_key_stable_and_param_sensitive(self):
         assert cache_key("shortline.daily", date="20261105", days=0) == (
-            "shortline.daily|date=20261105"
+            "shortline-v2|shortline.daily|date=20261105"
         )
         assert cache_key("shortline.daily", days=5, date="20261105") == (
             cache_key("shortline.daily", date="20261105", days=5)

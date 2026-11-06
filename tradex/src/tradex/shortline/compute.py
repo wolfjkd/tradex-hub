@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+import re
 import statistics
 from dataclasses import dataclass, field
 
@@ -129,6 +130,7 @@ def _stock_brief(row: dict) -> dict:
         "sealed_capital_yi": round((_f(row.get("sealed_capital")) or 0) / 1e8, 4),
         "first_seal_time": row.get("first_seal_time"),
         "break_count": _i(row.get("break_count")),
+        "limit_up_stats": row.get("limit_up_stats"),
         "industry": row.get("industry"),
     }
 
@@ -524,5 +526,298 @@ def cycle(
         f"最高板 {today['max_board']}（分位 {metrics['max_board']['percentile']}）；"
         f"炸板率 {today['break_rate']}（分位 {metrics['break_rate']['percentile']}）；"
         f"合成分位 {composite}"
+    )
+    return result, text
+
+
+# ---------------------------------------------------------------- H6：题材 / 首板 / 事实 / 轮动
+
+_REASON_SPLIT = re.compile(r"[、,，;；+＋|/]")
+
+
+def _reason_tokens(reason: str) -> list[str]:
+    """把涨停原因拆成题材关键词（去掉过长句子与空串）。"""
+    tokens: list[str] = []
+    for part in _REASON_SPLIT.split(str(reason or "")):
+        token = part.strip()
+        if not token or len(token) > 15:
+            continue
+        if token in tokens:
+            continue
+        tokens.append(token)
+    return tokens
+
+
+def themes(
+    snapshot: PoolSnapshot,
+    reasons: dict[str, str] | None = None,
+    source: str = "同花顺涨停归因",
+) -> tuple[dict, str]:
+    """题材事件树：涨停原因归组（问财优先 / 同花顺兜底）。"""
+    reasons = reasons or {}
+    events: dict[str, list[dict]] = {}
+    keyword_counts: dict[str, int] = {}
+    unattributed: list[dict] = []
+    for row in snapshot.zt:
+        code = str(row.get("code") or "")
+        reason = str(reasons.get(code) or "").strip()
+        if not reason:
+            unattributed.append({"code": code, "name": row.get("name")})
+            continue
+        events.setdefault(reason, []).append({"code": code, "name": row.get("name")})
+        for token in _reason_tokens(reason):
+            keyword_counts[token] = keyword_counts.get(token, 0) + 1
+
+    event_list = [
+        {"theme": theme, "count": len(stocks), "stocks": stocks}
+        for theme, stocks in events.items()
+    ]
+    event_list.sort(key=lambda item: (-item["count"], item["theme"]))
+    keywords = [
+        {"theme": name, "count": count}
+        for name, count in sorted(keyword_counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    ][:20]
+
+    missing_reason = None
+    if not reasons:
+        missing_reason = ["涨停原因源不可用（问财/同花顺均失败或空），题材树只有未归因名单"]
+    elif unattributed:
+        missing_reason = [f"{len(unattributed)} 只涨停股没有归因（原因源未覆盖）"]
+
+    result = {
+        "reason_source": source,
+        "events": event_list,
+        "keywords": keywords,
+        "unattributed": unattributed,
+        "unattributed_count": len(unattributed),
+        "missing_reason": missing_reason,
+    }
+    top = "、".join(f"{k['theme']}({k['count']})" for k in keywords[:3]) or "—"
+    text = (
+        f"{snapshot.date} 题材事件树（{source}）：{len(event_list)} 个事件，"
+        f"{len(keywords)} 个关键词；热度前列 {top}；未归因 {len(unattributed)} 只"
+    )
+    return result, text
+
+
+def _seal_minutes(value) -> int | None:
+    """把封板时间（HHMMSS / HH:MM:SS）转成当日分钟数，用于排序/中位。"""
+    raw = str(value or "").replace(":", "").strip()
+    if len(raw) != 6 or not raw.isdigit():
+        return None
+    hh, mm, ss = int(raw[0:2]), int(raw[2:4]), int(raw[4:6])
+    if hh > 23 or mm > 59 or ss > 59:
+        return None
+    return hh * 60 + mm
+
+
+def _reversal_flag(limit_up_stats: str) -> tuple[bool | None, str]:
+    """从「涨停统计」判断反包：格式 今涨停数/近N日涨停数，近N>1 视为反包。"""
+    raw = str(limit_up_stats or "").strip()
+    if "/" not in raw:
+        return None, "涨停统计缺失，无法判定反包"
+    left, right = raw.split("/", 1)
+    try:
+        today_count = int(left)
+        window_count = int(right)
+    except ValueError:
+        return None, f"涨停统计格式无法解析：{raw}"
+    return window_count > 1 and today_count <= 1, f"涨停统计 {raw}"
+
+
+def firstboard(snapshot: PoolSnapshot) -> tuple[dict, str]:
+    """首板名单：按首次封板时间排序，反包票单标。"""
+    rows = [row for row in snapshot.zt if _i(row.get("consecutive_days")) == 1]
+    stocks: list[dict] = []
+    for row in rows:
+        minutes = _seal_minutes(row.get("first_seal_time"))
+        reversal, note = _reversal_flag(row.get("limit_up_stats"))
+        stocks.append({
+            **_stock_brief(row),
+            "first_seal_minutes": minutes,
+            "is_reversal": reversal,
+            "reversal_note": note,
+        })
+    # 缺封板时间的排最后（None → 极大值），同时间按代码
+    stocks.sort(key=lambda s: (s["first_seal_minutes"] is None, s["first_seal_minutes"] or 0, s["code"] or ""))
+
+    missing_reason = None
+    if not rows:
+        missing_reason = ["今日无首板（涨停池为空或全部为连板）"]
+    result = {
+        "count": len(stocks),
+        "stocks": stocks,
+        "reversal_count": sum(1 for s in stocks if s["is_reversal"]),
+        "missing_reason": missing_reason,
+    }
+    text = (
+        f"{snapshot.date} 首板 {len(stocks)} 只（反包 {result['reversal_count']} 只）："
+        + "、".join(f"{s['name']}{'(反包)' if s['is_reversal'] else ''}" for s in stocks[:8])
+        if stocks else f"{snapshot.date} 首板：无"
+    )
+    return result, text
+
+
+def _fate_of_change(change: float | None, row: dict) -> str:
+    if change is None:
+        return "缺数"
+    ratio = _limit_ratio(row.get("code", ""), row.get("name", ""))
+    if change >= ratio:
+        return "涨停"
+    if change <= -ratio:
+        return "跌停"
+    if change > 0:
+        return "上涨"
+    if change < 0:
+        return "下跌"
+    return "走平"
+
+
+def _level_bucket(level: int) -> str:
+    if level <= 1:
+        return "首板"
+    if level == 2:
+        return "2板"
+    return "3板+"
+
+
+def facts(snapshot: PoolSnapshot) -> tuple[dict, str]:
+    """盘面事实：封板质量 / 亏钱效应 / 强势股反馈矩阵。"""
+    zt = snapshot.zt
+    seal_minutes = [m for m in (_seal_minutes(r.get("first_seal_time")) for r in zt) if m is not None]
+    sealed_capital = [_f(r.get("sealed_capital")) for r in zt if _f(r.get("sealed_capital")) is not None]
+    break_counts = [_i(r.get("break_count")) for r in zt]
+
+    quality = {
+        "avg_sealed_capital_yi": round(sum(sealed_capital) / len(sealed_capital) / 1e8, 4)
+        if sealed_capital else None,
+        "median_first_seal_time": _fmt_minutes(_median(seal_minutes)),
+        "avg_break_count": round(sum(break_counts) / len(break_counts), 2) if break_counts else None,
+        "seal_rate": _pct(len(zt), len(zt) + len(snapshot.zb)) if snapshot.has("zb") else None,
+        "sample": len(zt),
+    }
+
+    missing: list[str] = []
+    if snapshot.has("prev_zt") and snapshot.prev_zt:
+        changes = [_f(r.get("change_pct")) for r in snapshot.prev_zt if _f(r.get("change_pct")) is not None]
+        down = [c for c in changes if c < 0]
+        losing = {
+            "prev_zt_count": len(snapshot.prev_zt),
+            "down_ratio": _pct(len(down), len(changes)),
+            "median_change": _median(changes),
+            "limit_down_count": len(snapshot.dt) if snapshot.has("dt") else None,
+        }
+    else:
+        losing = {"prev_zt_count": None, "down_ratio": None, "median_change": None,
+                  "limit_down_count": len(snapshot.dt) if snapshot.has("dt") else None}
+        missing.append("prev_zt 池缺数，亏钱效应无法计算")
+
+    matrix: dict[str, dict[str, int]] = {}
+    if snapshot.has("prev_zt"):
+        for row in snapshot.prev_zt:
+            bucket = _level_bucket(_i(row.get("consecutive_days")))
+            fate = _fate_of_change(_f(row.get("change_pct")), row)
+            matrix.setdefault(bucket, {})
+            matrix[bucket][fate] = matrix[bucket].get(fate, 0) + 1
+    else:
+        missing.append("prev_zt 池缺数，反馈矩阵无法计算")
+
+    result = {
+        "seal_quality": quality,
+        "losing_effect": losing,
+        "feedback_matrix": matrix,
+        "missing_reason": missing or None,
+    }
+    text = (
+        f"{snapshot.date} 盘面事实：封板率 {quality['seal_rate']}%，"
+        f"均封单 {quality['avg_sealed_capital_yi']} 亿，封板中位时间 {quality['median_first_seal_time']}；"
+        f"昨日涨停今日下跌占比 {losing['down_ratio']}%，中位 {losing['median_change']}%"
+    )
+    return result, text
+
+
+def _fmt_minutes(minutes: float | None) -> str | None:
+    """分钟数 → HH:MM。"""
+    if minutes is None:
+        return None
+    total = int(round(minutes))
+    return f"{total // 60:02d}:{total % 60:02d}"
+
+
+def theme_rotation(
+    days_records: list[dict],
+    missing_dates: list[str] | None = None,
+) -> tuple[dict, str]:
+    """题材轮动：近 N 日每天只数 / 名次 / 连续 / 回流；缺天画「—」不当 0。
+
+    Args:
+        days_records: 升序列表，每项 {"date","available":bool,"theme_counts":{...}|None}
+    """
+    missing_dates = missing_dates or []
+    days = [{"date": r["date"], "available": bool(r.get("available", True))} for r in days_records]
+    if not days:
+        return {
+            "days": [],
+            "rows": [],
+            "missing_dates": missing_dates,
+            "missing_reason": ["无可用题材历史（需先跑收盘落库并成功归因）"],
+        }, "题材轮动：无历史数据"
+
+    today = days_records[-1]
+    today_counts: dict[str, int] = dict(today.get("theme_counts") or {})
+    themes_sorted = sorted(today_counts.items(), key=lambda kv: (-kv[1], kv[0]))
+
+    rows = []
+    for theme, _count in themes_sorted:
+        counts: list[int | None] = []
+        displays: list[str] = []
+        ranks: list[int | None] = []
+        for record in days_records:
+            if not record.get("available", True) or record.get("theme_counts") is None:
+                counts.append(None)
+                displays.append("—")
+                ranks.append(None)
+                continue
+            value = int(record["theme_counts"].get(theme, 0))
+            counts.append(value)
+            displays.append(str(value))
+            ordered = sorted(record["theme_counts"].items(), key=lambda kv: -kv[1])
+            ranks.append(next((i + 1 for i, (name, _) in enumerate(ordered) if name == theme), None))
+
+        streak = 0
+        for value in reversed(counts):
+            if value is None or value <= 0:
+                break
+            streak += 1
+
+        previous_available = next(
+            (c for c in reversed(counts[:-1]) if c is not None), None
+        )
+        is_returning = bool(counts[-1]) and previous_available == 0
+
+        rows.append({
+            "theme": theme,
+            "counts": counts,
+            "display": " / ".join(displays),
+            "ranks": ranks,
+            "streak": streak,
+            "is_returning": is_returning,
+            "today_count": counts[-1],
+        })
+
+    result = {
+        "days": [d["date"] for d in days],
+        "rows": rows,
+        "missing_dates": missing_dates,
+        "missing_reason": None,
+    }
+    text = (
+        f"题材轮动（{len(days)} 日）："
+        + "；".join(
+            f"{r['theme']} {r['display']}"
+            + (f"（连续{r['streak']}日）" if r["streak"] >= 2 else "")
+            + ("（回流）" if r["is_returning"] else "")
+            for r in rows[:5]
+        )
     )
     return result, text

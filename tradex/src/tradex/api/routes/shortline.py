@@ -147,6 +147,36 @@ def structure(date: str = Query("", description="交易日 YYYYMMDD")) -> Envelo
     return _call(lambda: shortline_service.get_structure(date=date))
 
 
+# ---------------------------------------------------------------- H6 题材 / 首板 / 事实 / 轮动
+
+
+@router.get("/themes", response_model=Envelope[dict])
+def themes(date: str = Query("", description="交易日 YYYYMMDD")) -> Envelope[dict]:
+    """题材事件树（问财优先 / 同花顺兜底）。"""
+    return _call(lambda: shortline_service.get_themes(date=date))
+
+
+@router.get("/firstboard", response_model=Envelope[dict])
+def firstboard(date: str = Query("", description="交易日 YYYYMMDD")) -> Envelope[dict]:
+    """首板名单（按首封时间排序，反包单标）。"""
+    return _call(lambda: shortline_service.get_firstboard(date=date))
+
+
+@router.get("/facts", response_model=Envelope[dict])
+def facts(date: str = Query("", description="交易日 YYYYMMDD")) -> Envelope[dict]:
+    """盘面事实（封板质量 / 亏钱效应 / 反馈矩阵）。"""
+    return _call(lambda: shortline_service.get_facts(date=date))
+
+
+@router.get("/theme-rotation", response_model=Envelope[dict])
+def theme_rotation(
+    days: int = Query(5, description="窗口天数 2~60"),
+    date: str = Query("", description="交易日 YYYYMMDD"),
+) -> Envelope[dict]:
+    """题材轮动（缺天画「—」）。"""
+    return _call(lambda: shortline_service.get_theme_rotation(days=days, date=date))
+
+
 # ---------------------------------------------------------------- H3 落库 / 历史
 
 

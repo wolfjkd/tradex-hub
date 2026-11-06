@@ -3,7 +3,7 @@
 > 本文件由 `scripts/gen_shortline_catalog.py` 依据 `tradex.shortline.meta` 声明生成，请勿手改。
 
 - schema_version: **1.0**
-- 端点数量: **12**
+- 端点数量: **16**
 - 声明校验: 全绿
 
 | 端点 id | 标题 | 阶段 | 缓存策略 | 来源 | 合规 | MCP 工具 | REST 路径 | 状态 |
@@ -14,11 +14,15 @@
 | shortline.cycle | 情绪周期 | close | closed_long（604800s） | shortline_store + akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_cycle | /api/v1/shortline/cycle | implemented |
 | shortline.daily | 每日读数 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_daily | /api/v1/shortline/daily | implemented |
 | shortline.emotion | 情绪四项 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_emotion | /api/v1/shortline/emotion | implemented |
+| shortline.facts | 盘面事实 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_facts | /api/v1/shortline/facts | implemented |
+| shortline.firstboard | 首板名单 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_firstboard | /api/v1/shortline/firstboard | implemented |
 | shortline.history | 收盘历史回读 | anytime | closed_long（604800s） | shortline_store | cn-public | get_shortline_history | /api/v1/shortline/history | implemented |
 | shortline.ladder | 昨日梯队 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_ladder | /api/v1/shortline/ladder | implemented |
 | shortline.live | 盘中情绪 | intraday | live_15s（15s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_live | /api/v1/shortline/live | implemented |
 | shortline.settled | 昨日涨停股当日表现 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_settled | /api/v1/shortline/settled | implemented |
 | shortline.structure | 涨停结构 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_structure | /api/v1/shortline/structure | implemented |
+| shortline.theme_rotation | 题材轮动 | close | closed_long（604800s） | 题材归因 + shortline_store | cn-public | get_shortline_theme_rotation | /api/v1/shortline/theme-rotation | implemented |
+| shortline.themes | 题材事件树 | close | closed_long（604800s） | 问财（备：同花顺涨停归因） | cn-public | get_shortline_themes | /api/v1/shortline/themes | implemented |
 | shortline.turnover_top | 全市场成交额榜 | postclose | package_long（2592000s） | tdx_official（备：category_quotes 实时榜） | cn-public | get_shortline_turnover_top | /api/v1/shortline/turnover-top | implemented |
 
 ## 口径说明
@@ -59,6 +63,18 @@
 
 - 参数：date ｜ 产出字段：money_effect, promotion_rate, premium, ladder_gap ｜ 计算函数：`tradex.shortline.compute:emotion`
 
+### `shortline.facts` — 盘面事实
+
+封板质量（均封单/封板时间中位/炸板次数/封板率）+ 亏钱效应 + 强势股反馈矩阵。
+
+- 参数：date ｜ 产出字段：seal_quality, losing_effect, feedback_matrix ｜ 计算函数：`tradex.shortline.compute:facts`
+
+### `shortline.firstboard` — 首板名单
+
+首板（连板数=1）名单，按首次封板时间升序；涨停统计近N日>1 的票单标反包。
+
+- 参数：date ｜ 产出字段：count, stocks, reversal_count ｜ 计算函数：`tradex.shortline.compute:firstboard`
+
 ### `shortline.history` — 收盘历史回读
 
 读取已落库的定稿读数（按日期或区间），覆盖已积累的全部交易日。
@@ -88,6 +104,18 @@
 涨停结构（板块/制度占比）+ 四池上游字段清单（防假断点）。
 
 - 参数：date ｜ 产出字段：structure, upstream_fields, missing_reason ｜ 计算函数：`tradex.shortline.compute:structure`
+
+### `shortline.theme_rotation` — 题材轮动
+
+近 N 日题材轮动：每天只数 / 名次 / 连续天数 / 回流；历史缺天画「—」不当 0（数据来自收盘定稿落库）。
+
+- 参数：days, date ｜ 产出字段：days, rows, missing_dates ｜ 计算函数：`tradex.shortline.compute:theme_rotation`
+
+### `shortline.themes` — 题材事件树
+
+涨停原因归组：问财优先，缺 key/失败自动切同花顺并标 source；产出事件（整条原因归组）+ 关键词热度 + 未归因名单。
+
+- 参数：date ｜ 产出字段：reason_source, events, keywords, unattributed, missing_reason ｜ 计算函数：`tradex.shortline.compute:themes`
 
 ### `shortline.turnover_top` — 全市场成交额榜
 
