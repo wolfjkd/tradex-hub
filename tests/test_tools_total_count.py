@@ -48,11 +48,11 @@ class TestTdxMcpToolCount:
         assert os.path.exists(p), f"tdx_tq.py 不存在: {p}"
         assert _count_decorators(p) == 2
 
-    def test_total_tool_count_is_185(self):
-        """全量工具数 = 185（shortline 批次：H1+H4+H5 +3、H2 +8、H3 +2、H6 +4：168→185）。"""
+    def test_total_tool_count_is_186(self):
+        """全量工具数 = 186（shortline 批次：H1+H4+H5 +3、H2 +8、H3 +2、H6 +4、H7 +1：168→186）。"""
         total = 0
         for py in glob.glob(os.path.join(_TOOLS_DIR, "*.py")):
             if py.endswith("__init__.py") or py.endswith("registry.py"):
                 continue
             total += _count_decorators(py)
-        assert total == 185, f"期望工具总数 185，实得 {total}"
+        assert total == 186, f"期望工具总数 186，实得 {total}"

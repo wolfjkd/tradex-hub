@@ -65,6 +65,7 @@ class TestRegistry:
             "shortline.firstboard",  # 工单 H6
             "shortline.facts",  # 工单 H6
             "shortline.theme_rotation",  # 工单 H6
+            "shortline.field_drift",  # 工单 H7
             "shortline.bigcaps",  # 工单 H4 新增（只改声明）
             "shortline.turnover_top",  # 工单 H5 新增（只改声明）
             "shortline.close_fetch",

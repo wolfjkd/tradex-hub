@@ -46,6 +46,22 @@ def _ts_to_iso(ts) -> str:
         return ""
 
 
+def _shortline_health() -> dict:
+    """短线落库健康 + 字段漂移（H7：接入数据源健康看板）。
+
+    失败不影响看板主体：返回 error 字段即可。
+    """
+    try:
+        from ..shortline import drift, store
+
+        return {
+            "store": store.health(),
+            "field_drift": drift.field_drift(),
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"短线健康信息不可读: {exc}"}
+
+
 def build_dashboard_data(tool_count: int = 0) -> dict:
     """构建数据源看板数据（MCP 工具与 HTTP 看板共享）。
 
@@ -84,6 +100,7 @@ def build_dashboard_data(tool_count: int = 0) -> dict:
             "sources": [],
             "health": [],
             "versions": versions,
+            "shortline": _shortline_health(),
         }
 
     sources = router.get_registry_report()
@@ -104,6 +121,7 @@ def build_dashboard_data(tool_count: int = 0) -> dict:
         "sources": sources,
         "health": health,
         "versions": versions,
+        "shortline": _shortline_health(),
     }
 
 

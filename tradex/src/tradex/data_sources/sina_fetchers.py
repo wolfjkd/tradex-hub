@@ -440,3 +440,103 @@ def fetch_sina_bigcaps(min_mktcap_yi: float = 500, max_pages: int = 30, **kwargs
     }
 
 
+# ============================================================
+# 行业资金备源 — sina_industry（工单 H7）
+#
+# 东财 push2 族行业资金流被风控时，新浪行业页仍可用。注意口径差异：
+# 新浪只给行业「涨跌幅 + 成交额 + 领涨股」，**没有主力净额**——
+# 因此 output 明确标 metric=amount_change，绝不给「主力净流入」伪造值。
+# ============================================================
+
+_SINA_INDUSTRY_URL = "https://vip.stock.finance.sina.com.cn/q/view/newSinaHy.php"
+
+
+def _parse_sina_industry_js(text: str) -> list[dict]:
+    """解析 newSinaHy.php 返回的 JS 对象（纯函数，便于单测）。
+
+    每行字段（逗号分隔，13 个）：
+      code,name,count,avg_price,change,change_pct,volume,amount,
+      leader_code,leader_price,leader_change_pct,leader_change,leader_name
+    """
+    start = str(text or "").find("{")
+    end = str(text or "").rfind("}")
+    if start < 0 or end <= start:
+        raise RuntimeError("新浪行业页返回结构异常（找不到 JSON 对象）")
+    payload = json.loads(text[start:end + 1])
+    if not isinstance(payload, dict):
+        raise RuntimeError("新浪行业页返回不是对象")
+
+    rows: list[dict] = []
+    for raw in payload.values():
+        parts = [p.strip() for p in str(raw).split(",")]
+        if len(parts) < 13:
+            continue
+        try:
+            rows.append({
+                "industry_code": parts[0],
+                "name": parts[1],
+                "stock_count": int(float(parts[2] or 0)),
+                "avg_price": round(float(parts[3] or 0), 4),
+                "change": round(float(parts[4] or 0), 4),
+                "change_pct": round(float(parts[5] or 0), 4),
+                "volume": float(parts[6] or 0),
+                "amount": float(parts[7] or 0),
+                "leader_code": parts[8],
+                "leader_price": parts[9],
+                "leader_change_pct": parts[10],
+                "leader_change": parts[11],
+                "leader": parts[12],
+            })
+        except (TypeError, ValueError):
+            continue
+    if not rows:
+        raise RuntimeError("新浪行业页没有可解析的行业行（格式可能已变）")
+    return rows
+
+
+def fetch_industry_comparison_sina(
+    endpoint: str = "", code: str = "", symbol: str = "",
+    trade_date: str = "", top_n: int = 20, **kwargs,
+) -> dict:
+    """行业横向对比备源（新浪行业页，与东财/同花顺完全独立上游）。
+
+    返回与 akshare / ths_flow 相同的 industries 信封，但口径不同：
+      - 有：涨跌幅、成交额（亿元）、领涨股
+      - 无：主力净流入（新浪该页不提供）→ ``metric=amount_change`` 明确标注
+    """
+    resp = curl_requests.get(
+        _SINA_INDUSTRY_URL,
+        headers={"User-Agent": _UA, "Referer": "https://finance.sina.com.cn"},
+        timeout=_TIMEOUT,
+        impersonate="chrome120",
+    )
+    resp.raise_for_status()
+    rows = _parse_sina_industry_js(resp.text)
+
+    date_str = trade_date or datetime.now().strftime("%Y-%m-%d")
+    rows.sort(key=lambda item: item["change_pct"], reverse=True)
+    industries = []
+    for i, row in enumerate(rows[: max(1, int(top_n or 20))]):
+        industries.append({
+            "rank": i + 1,
+            "name": row["name"],
+            "change_pct": row["change_pct"],
+            "up_count": 0,
+            "down_count": 0,
+            "leader": row["leader"],
+            # 新浪口径的扩展字段（消费方按需读取）
+            "amount_yi": round(row["amount"] / 1e8, 2),
+            "stock_count": row["stock_count"],
+            "industry_code": row["industry_code"],
+        })
+
+    return {
+        "source": "Sina newSinaHy（行业涨跌幅 + 成交额）",
+        "date": date_str,
+        "code": code or symbol or None,
+        "industries": industries,
+        "metric": "amount_change",
+        "note": "新浪行业页无主力净流入，仅提供涨跌幅与成交额；口径与东财主力净额不同，请勿混用",
+    }
+
+

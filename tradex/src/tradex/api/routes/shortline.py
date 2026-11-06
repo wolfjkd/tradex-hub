@@ -15,7 +15,7 @@ from ...api.schemas import (
     envelope_ok,
 )
 from ...service import bigcaps_service, shortline_service, turnover_service
-from ...shortline import store
+from ...shortline import drift, store
 from ...shortline.catalog import build_catalog
 
 router = APIRouter(prefix="/shortline", tags=["shortline"])
@@ -202,3 +202,12 @@ def history(
 def store_health() -> Envelope[dict]:
     """落库健康状态（写次数 / 跳过次数 / 最近错误）。"""
     return envelope_ok(store.health())
+
+
+@router.get("/field-drift", response_model=Envelope[dict])
+def field_drift(
+    date: str = Query("", description="截止日期 YYYYMMDD"),
+    lookback: int = Query(10, description="往回找参考快照的最大记录数"),
+) -> Envelope[dict]:
+    """四池字段漂移报告（新增/消失列 + 可疑 0）。"""
+    return _call(lambda: drift.field_drift(date=date, lookback=lookback))

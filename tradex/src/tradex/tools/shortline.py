@@ -23,7 +23,7 @@ from ..service.shortline_service import (
     get_themes,
 )
 from ..service.turnover_service import get_turnover_top
-from ..shortline import store
+from ..shortline import drift, store
 from ..shortline.catalog import build_catalog
 from ..utils.formatter import dict_to_json, error_response
 
@@ -334,3 +334,25 @@ def register(mcp: FastMCP):
             return dict_to_json(store.history(days=days, date=date))
         except Exception as e:
             return error_response(f"读取收盘历史失败: {e}", "get_shortline_history")
+
+    # ---------------- H7：数据源韧性 ----------------
+
+    @mcp.tool()
+    async def get_shortline_field_drift(date: str = "", lookback: int = 10) -> str:
+        """
+        获取四池字段漂移报告（区分「真 0」与「字段变了」）。
+
+        比对当前与上一份落库快照的四池上游字段清单：新增/消失列、语义字段别名缺口、
+        可疑 0 清单；结果同时进入数据源健康看板。
+
+        Args:
+            date: 截止日期 YYYYMMDD，默认今天。
+            lookback: 往回找参考快照的最大记录数，默认 10。
+
+        Returns:
+            漂移 JSON（drift / added / removed / alias_gaps / zero_suspects / alerts）。
+        """
+        try:
+            return dict_to_json(drift.field_drift(date=date, lookback=lookback))
+        except Exception as e:
+            return error_response(f"获取字段漂移报告失败: {e}", "get_shortline_field_drift")

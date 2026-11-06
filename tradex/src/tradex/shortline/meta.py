@@ -387,6 +387,25 @@ _ENDPOINTS: tuple[EndpointMeta, ...] = (
         status="implemented",
     ),
     EndpointMeta(
+        id="shortline.field_drift",
+        title="四池字段漂移",
+        description=(
+            "把当前四池上游字段清单与上一份落库快照逐池比对：新增/消失列、"
+            "语义字段别名缺口、以及「字段没了导致显示 0」的可疑 0 清单。"
+            "漂移结果同时进入数据源健康看板。"
+        ),
+        params=("date", "lookback"),
+        fields=("drift", "added", "removed", "alias_gaps", "zero_suspects", "alerts"),
+        source="shortline_store",
+        compliance="cn-public",
+        phase="anytime",
+        cache_policy="closed_long",
+        compute="tradex.shortline.drift:field_drift",
+        mcp_tool="get_shortline_field_drift",
+        rest_path="/api/v1/shortline/field-drift",
+        status="implemented",
+    ),
+    EndpointMeta(
         id="shortline.bigcaps",
         title="大市值名单",
         description=(

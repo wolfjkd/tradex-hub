@@ -3,7 +3,7 @@
 > 本文件由 `scripts/gen_shortline_catalog.py` 依据 `tradex.shortline.meta` 声明生成，请勿手改。
 
 - schema_version: **1.0**
-- 端点数量: **16**
+- 端点数量: **17**
 - 声明校验: 全绿
 
 | 端点 id | 标题 | 阶段 | 缓存策略 | 来源 | 合规 | MCP 工具 | REST 路径 | 状态 |
@@ -15,6 +15,7 @@
 | shortline.daily | 每日读数 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_daily | /api/v1/shortline/daily | implemented |
 | shortline.emotion | 情绪四项 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_emotion | /api/v1/shortline/emotion | implemented |
 | shortline.facts | 盘面事实 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_facts | /api/v1/shortline/facts | implemented |
+| shortline.field_drift | 四池字段漂移 | anytime | closed_long（604800s） | shortline_store | cn-public | get_shortline_field_drift | /api/v1/shortline/field-drift | implemented |
 | shortline.firstboard | 首板名单 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_firstboard | /api/v1/shortline/firstboard | implemented |
 | shortline.history | 收盘历史回读 | anytime | closed_long（604800s） | shortline_store | cn-public | get_shortline_history | /api/v1/shortline/history | implemented |
 | shortline.ladder | 昨日梯队 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_ladder | /api/v1/shortline/ladder | implemented |
@@ -68,6 +69,12 @@
 封板质量（均封单/封板时间中位/炸板次数/封板率）+ 亏钱效应 + 强势股反馈矩阵。
 
 - 参数：date ｜ 产出字段：seal_quality, losing_effect, feedback_matrix ｜ 计算函数：`tradex.shortline.compute:facts`
+
+### `shortline.field_drift` — 四池字段漂移
+
+把当前四池上游字段清单与上一份落库快照逐池比对：新增/消失列、语义字段别名缺口、以及「字段没了导致显示 0」的可疑 0 清单。漂移结果同时进入数据源健康看板。
+
+- 参数：date, lookback ｜ 产出字段：drift, added, removed, alias_gaps, zero_suspects, alerts ｜ 计算函数：`tradex.shortline.drift:field_drift`
 
 ### `shortline.firstboard` — 首板名单
 

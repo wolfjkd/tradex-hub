@@ -229,6 +229,10 @@ def _do_register() -> None:
     # 跨上游兜底，主源同族失效时它是实际可用的一环。
     router.register("industry_comparison", "ths_flow",
                     akf.fetch_industry_comparison_ths, priority=200)
+    # 工单 H7：再补新浪行业页（第三独立上游）。口径不同——新浪只有涨跌幅+成交额、
+    # 没有主力净额，输出 metric=amount_change 并写明口径，绝不伪造净流入。
+    router.register("industry_comparison", "sina_industry",
+                    sina.fetch_industry_comparison_sina, priority=300)
 
     # ── 同花顺主 + akshare 备 ──
     router.register("northbound", "ths_hsgt", asf.fetch_northbound_ths, priority=1)
