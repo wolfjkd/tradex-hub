@@ -68,13 +68,18 @@ class TestRegistry:
         }
         assert set(SHORTLINE_ENDPOINTS) == expected
 
-    def test_live_uses_15s_cache_and_never_partial(self):
+    def test_live_uses_15s_cache_and_never_persists(self):
         live = SHORTLINE_ENDPOINTS["shortline.live"]
         decision = resolve_cache(live.cache_policy)
         assert decision.ttl_seconds == 15
         assert decision.file_cache is False
-        # 盘中读数即使是 final 也不允许落文件
         assert decision.enabled is True
+
+    def test_live_partial_still_cached_for_15s(self):
+        # live 天生是「此刻」partial 读数：允许 15 秒内存缓存，但绝不落文件
+        decision = resolve_cache("live_15s", partial=True)
+        assert decision.ttl_seconds == 15
+        assert decision.file_cache is False
 
 
 class TestCachePolicy:
@@ -87,11 +92,7 @@ class TestCachePolicy:
         assert final.file_cache is True
         assert partial.enabled is False
 
-    def test_live_partial_not_cached(self):
-        assert resolve_cache("live_15s", partial=True).enabled is False
-        assert resolve_cache("live_15s", partial=False).enabled is True
-
-    def test_none_policy_never_caches(self):
+    def test_live_policy_only(self):
         assert resolve_cache("none").enabled is False
 
     def test_unknown_policy_raises(self):

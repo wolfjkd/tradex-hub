@@ -38,8 +38,8 @@ CACHE_POLICIES: dict[str, CachePolicy] = {
         name="live_15s",
         ttl_seconds=15,
         file_cache=False,
-        cache_partial=False,
-        description="盘中读数最多缓存 15 秒，不落文件",
+        cache_partial=True,
+        description="盘中读数最多缓存 15 秒、不落文件；partial 允许缓存（15 秒后自然失效）",
     ),
     "closed_long": CachePolicy(
         name="closed_long",
@@ -200,6 +200,7 @@ _ENDPOINTS: tuple[EndpointMeta, ...] = (
         compute="tradex.shortline.compute:emotion",
         mcp_tool="get_shortline_emotion",
         rest_path="/api/v1/shortline/emotion",
+        status="implemented",
     ),
     EndpointMeta(
         id="shortline.cycle",
@@ -217,6 +218,7 @@ _ENDPOINTS: tuple[EndpointMeta, ...] = (
         compute="tradex.shortline.compute:cycle",
         mcp_tool="get_shortline_cycle",
         rest_path="/api/v1/shortline/cycle",
+        status="implemented",
     ),
     EndpointMeta(
         id="shortline.daily",
@@ -234,6 +236,7 @@ _ENDPOINTS: tuple[EndpointMeta, ...] = (
         compute="tradex.shortline.compute:daily",
         mcp_tool="get_shortline_daily",
         rest_path="/api/v1/shortline/daily",
+        status="implemented",
     ),
     EndpointMeta(
         id="shortline.settled",
@@ -248,6 +251,7 @@ _ENDPOINTS: tuple[EndpointMeta, ...] = (
         compute="tradex.shortline.compute:settled",
         mcp_tool="get_shortline_settled",
         rest_path="/api/v1/shortline/settled",
+        status="implemented",
     ),
     EndpointMeta(
         id="shortline.live",
@@ -262,6 +266,7 @@ _ENDPOINTS: tuple[EndpointMeta, ...] = (
         compute="tradex.shortline.compute:live",
         mcp_tool="get_shortline_live",
         rest_path="/api/v1/shortline/live",
+        status="implemented",
     ),
     EndpointMeta(
         id="shortline.ladder",
@@ -276,6 +281,7 @@ _ENDPOINTS: tuple[EndpointMeta, ...] = (
         compute="tradex.shortline.compute:ladder",
         mcp_tool="get_shortline_ladder",
         rest_path="/api/v1/shortline/ladder",
+        status="implemented",
     ),
     EndpointMeta(
         id="shortline.board_ladder",
@@ -290,6 +296,7 @@ _ENDPOINTS: tuple[EndpointMeta, ...] = (
         compute="tradex.shortline.compute:board_ladder",
         mcp_tool="get_shortline_board_ladder",
         rest_path="/api/v1/shortline/board-ladder",
+        status="implemented",
     ),
     EndpointMeta(
         id="shortline.structure",
@@ -304,6 +311,7 @@ _ENDPOINTS: tuple[EndpointMeta, ...] = (
         compute="tradex.shortline.compute:structure",
         mcp_tool="get_shortline_structure",
         rest_path="/api/v1/shortline/structure",
+        status="implemented",
     ),
     EndpointMeta(
         id="shortline.bigcaps",

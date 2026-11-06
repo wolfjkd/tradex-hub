@@ -9,16 +9,16 @@
 | 端点 id | 标题 | 阶段 | 缓存策略 | 来源 | 合规 | MCP 工具 | REST 路径 | 状态 |
 |---|---|---|---|---|---|---|---|---|
 | shortline.bigcaps | 大市值名单 | anytime | hourly（3600s） | sina_bigcaps（备源：akshare_em） | cn-public | get_shortline_bigcaps | /api/v1/shortline/bigcaps | implemented |
-| shortline.board_ladder | 连板天梯 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_board_ladder | /api/v1/shortline/board-ladder | planned |
+| shortline.board_ladder | 连板天梯 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_board_ladder | /api/v1/shortline/board-ladder | implemented |
 | shortline.close_fetch | 收盘定稿落库 | postclose | none（不缓存） | akshare_em(zt/zb/dt/prev_zt) | cn-public | shortline_close_fetch | /api/v1/shortline/close-fetch | planned |
-| shortline.cycle | 情绪周期 | close | closed_long（604800s） | shortline_store + akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_cycle | /api/v1/shortline/cycle | planned |
-| shortline.daily | 每日读数 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_daily | /api/v1/shortline/daily | planned |
-| shortline.emotion | 情绪四项 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_emotion | /api/v1/shortline/emotion | planned |
+| shortline.cycle | 情绪周期 | close | closed_long（604800s） | shortline_store + akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_cycle | /api/v1/shortline/cycle | implemented |
+| shortline.daily | 每日读数 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_daily | /api/v1/shortline/daily | implemented |
+| shortline.emotion | 情绪四项 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_emotion | /api/v1/shortline/emotion | implemented |
 | shortline.history | 收盘历史回读 | anytime | closed_long（604800s） | shortline_store | cn-public | get_shortline_history | /api/v1/shortline/history | planned |
-| shortline.ladder | 昨日梯队 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_ladder | /api/v1/shortline/ladder | planned |
-| shortline.live | 盘中情绪 | intraday | live_15s（15s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_live | /api/v1/shortline/live | planned |
-| shortline.settled | 昨日涨停股当日表现 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_settled | /api/v1/shortline/settled | planned |
-| shortline.structure | 涨停结构 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_structure | /api/v1/shortline/structure | planned |
+| shortline.ladder | 昨日梯队 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_ladder | /api/v1/shortline/ladder | implemented |
+| shortline.live | 盘中情绪 | intraday | live_15s（15s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_live | /api/v1/shortline/live | implemented |
+| shortline.settled | 昨日涨停股当日表现 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_settled | /api/v1/shortline/settled | implemented |
+| shortline.structure | 涨停结构 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_structure | /api/v1/shortline/structure | implemented |
 | shortline.turnover_top | 全市场成交额榜 | postclose | package_long（2592000s） | tdx_official（备：category_quotes 实时榜） | cn-public | get_shortline_turnover_top | /api/v1/shortline/turnover-top | implemented |
 
 ## 口径说明
@@ -101,6 +101,6 @@
 |---|---|---|---|---|
 | closed_long | 604800s | 是 | 否 | 已收盘结果长期缓存（7 天，落文件缓存） |
 | hourly | 3600s | 是 | 否 | 最多缓存 1 小时 |
-| live_15s | 15s | 否 | 否 | 盘中读数最多缓存 15 秒，不落文件 |
+| live_15s | 15s | 否 | 是 | 盘中读数最多缓存 15 秒、不落文件；partial 允许缓存（15 秒后自然失效） |
 | none | — | 否 | 否 | 不缓存（写操作 / 必须实时） |
 | package_long | 2592000s | 是 | 否 | 按交易日的盘后包长期缓存（30 天） |

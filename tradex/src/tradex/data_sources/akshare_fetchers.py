@@ -2141,6 +2141,12 @@ def _map_pool_rows(df: pd.DataFrame, board_type: str) -> list[dict]:
 
 def _fetch_pool_rows(board_type: str, date: str) -> list[dict]:
     """取单个池（日期已归一）。空表返回空列表，不抛。"""
+    rows, _fields = _fetch_pool_with_fields(board_type, date)
+    return rows
+
+
+def _fetch_pool_with_fields(board_type: str, date: str) -> tuple[list[dict], list[str]]:
+    """取单个池，并带回上游原始列名（工单 H2/H7 的字段清单 / 漂移检测原料）。"""
     func_name = _POOL_AK_FUNCS.get(board_type)
     if func_name is None:
         raise ValueError(
@@ -2148,7 +2154,8 @@ def _fetch_pool_rows(board_type: str, date: str) -> list[dict]:
         )
     ak = _ak()
     df = getattr(ak, func_name)(date=date)
-    return _map_pool_rows(df, board_type)
+    fields = list(df.columns) if df is not None and not df.empty else []
+    return _map_pool_rows(df, board_type), fields
 
 
 def fetch_limit_up_board(
@@ -2174,10 +2181,17 @@ def fetch_limit_up_board(
         )
 
     s = _normalize_board_date(date) if date else _latest_board_date()
-    rows = _fetch_pool_rows(bt, s)
+    rows, fields = _fetch_pool_with_fields(bt, s)
     if not rows:
         raise RuntimeError(f"{bt} 池返回空（date={s}，可能非交易日或数据未更新）")
-    return {"board_type": bt, "date": s, "count": len(rows), "data": rows}
+    return {
+        "board_type": bt,
+        "date": s,
+        "count": len(rows),
+        "data": rows,
+        # 上游原始列名：structure 端点展示 + H7 字段漂移检测都用这一份
+        "fields": fields,
+    }
 
 
 def fetch_board_sentiment(*, date: str = "", **kwargs) -> dict:
