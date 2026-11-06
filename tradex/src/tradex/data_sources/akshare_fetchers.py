@@ -802,16 +802,35 @@ def fetch_industry_comparison(code: str = "", trade_date: str = "", top_n: int =
     df = ak.stock_sector_fund_flow_rank(indicator="今日", sector_type="行业资金流")
     if df is None or df.empty:
         raise RuntimeError("AKShare 行业资金流数据为空")
+
+    # 2026-11-06 实测：akshare 1.20.21 把列名改成了
+    #   「板块/涨跌幅/领涨股票」→「名称/今日涨跌幅/今日主力净流入最大股」。
+    # 旧映射取不到值会把所有行业读成 "" / 0.0（假 0），故按别名兜底，
+    # 别名全不匹配时直接抛错，交给 SmartRouter 降级到 ths_flow / sina_industry。
+    def _pick(*names: str) -> str | None:
+        for name in names:
+            if name in df.columns:
+                return name
+        return None
+
+    name_col = _pick("板块", "名称")
+    change_col = _pick("涨跌幅", "今日涨跌幅")
+    leader_col = _pick("领涨股票", "今日主力净流入最大股")
+    if not name_col or not change_col:
+        raise RuntimeError(
+            f"AKShare 行业资金流列名漂移（缺少板块/涨跌幅列）：{list(df.columns)}"
+        )
+
     for i, (_, row) in enumerate(df.iterrows()):
         if i >= top_n:
             break
         result["industries"].append({
             "rank": i + 1,
-            "name": str(row.get("板块", "")),
-            "change_pct": float(row.get("涨跌幅", 0) or 0),
+            "name": str(row.get(name_col, "")),
+            "change_pct": float(row.get(change_col, 0) or 0),
             "up_count": 0,
             "down_count": 0,
-            "leader": str(row.get("领涨股票", "")),
+            "leader": str(row.get(leader_col, "")) if leader_col else "",
         })
     return result
 

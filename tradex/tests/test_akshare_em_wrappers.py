@@ -23,6 +23,44 @@ import pytest
 # 字段对齐主源测试（不真实联网，mock akshare 返回）
 # ============================================================
 
+class TestIndustryComparisonColumnDrift:
+    """2026-11-06 实测 akshare 1.20.21 行业资金流列名漂移的回归。"""
+
+    def test_maps_new_column_names(self):
+        from tradex.data_sources import akshare_fetchers as akf
+
+        df = pd.DataFrame([{
+            "序号": 1, "名称": "公用事业", "今日涨跌幅": 0.55,
+            "今日主力净流入最大股": "长江电力",
+        }])
+        with patch.object(akf, "_ak") as mock_ak:
+            mock_ak.return_value.stock_sector_fund_flow_rank.return_value = df
+            out = akf.fetch_industry_comparison(top_n=1)
+        item = out["industries"][0]
+        assert item["name"] == "公用事业"
+        assert item["change_pct"] == 0.55
+        assert item["leader"] == "长江电力"
+
+    def test_maps_legacy_column_names(self):
+        from tradex.data_sources import akshare_fetchers as akf
+
+        df = pd.DataFrame([{"序号": 1, "板块": "银行", "涨跌幅": 1.2, "领涨股票": "招商银行"}])
+        with patch.object(akf, "_ak") as mock_ak:
+            mock_ak.return_value.stock_sector_fund_flow_rank.return_value = df
+            out = akf.fetch_industry_comparison(top_n=1)
+        assert out["industries"][0]["name"] == "银行"
+
+    def test_unknown_columns_raise_for_fallback(self):
+        """别名全不匹配必须抛错，让 SmartRouter 降级而不是返回假 0。"""
+        from tradex.data_sources import akshare_fetchers as akf
+
+        df = pd.DataFrame([{"foo": "bar", "baz": 0}])
+        with patch.object(akf, "_ak") as mock_ak:
+            mock_ak.return_value.stock_sector_fund_flow_rank.return_value = df
+            with pytest.raises(RuntimeError, match="列名漂移"):
+                akf.fetch_industry_comparison(top_n=1)
+
+
 _FAKE_LHB_DETAIL = pd.DataFrame([
     {
         "序号": 1, "代码": "000002", "名称": "万科A",
