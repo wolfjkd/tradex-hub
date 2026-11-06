@@ -241,6 +241,12 @@ def _do_register() -> None:
     # 2026-09-26 修复：补 akshare_em 主源（stock_zt_pool_em），独立于 push2 域名族
     router.register("limit_up_board", "akshare_em", akf.fetch_limit_up_board, priority=1)
 
+    # ── 大市值名单（工单 H4，2026-11-06）──
+    # 主源新浪 bigcaps（按总市值降序翻页，东财 2026-09-22 起成片失败后的替代）；
+    # 备源东财全市场快照（stock_zh_a_spot_em），与主源不同接口，失败才降级。
+    router.register("bigcaps", "sina_bigcaps", sina.fetch_sina_bigcaps, priority=1)
+    router.register("bigcaps", "akshare_em", akf.fetch_bigcaps_em, priority=100)
+
     # ── akshare 主 + tencent_http 备 ──
     router.register("profit_forecast", "akshare", akf.fetch_profit_forecast, priority=1)
     router.register("profit_forecast", "tencent_http", hf.fetch_profit_forecast_tencent, priority=100)

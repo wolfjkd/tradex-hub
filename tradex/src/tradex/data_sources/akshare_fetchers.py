@@ -2351,4 +2351,73 @@ def fetch_trading_calendar(year: int = 0, month: int = 0, **kwargs) -> pd.DataFr
     return pd.DataFrame(rows)
 
 
+# ============================================================
+# 大市值名单备源 — bigcaps（工单 H4）
+#
+# 主源走新浪 bigcaps；东财全市场快照只在主源失败时兜底。
+# 口径：总市值 ≥ 门槛（亿元），缺市值不丢票、写 reason。
+# ============================================================
+
+def fetch_bigcaps_em(min_mktcap_yi: float = 500, **kwargs) -> dict:
+    """大市值名单（东财全市场快照备源）。"""
+    ak = _ak()
+    df = ak.stock_zh_a_spot_em()
+    if df is None or df.empty:
+        raise RuntimeError("东财全市场快照返回空（stock_zh_a_spot_em）")
+    missing_cols = {"代码", "名称", "总市值"} - set(df.columns)
+    if missing_cols:
+        raise RuntimeError(f"东财全市场快照缺列 {sorted(missing_cols)}（字段可能漂移）")
+
+    threshold = float(min_mktcap_yi or 0) * 1e8
+    stocks: list[dict] = []
+    unpriced: list[dict] = []
+    for _, row in df.iterrows():
+        code = str(row.get("代码") or "").strip()
+        if not code:
+            continue
+        name = str(row.get("名称") or "").strip()
+        total_mv = row.get("总市值")
+        try:
+            total_mv_f = float(total_mv)
+        except (TypeError, ValueError):
+            total_mv_f = 0.0
+        if total_mv_f <= 0 or pd.isna(total_mv_f):
+            unpriced.append({"code": code, "name": name, "reason": "total_mv_missing"})
+            continue
+        if total_mv_f < threshold:
+            continue
+        price = float(row.get("最新价") or 0)
+        stocks.append({
+            "code": code,
+            "name": name,
+            "market_cap_yi": round(total_mv_f / 1e8, 2),
+            "float_cap_yi": (
+                round(float(row.get("流通市值")) / 1e8, 2)
+                if row.get("流通市值") not in (None, "") and not pd.isna(row.get("流通市值"))
+                else None
+            ),
+            "price": price if price > 0 else None,
+            "change_pct": float(row.get("涨跌幅") or 0),
+            "amount_yi": round(float(row.get("成交额") or 0) / 1e8, 4),
+            "turnover_pct": float(row.get("换手率") or 0),
+            "suspended": price <= 0,
+            **({"reason": "suspended"} if price <= 0 else {}),
+        })
+    stocks.sort(key=lambda item: (-item["market_cap_yi"], item["code"]))
+    return {
+        "as_of": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "source": "akshare_em",
+        "source_url": "akshare.stock_zh_a_spot_em",
+        "threshold_yi": float(min_mktcap_yi or 0),
+        "count": len(stocks),
+        "stocks": stocks,
+        "unpriced": unpriced,
+        "source_note": (
+            "东财全市场快照（stock_zh_a_spot_em）按总市值过滤；"
+            "总市值原始单位元，已换算亿元；与新浪源口径一致"
+        ),
+    }
+
+
+
 

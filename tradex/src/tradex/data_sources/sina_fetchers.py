@@ -315,4 +315,128 @@ def fetch_sina_fund_flow(
 # ============================================================
 # 新浪 ETF 期权希腊字母 + IV — sina_option_greeks
 # ============================================================
+# 2026-09-28 死源剥离：OptionService 已下线（Service not found），占位保留。
+
+
+# ============================================================
+# 大市值名单 — sina_bigcaps（工单 H4）
+#
+# 东财 2026-09-22 起成片失败后切新浪：Market_Center.getHQNodeData 按总市值
+# 降序翻页，mktcap / nmc 单位「万元」。500 亿 = 5,000,000 万元。
+# ============================================================
+
+_SINA_BIGCAPS_URL = (
+    "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/"
+    "Market_Center.getHQNodeData"
+)
+_SINA_BIGCAPS_PAGE_SIZE = 100
+
+
+def _to_float(value, default: float = 0.0) -> float:
+    """把新浪返回的字符串 / None 收敛成 float。"""
+    try:
+        if value in (None, "", "-"):
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalize_bigcap_rows(rows: list[dict], threshold_yi: float) -> dict:
+    """把新浪原始行收敛成统一结构（纯函数，便于单测）。
+
+    口径：
+      - market_cap_yi = mktcap(万元) / 10000
+      - float_cap_yi   = nmc(万元) / 10000
+      - 缺市值 / 市值 ≤ 0 的票不丢：进 ``unpriced`` 并写 reason
+      - 有市值但当前价 ≤ 0（停牌）的票照常入榜，标 ``suspended=True``
+    """
+    stocks: list[dict] = []
+    unpriced: list[dict] = []
+    threshold_wan = float(threshold_yi) * 10000
+
+    for row in rows:
+        code = str(row.get("code") or "").strip()
+        if not code:
+            continue
+        name = str(row.get("name") or "").strip()
+        mktcap_wan = _to_float(row.get("mktcap"))
+        nmc_wan = _to_float(row.get("nmc"))
+        price = _to_float(row.get("trade"))
+        if mktcap_wan <= 0:
+            unpriced.append({"code": code, "name": name, "reason": "mktcap_missing"})
+            continue
+        if mktcap_wan < threshold_wan:
+            continue
+        stocks.append({
+            "code": code,
+            "name": name,
+            "market_cap_yi": round(mktcap_wan / 10000, 2),
+            "float_cap_yi": round(nmc_wan / 10000, 2) if nmc_wan > 0 else None,
+            "price": price if price > 0 else None,
+            "change_pct": _to_float(row.get("changepercent")),
+            "amount_yi": round(_to_float(row.get("amount")) / 1e8, 4),
+            "turnover_pct": _to_float(row.get("turnoverratio")),
+            "suspended": price <= 0,
+            **({"reason": "suspended"} if price <= 0 else {}),
+        })
+
+    stocks.sort(key=lambda item: (-item["market_cap_yi"], item["code"]))
+    return {"stocks": stocks, "unpriced": unpriced}
+
+
+def fetch_sina_bigcaps(min_mktcap_yi: float = 500, max_pages: int = 30, **kwargs) -> dict:
+    """大市值名单（新浪主源）——总市值 ≥ 门槛的 A 股名单。
+
+    按 mktcap 降序翻页，一旦本页最后一名已低于门槛即停止（避免全市场扫描）。
+    失败时抛异常，由 SmartRouter 记账并降级到东财快照。
+    """
+    threshold_yi = max(float(min_mktcap_yi or 0), 0.0)
+    all_rows: list[dict] = []
+    for page in range(1, max_pages + 1):
+        resp = curl_requests.get(
+            _SINA_BIGCAPS_URL,
+            params={
+                "page": page,
+                "num": _SINA_BIGCAPS_PAGE_SIZE,
+                "sort": "mktcap",
+                "asc": 0,
+                "node": "hs_a",
+                "symbol": "",
+                "_s_r_a": "page",
+            },
+            headers={"User-Agent": _UA, "Referer": "https://finance.sina.com.cn"},
+            timeout=_TIMEOUT,
+            impersonate="chrome120",
+        )
+        resp.raise_for_status()
+        try:
+            rows = resp.json()
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(f"新浪 bigcaps 第 {page} 页不是合法 JSON: {exc}") from exc
+        if not isinstance(rows, list) or not rows:
+            break
+        all_rows.extend(rows)
+        last_cap = _to_float(rows[-1].get("mktcap"))
+        if last_cap <= 0 or last_cap < threshold_yi * 10000:
+            break
+
+    if not all_rows:
+        raise RuntimeError("新浪 bigcaps 返回空列表（接口结构可能已变）")
+
+    normalized = _normalize_bigcap_rows(all_rows, threshold_yi)
+    return {
+        "as_of": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "source": "sina_bigcaps",
+        "source_url": _SINA_BIGCAPS_URL,
+        "threshold_yi": threshold_yi,
+        "count": len(normalized["stocks"]),
+        "stocks": normalized["stocks"],
+        "unpriced": normalized["unpriced"],
+        "source_note": (
+            "新浪 Market_Center hs_a 按总市值降序；mktcap/nmc 原始单位万元，"
+            "已换算亿元；停牌票保留市值并标 suspended"
+        ),
+    }
+
 

@@ -61,6 +61,7 @@ class TestRegistry:
             "shortline.ladder",
             "shortline.board_ladder",
             "shortline.structure",
+            "shortline.bigcaps",  # 工单 H4 新增（只改声明）
             "shortline.close_fetch",
             "shortline.history",
         }

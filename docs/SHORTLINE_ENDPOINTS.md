@@ -3,11 +3,12 @@
 > 本文件由 `scripts/gen_shortline_catalog.py` 依据 `tradex.shortline.meta` 声明生成，请勿手改。
 
 - schema_version: **1.0**
-- 端点数量: **10**
+- 端点数量: **11**
 - 声明校验: 全绿
 
 | 端点 id | 标题 | 阶段 | 缓存策略 | 来源 | 合规 | MCP 工具 | REST 路径 | 状态 |
 |---|---|---|---|---|---|---|---|---|
+| shortline.bigcaps | 大市值名单 | anytime | hourly（3600s） | sina_bigcaps（备源：akshare_em） | cn-public | get_shortline_bigcaps | /api/v1/shortline/bigcaps | implemented |
 | shortline.board_ladder | 连板天梯 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_board_ladder | /api/v1/shortline/board-ladder | planned |
 | shortline.close_fetch | 收盘定稿落库 | postclose | none（不缓存） | akshare_em(zt/zb/dt/prev_zt) | cn-public | shortline_close_fetch | /api/v1/shortline/close-fetch | planned |
 | shortline.cycle | 情绪周期 | close | closed_long（604800s） | shortline_store + akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_cycle | /api/v1/shortline/cycle | planned |
@@ -20,6 +21,12 @@
 | shortline.structure | 涨停结构 | close | closed_long（604800s） | akshare_em(zt/zb/dt/prev_zt) | cn-public | get_shortline_structure | /api/v1/shortline/structure | planned |
 
 ## 口径说明
+
+### `shortline.bigcaps` — 大市值名单
+
+总市值 ≥ 门槛（默认 500 亿）的 A 股名单。主源新浪 bigcaps，失败切东财全市场快照；1 小时缓存；返回 as_of / source / compliance，停牌或缺市值的票不丢整只、写原因。
+
+- 参数：min_mktcap_yi, limit ｜ 产出字段：as_of, source, threshold_yi, count, stocks, unpriced, source_note ｜ 计算函数：`tradex.service.bigcaps_service:get_bigcaps`
 
 ### `shortline.board_ladder` — 连板天梯
 

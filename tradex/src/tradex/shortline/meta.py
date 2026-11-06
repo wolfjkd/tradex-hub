@@ -306,6 +306,25 @@ _ENDPOINTS: tuple[EndpointMeta, ...] = (
         rest_path="/api/v1/shortline/structure",
     ),
     EndpointMeta(
+        id="shortline.bigcaps",
+        title="大市值名单",
+        description=(
+            "总市值 ≥ 门槛（默认 500 亿）的 A 股名单。主源新浪 bigcaps，"
+            "失败切东财全市场快照；1 小时缓存；返回 as_of / source / compliance，"
+            "停牌或缺市值的票不丢整只、写原因。"
+        ),
+        params=("min_mktcap_yi", "limit"),
+        fields=("as_of", "source", "threshold_yi", "count", "stocks", "unpriced", "source_note"),
+        source="sina_bigcaps（备源：akshare_em）",
+        compliance="cn-public",
+        phase="anytime",
+        cache_policy="hourly",
+        compute="tradex.service.bigcaps_service:get_bigcaps",
+        mcp_tool="get_shortline_bigcaps",
+        rest_path="/api/v1/shortline/bigcaps",
+        status="implemented",
+    ),
+    EndpointMeta(
         id="shortline.close_fetch",
         title="收盘定稿落库",
         description=(

@@ -5,9 +5,15 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
-from ...api.schemas import ERR_INTERNAL, Envelope, envelope_ok
+from ...api.schemas import (
+    ERR_DATA_SOURCE_UNREACHABLE,
+    ERR_INTERNAL,
+    Envelope,
+    envelope_ok,
+)
+from ...service import bigcaps_service
 from ...shortline.catalog import build_catalog
 
 router = APIRouter(prefix="/shortline", tags=["shortline"])
@@ -23,4 +29,22 @@ def catalog() -> Envelope[dict]:
             status_code=500,
             detail=f"生成短线端点目录失败: {e}",
             headers={"X-ErrCode": str(ERR_INTERNAL)},
+        )
+
+
+@router.get("/bigcaps", response_model=Envelope[dict])
+def bigcaps(
+    min_mktcap_yi: float = Query(500, description="总市值门槛（亿元）"),
+    limit: int = Query(0, description="只返回前 N 只，0 = 全部"),
+) -> Envelope[dict]:
+    """大市值名单（新浪主源，东财快照兜底，1 小时缓存）。"""
+    try:
+        return envelope_ok(
+            bigcaps_service.get_bigcaps(min_mktcap_yi=min_mktcap_yi, limit=limit)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"数据源不可达: {e}",
+            headers={"X-ErrCode": str(ERR_DATA_SOURCE_UNREACHABLE)},
         )
