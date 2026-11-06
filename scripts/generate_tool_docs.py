@@ -70,6 +70,8 @@ MODULE_GROUPS: dict[str, tuple[str, str, int]] = {
     "stock_screening.py": ("L3 决策支持", "条件选股", 620),
     "composite_analysis.py": ("L3 决策支持", "综合分析", 630),
     "analysis_engine.py": ("L3 决策支持", "技术分析引擎", 640),
+    # 2026-11-06 shortline（vibe-astock 借鉴批次）：短线读数 / 收盘落库 / 元数据
+    "shortline.py": ("L3 决策支持", "短线读数与收盘落库", 650),
     # ---- 系统诊断 ----
     "diagnostics.py": ("系统诊断", "健康检查与可观测性", 900),
 }

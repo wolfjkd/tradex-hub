@@ -112,3 +112,8 @@ router.include_router(_macro_routes.router)
 from . import industry_news as _industry_news_routes  # noqa: E402
 
 router.include_router(_industry_news_routes.router)
+
+# 工单 H1（2026-11-06）：短线端点声明式元数据（/shortline/catalog）
+from . import shortline as _shortline_routes  # noqa: E402
+
+router.include_router(_shortline_routes.router)
