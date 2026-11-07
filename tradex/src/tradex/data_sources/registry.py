@@ -76,6 +76,7 @@ from . import http_fetchers as hf
 from . import news_fetchers as nf
 from . import astock_signals_fetchers as asf
 from . import wencai_fetchers as wf
+from . import kpl_fetchers as kpl  # 开盘啦 KPL（交接文档 07 T3，v3.8.8）
 from . import em_client as emc
 from . import ths_fetchers as ths
 from . import tdx_local as tdx
@@ -343,6 +344,13 @@ def _do_register() -> None:
     # ── v3.3.0 新增：同花顺问财数据源（可选依赖） ──
     router.register("wencai_query", "pywencai", wf.fetch_wencai_query, priority=1)
     router.register("wencai_news", "iwencai_openapi", wf.fetch_wencai_news, priority=1)
+
+    # ── v3.8.8 新增：开盘啦 KPL 数据源（交接文档 07 T3；KPL 短线特色口径独有） ──
+    # 免鉴权直连（实测 2026-11-07）；KPL 系列在各自类型内为唯一源（exclusive）
+    router.register("kpl_limit_up", "kpl", kpl.fetch_kpl_limit_up, priority=1, exclusive=True)
+    router.register("kpl_sentiment", "kpl", kpl.fetch_kpl_sentiment, priority=1, exclusive=True)
+    router.register("kpl_boards", "kpl", kpl.fetch_kpl_boards, priority=1, exclusive=True)
+    router.register("kpl_bidding", "kpl", kpl.fetch_kpl_bidding, priority=1, exclusive=True)
 
     # ════════════════════════════════════════════════════════════════════
     # SP-2026-09-23-001 数据源大扩充：一次性注册全部新类型 + 备源
