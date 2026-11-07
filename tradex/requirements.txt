@@ -11,3 +11,5 @@ python-dotenv>=1.0.0
 uvicorn>=0.29.0
 starlette>=0.37.0
 sse-starlette>=1.6.0
+# 问财 wencai_query 主源（hexin-v token 生成；未装时该源抛错由 router 降级）
+pywencai>=0.13.1

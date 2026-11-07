@@ -312,27 +312,41 @@ def _load_history(days: int, end_date: str = "") -> tuple[list[dict], list[str],
 
 
 def fetch_reasons(date: str = "") -> tuple[dict[str, str], str, list[str]]:
-    """取涨停原因映射：问财优先，失败/缺 key 切同花顺，并标注 source。
+    """取涨停原因映射：问财优先、同花顺补缺（合并制）。
+
+    2026-11-07 升级（配合 wencai WAP 通道锁页限制）：问财 WAP 单会话最多
+    返回 10 行，涨停家数多时归因不全——改为问财结果优先、同花顺结果补缺，
+    同 code 冲突时问财覆盖同花顺，来源按实际组合标注。
 
     Returns:
         (reasons_by_code, source, problems)
     """
     problems: list[str] = []
+    wencai_reasons: dict[str, str] = {}
     try:
-        reasons = _reasons_from_wencai(date)
-        if reasons:
-            return reasons, "问财", []
-        problems.append("问财返回空（无 key 或未覆盖）")
+        wencai_reasons = _reasons_from_wencai(date)
+        if not wencai_reasons:
+            problems.append("问财返回空（无 key 或未覆盖）")
     except Exception as exc:  # noqa: BLE001 - 缺 key/依赖缺失都走兜底
         problems.append(f"问财不可用：{exc}")
 
+    ths_reasons: dict[str, str] = {}
     try:
-        reasons = _reasons_from_ths(date)
-        if reasons:
-            return reasons, "同花顺涨停归因", problems
-        problems.append("同花顺归因为空")
+        ths_reasons = _reasons_from_ths(date)
+        if not ths_reasons:
+            problems.append("同花顺归因为空")
     except Exception as exc:  # noqa: BLE001
         problems.append(f"同花顺归因不可用：{exc}")
+
+    merged = {**ths_reasons, **wencai_reasons}  # 问财优先：同 code 覆盖同花顺
+    if merged:
+        if wencai_reasons and ths_reasons:
+            source = "问财+同花顺补缺"
+        elif wencai_reasons:
+            source = "问财"
+        else:
+            source = "同花顺涨停归因"
+        return merged, source, problems
     return {}, "无（问财与同花顺均失败）", problems
 
 

@@ -234,11 +234,19 @@ class TestReasonFallback:
         assert any("问财" in p for p in problems)
 
     def test_wencai_preferred_when_available(self, monkeypatch):
+        # 2026-11-07 合并制升级（wencai WAP 锁页 10 行）：问财可用也调同花顺补缺
         monkeypatch.setattr(shortline_service, "_router", _FakeRouter(wencai="ok"))
         reasons, source, problems = shortline_service.fetch_reasons(_DATE)
-        assert source == "问财"
+        assert source == "问财+同花顺补缺"
         assert problems == []
         assert reasons["300750"] == "固态电池"
+
+    def test_wencai_only_when_ths_down(self, monkeypatch):
+        monkeypatch.setattr(shortline_service, "_router", _FakeRouter(wencai="ok", ths=False))
+        reasons, source, problems = shortline_service.fetch_reasons(_DATE)
+        assert source == "问财"
+        assert reasons["002384"] == "消费电子"
+        assert any("同花顺" in p for p in problems)
 
     def test_both_sources_fail(self, monkeypatch):
         monkeypatch.setattr(shortline_service, "_router", _FakeRouter(wencai="fail", ths=False))
