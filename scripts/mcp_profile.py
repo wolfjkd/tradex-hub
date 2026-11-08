@@ -55,24 +55,32 @@ def _read_profile() -> dict:
     return {"profile": "full", "hidden_tools": []}
 
 
-def _write_profile(profile: str, hidden: list[str]) -> None:
-    PROFILE.parent.mkdir(parents=True, exist_ok=True)
-    PROFILE.write_text(
-        json.dumps(
-            {
-                "profile": profile,
-                "hidden_tools": hidden,
-                "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-
-
 def _hidden_set(data: dict) -> set[str]:
     return set(data.get("hidden_tools") or [])
+
+
+def _gateway_tools() -> int | None:
+    from tradex.tools.mcp_profile_io import gateway_tools as _gw
+
+    return _gw()
+
+
+def _kill_gateway() -> int:
+    from tradex.tools.mcp_profile_io import kill_gateway as _kill
+
+    return _kill()
+
+
+def _wait_gateway(expected: int | None, deadline_s: float = 45.0) -> int | None:
+    from tradex.tools.mcp_profile_io import wait_gateway as _wait
+
+    return _wait(expected, deadline_s)
+
+
+def _write_profile(profile: str, hidden: list[str]) -> None:
+    from tradex.tools.mcp_profile_io import write_profile as _write
+
+    _write(profile, hidden)
 
 
 def cmd_list() -> int:

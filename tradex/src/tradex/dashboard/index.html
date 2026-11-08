@@ -13,6 +13,51 @@
     color: #333;
     line-height: 1.5;
   }
+  /* ── MCP 工具启停面板 ── */
+  .mcp-panel {
+    background: #fff; border-radius: 10px; padding: 16px 20px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08); margin-bottom: 20px;
+  }
+  .mcp-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .mcp-head h2 { font-size: 17px; font-weight: 600; }
+  .mcp-status { font-size: 13px; color: #666; }
+  .mcp-refresh-btn {
+    margin-left: auto; padding: 4px 12px; border-radius: 6px;
+    border: 1px solid #ddd; background: #fff; cursor: pointer; font-size: 13px;
+  }
+  .mcp-hint { font-size: 12px; color: #999; margin: 6px 0 10px; }
+  .mcp-presets { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+  .mcp-preset {
+    flex: 1; min-width: 180px; text-align: left; padding: 10px 14px;
+    border-radius: 8px; border: 1px solid #ddd; background: #fafafa; cursor: pointer;
+  }
+  .mcp-preset b { display: block; font-size: 14px; color: #1a1a1a; }
+  .mcp-preset span { font-size: 12px; color: #888; }
+  .mcp-preset.recommended { border-color: #2563eb; background: #eff6ff; }
+  .mcp-preset.recommended b { color: #2563eb; }
+  .mcp-preset:hover { border-color: #2563eb; }
+  .mcp-msg { padding: 8px 12px; border-radius: 6px; font-size: 13px; margin-bottom: 10px; }
+  .mcp-msg.ok { background: #f0fdf4; color: #15803d; }
+  .mcp-msg.err { background: #fef2f2; color: #b91c1c; }
+  .mcp-msg.warn { background: #fffbeb; color: #b45309; }
+  .mcp-group { border: 1px solid #eee; border-radius: 8px; margin-bottom: 6px; }
+  .mcp-group summary {
+    padding: 8px 12px; cursor: pointer; font-size: 13px; font-weight: 600;
+    display: flex; gap: 8px; align-items: baseline; list-style: none;
+  }
+  .mcp-group summary::-webkit-details-marker { display: none; }
+  .mcp-group .cnt { color: #888; font-weight: 400; font-size: 12px; }
+  .mcp-group .gdesc { color: #999; font-weight: 400; font-size: 12px; }
+  .mcp-tools { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 12px 10px; }
+  .mcp-chip {
+    font-size: 12px; padding: 2px 8px; border-radius: 4px;
+    border: 1px solid #e5e7eb; background: #eff6ff; color: #1a1a1a;
+  }
+  .mcp-chip.off {
+    background: transparent; color: #aaa; text-decoration: line-through;
+  }
+  .hidden { display: none; }
+
   /* ── 顶部状态栏 ── */
   .header {
     background: #fff;
@@ -240,6 +285,31 @@
 <div class="version-banner hidden" id="version-banner"></div>
 
 <div class="container">
+  <div class="mcp-panel">
+    <div class="mcp-head">
+      <h2>MCP 工具启停</h2>
+      <span class="mcp-status" id="mcp-status">加载中...</span>
+      <button class="mcp-refresh-btn" onclick="fetchMcpCatalog()">刷新</button>
+    </div>
+    <div class="mcp-hint">
+      管理的是「AI 对话可见哪些工具」；TradeX 看板 / 短线落库 / 数据源降级链走进程内调用，不受影响。
+      与 TradeX 看板设置页的开关读写同一份配置，两边永远一致。
+    </div>
+    <div class="mcp-presets">
+      <button class="mcp-preset" onclick="applyMcpPreset('full')">
+        <b>恢复全量</b><span>190 个工具全部暴露</span>
+      </button>
+      <button class="mcp-preset recommended" onclick="applyMcpPreset('lean')">
+        <b>精简（推荐）</b><span>禁低频 74 个，剩 116 个高频</span>
+      </button>
+      <button class="mcp-preset" onclick="applyMcpPreset('lean80')">
+        <b>二段精简</b><span>再禁观察档 34 个，剩 82 个</span>
+      </button>
+    </div>
+    <div class="mcp-msg hidden" id="mcp-msg"></div>
+    <div id="mcp-groups" class="mcp-groups"><div class="loading">加载中...</div></div>
+  </div>
+
   <div id="content">
     <div class="loading">加载中...</div>
   </div>
@@ -437,8 +507,66 @@
     timerId = setInterval(fetchDashboard, REFRESH_INTERVAL);
   }
 
+  // ── MCP 工具启停（与 TradeX 看板/CLI 同一 profile 单一真源）──
+  function mcpSetMsg(text, cls) {
+    var el = document.getElementById("mcp-msg");
+    el.className = "mcp-msg " + (cls || "");
+    el.textContent = text;
+    if (cls === "ok") { setTimeout(function() { el.className = "mcp-msg hidden"; }, 6000); }
+  }
+
+  function fetchMcpCatalog() {
+    fetch("/api/mcp/catalog", { cache: "no-store" })
+      .then(function(resp) { return resp.json(); })
+      .then(function(data) { renderMcp(data); })
+      .catch(function(err) {
+        document.getElementById("mcp-status").textContent = "加载失败: " + err.message;
+      });
+  }
+
+  function renderMcp(data) {
+    var gw = data.gateway_tools != null ? ("网关实时 " + data.gateway_tools) : "网关离线";
+    document.getElementById("mcp-status").textContent =
+      "当前 " + data.enabled + "/" + data.total + " 启用 · profile " + data.profile + " · " + gw;
+    var html = "";
+    data.groups.forEach(function(g) {
+      var en = g.tools.filter(function(t) { return !t.hidden; }).length;
+      html += '<details class="mcp-group">';
+      html += '<summary>' + g.name + ' <span class="cnt">' + en + '/' + g.tools.length + ' 启用</span>'
+           + ' <span class="gdesc">' + g.desc + '</span></summary>';
+      html += '<div class="mcp-tools">';
+      g.tools.forEach(function(t) {
+        html += '<span class="mcp-chip' + (t.hidden ? ' off' : '') + '">' + t.name + '</span>';
+      });
+      html += '</div></details>';
+    });
+    document.getElementById("mcp-groups").innerHTML = html;
+  }
+
+  function applyMcpPreset(preset) {
+    var label = { full: "恢复全量", lean: "精简", lean80: "二段精简" }[preset] || preset;
+    if (!window.confirm("确认应用「" + label + "」？hub 网关将重启（约 10 秒），期间 AI 对话短暂不可用，看板不受影响。")) return;
+    mcpSetMsg("⏳ 正在应用并重启网关……", "warn");
+    fetch("/api/mcp/apply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ preset: preset })
+    })
+      .then(function(resp) { return resp.json().then(function(j) { return { ok: resp.ok, j: j }; }); })
+      .then(function(r) {
+        if (!r.ok) { mcpSetMsg("❌ 应用失败: " + (r.j.error || r.j.detail || "未知错误"), "err"); return; }
+        var j = r.j;
+        mcpSetMsg("✅ 已应用「" + label + "」：启用 " + j.enabled + " 个"
+          + (j.gateway_tools != null ? "，网关实时 " + j.gateway_tools : "")
+          + "。WorkBuddy/ZCode 重连 MCP 后数字即一致。", "ok");
+        fetchMcpCatalog();
+      })
+      .catch(function(err) { mcpSetMsg("❌ 请求失败: " + err.message, "err"); });
+  }
+
   // 页面加载后首次拉取 + 启动定时刷新
   fetchDashboard();
+  fetchMcpCatalog();
   startAutoRefresh();
 </script>
 
