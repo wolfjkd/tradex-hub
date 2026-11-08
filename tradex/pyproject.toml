@@ -40,6 +40,8 @@ dependencies = [
     "pydantic>=2.0.0",
     "requests>=2.28.0",
     "stockstats>=0.6.0",
+    # 中证官方估值 xls 读取（fetch_index_valuation，xlrd 2.x 仅支持 .xls 恰为本场景）
+    "xlrd>=2.0.2",
     "python-dotenv>=1.0.0",
     # 问财 wencai_query 主源（hexin-v token 生成，node 子进程；未装时该源抛错由 router 降级）
     "pywencai>=0.13.1",

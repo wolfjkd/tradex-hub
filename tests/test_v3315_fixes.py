@@ -247,7 +247,7 @@ class TestBackupSourceRegistration:
         #   → 107（SP-2026-10-13-001 tq 源新增 l2_stats + tdx_formula）
         #   → 109（2026-11-06 shortline 批次新增 bigcaps + tdx_daily_package）
         #   → 113（2026-11-07 KPL 批次新增 kpl_limit_up/kpl_sentiment/kpl_boards/kpl_bidding）
-        assert len(router._sources) == 113
+        assert len(router._sources) == 114  # 2026-11-08 +index_valuation
 
     def test_total_registrations(self, router):
         # 总注册数演进：90 → 94（v3.3.14）→ 101（v3.3.15）→ 102 → 107
@@ -259,7 +259,7 @@ class TestBackupSourceRegistration:
         #   → 153（2026-11-06 shortline 批次：bigcaps 2 + tdx_daily_package 1
         #          + industry_comparison sina_industry 1）
         #   → 157（2026-11-07 KPL 批次：kpl_* 4 类型各 1 独占注册）
-        assert sum(len(v) for v in router._sources.values()) == 157
+        assert sum(len(v) for v in router._sources.values()) == 159  # 2026-11-08 +index_valuation +em_bond_backup 备源
 
     def test_new_sources_registered_with_priority(self, router):
         for data_type, name, prio in NEW_SOURCES:

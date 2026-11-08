@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import io
 import logging
+
+import requests as _requests
 import re
 from datetime import datetime
 from typing import Any
@@ -152,8 +154,16 @@ def fetch_chinabond_yield_curve(
             try:
                 tables = pd.read_html(io.StringIO(resp.text))
                 if tables:
-                    return tables[0].head(15)
-            except ValueError:
+                    t = tables[0].head(15)
+                    # 2026-11-08：yield_main 已改版为 JS 填充页面，read_html 只能
+                    # 拿到空壳骨架——假数据比 5xx 更糟，空壳必须抛出走降级。
+                    if not t.empty and t.notna().to_numpy().any():
+                        return t
+                    raise ValueError("中债收益率曲线 HTML 表格为空壳（接口疑似改版）")
+            except ValueError as ve:
+                if "空壳" in str(ve):
+                    raise
+            except Exception:
                 pass
             raise  # 2026-09-28 审计修复：失败必须抛出，由 SmartRouter 记账降级（吞成空表会让降级链与健康分全部失效）
 
@@ -169,7 +179,12 @@ def fetch_chinabond_yield_curve(
             })
         if not rows:
             return pd.DataFrame()
-        return pd.DataFrame(rows)
+        out = pd.DataFrame(rows)
+        # 2026-11-08 修复：yield_main 已改版为 JS 填充页面，read_html 会解析出
+        # 全 NaN 空壳——假数据比 5xx 更糟（健康分正常但读数无效），必须抛出走降级。
+        if out.empty or out["收益率(%)"].isna().all() or (out["收益率(%)"] == 0).all():
+            raise ValueError(f"中债收益率曲线返回空壳（接口疑似改版），curve={curve}")
+        return out
 
     except Exception as e:
         logger.warning("fetch_chinabond_yield_curve(%s) failed: %s", curve, e)
@@ -185,3 +200,73 @@ def fetch_chinabond_yield_curve(
 # LPR 历史 — lpr_history
 # ============================================================
 
+
+
+# ============================================================
+# 中证指数官方估值 — index_valuation（2026-11-08 复活）
+# ============================================================
+
+# v3.6.0 曾以 zealink（csi-web.cn.zealink.com，中证官网 CDN）实现本类型，
+# 后该域名 DNS 失效被作为死源剥离（2026-11-08 实测 getaddrinfo 失败，确认真死）。
+# 现换中证官网自动估值文件（oss-ch.csindex.com.cn OSS，官方一手，日度更新），
+# 单文件同时给出 PE 与股息率，免去多源拼接。
+_CSI_INDICATOR_URL = (
+    "https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/"
+    "file/autofile/indicator/{index_code}indicator.xls"
+)
+
+# 该 OSS 对 curl_cffi 的 TLS 指纹返回 404（2026-11-08 实测），对原生 requests
+# 放行 200——故本 fetcher 用 requests 直连（trust_env=False，国内源铁律）。
+_csi_session = _requests.Session()
+_csi_session.trust_env = False
+
+
+def fetch_index_valuation(index_code: str = "000300", **kwargs) -> pd.DataFrame:
+    """中证指数官方日度估值（PE + 股息率）。
+
+    数据源为中证官网「指数估值」自动文件（xls，OLE2 格式，约近一月窗口，
+    最新一行即最新交易日）。读 .xls 需要 xlrd>=2.0（仅支持 .xls，恰为本场景）。
+
+    Args:
+        index_code: 指数代码，默认 000300 沪深300
+
+    Returns:
+        DataFrame with columns: 日期, 市盈率1(总股本), 市盈率2(计算用股本),
+        股息率1(总股本), 股息率2(计算用股本)，按日期降序（最新在前）
+    """
+    try:
+        url = _CSI_INDICATOR_URL.format(index_code=index_code)
+        headers = {
+            "User-Agent": _UA,
+            "Referer": "https://www.csindex.com.cn/",
+            "Accept": "*/*",
+        }
+        resp = _csi_session.get(url, headers=headers, timeout=_TIMEOUT)
+        resp.raise_for_status()
+        df = pd.read_excel(io.BytesIO(resp.content))
+        if df.empty:
+            raise ValueError(f"中证估值文件为空：{url}")
+
+        # 双语表头按关键子串定位，防中证改英文列名顺序
+        col_date = next(c for c in df.columns if "日期" in str(c))
+        col_pe1 = next(c for c in df.columns if "市盈率1" in str(c))
+        col_pe2 = next(c for c in df.columns if "市盈率2" in str(c))
+        col_dp1 = next(c for c in df.columns if "股息率1" in str(c))
+        col_dp2 = next(c for c in df.columns if "股息率2" in str(c))
+
+        out = df[[col_date, col_pe1, col_pe2, col_dp1, col_dp2]].copy()
+        out.columns = [
+            "日期", "市盈率1(总股本)", "市盈率2(计算用股本)",
+            "股息率1(总股本)", "股息率2(计算用股本)",
+        ]
+        out["日期"] = out["日期"].astype(str).str.split(" ").str[0].str.replace("-", "", regex=False)
+        for c in out.columns[1:]:
+            out[c] = pd.to_numeric(out[c], errors="coerce")
+        out = out.dropna(subset=["日期"]).sort_values("日期", ascending=False).reset_index(drop=True)
+        if out.empty:
+            raise ValueError(f"中证估值文件解析后无有效行：{url}")
+        return out
+
+    except Exception as e:
+        logger.warning("fetch_index_valuation(%s) failed: %s", index_code, e)
+        raise  # 失败必须抛出，由 SmartRouter 记账降级（v3.3.15 起约定）

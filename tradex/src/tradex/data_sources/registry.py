@@ -382,6 +382,13 @@ def _do_register() -> None:
     # （货币网静态 json 404，AGS 接口语义不符）；保留实测可用的 PMI + 中债曲线。
     router.register("pmi_data", "nbs_official", macro_off.fetch_nbs_pmi, priority=1)
     router.register("bond_yield_curve", "chinabond_official", macro_off.fetch_chinabond_yield_curve, priority=1)
+    # 2026-11-08：中债 yield_main 改版（JSON→JS 页面）主源解析空壳已按纪律抛出，
+    # 东财 datacenter（akshare bond_zh_us_rate）挂第二源兜底国债曲线。
+    router.register("bond_yield_curve", "em_bond_backup", akf.fetch_bond_yield_cn_backup, priority=100)
+
+    # 2026-11-08 复活：v3.6.0 曾以 zealink 实现指数估值（后 DNS 死亡被剥离），
+    # 现换中证官网 OSS 自动估值文件（oss-ch.csindex.com.cn，一手，xls）。
+    router.register("index_valuation", "csindex_official", macro_off.fetch_index_valuation, priority=1)
 
     # ── 投资者互动 2 件套：2026-09-28 死源剥离（老板拍板）──
     # 巨潮互动易上游 500、上交所 e互动 404（主站存活、接口层死亡），

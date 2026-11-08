@@ -92,6 +92,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
     ("宏观与全球（低频）", "宏观指标/全球行情/债收益率/外汇/期货新闻", [
         "get_macro_cpi", "get_macro_gdp", "get_macro_money_supply", "get_macro_pmi",
         "get_pmi", "get_bond_yield_curve", "get_bond_yield_curve_official",
+        "get_index_valuation",
         "get_fx_rate", "get_futures_news", "get_global_market_quote",
         "get_wallstreetcn_lives", "get_macro_calendar", "query_macro_indicator",
         "get_cctv_news",

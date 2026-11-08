@@ -49,10 +49,10 @@ class TestTdxMcpToolCount:
         assert _count_decorators(p) == 2
 
     def test_total_tool_count_is_190(self):
-        """全量工具数 = 190（2026-11-07 KPL 批次 +4：limit_up/sentiment/boards/bidding：186→190）。"""
+        """全量工具数 = 191（2026-11-08 中证官方估值复活 +1：190→191）。"""
         total = 0
         for py in glob.glob(os.path.join(_TOOLS_DIR, "*.py")):
             if py.endswith("__init__.py") or py.endswith("registry.py"):
                 continue
             total += _count_decorators(py)
-        assert total == 190, f"期望工具总数 190，实得 {total}"
+        assert total == 191, f"期望工具总数 191，实得 {total}"

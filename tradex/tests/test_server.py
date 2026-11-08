@@ -18,7 +18,7 @@ class TestServerSetup:
         limit_up/sentiment/boards/bidding）.
         数量精确锁定，版本演进需同步更新本断言。"""
         tools = mcp_server._tool_manager._tools
-        assert len(tools) == 190, f"Expected 190 tools, got {len(tools)}"
+        assert len(tools) == 191, f"Expected 191 tools, got {len(tools)}"
 
     def test_v01_tools_present(self, mcp_server):
         """V0.1 company info + price data tools (8 tools)."""
@@ -134,7 +134,7 @@ class TestServerSetup:
 
     def test_tool_count_per_version(self, mcp_server):
         """SP-2026-10-13-001: tq 源工具 +2 (166→168)；2026-11-06 shortline 批次 +18（168→186）；
-        2026-11-07 KPL 批次 +4（186→190）.
+        2026-11-08 中证估值复活 +1（190→191）.
         防重复注册回归。版本演进需同步更新本断言。"""
         tools = mcp_server._tool_manager._tools
-        assert len(tools) == 190
+        assert len(tools) == 191

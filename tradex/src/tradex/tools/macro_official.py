@@ -60,3 +60,21 @@ def register(mcp: FastMCP):
             return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             return error_response(f"获取收益率曲线失败: {e}", "get_bond_yield_curve_official")
+
+    @mcp.tool()
+    async def get_index_valuation(index_code: str = "000300") -> str:
+        """
+        获取中证指数官方估值（PE + 股息率，中证官网一手文件，日度更新）。
+
+        Args:
+            index_code: 指数代码，默认 000300 沪深300
+
+        Returns:
+            估值序列 (JSON)，含日期、市盈率1(总股本)/市盈率2(计算用股本)、
+            股息率1(总股本)/股息率2(计算用股本)，最新日期在前。
+        """
+        try:
+            result = macro_service.get_index_valuation(index_code=index_code)
+            return json.dumps(result, ensure_ascii=False)
+        except Exception as e:
+            return error_response(f"获取指数估值失败: {e}", "get_index_valuation")
