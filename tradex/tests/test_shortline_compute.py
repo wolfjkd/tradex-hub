@@ -85,6 +85,36 @@ class TestEmotion:
         assert result["premium"] is None
         assert result["missing_reason"]
 
+    def test_promotion_tiers(self):
+        result, text = compute.emotion(_snapshot())
+        tiers = {t["tier"]: t for t in result["promotion_tiers"]}
+        # 手算样本：昨日 3 首板全晋级、1 只 2 板未晋级、1 只 3 板未晋级
+        assert tiers["1进2"] == {"tier": "1进2", "base": 3, "promoted": 3, "rate": 100.0}
+        assert tiers["2进3"]["base"] == 1
+        assert tiers["2进3"]["promoted"] == 0
+        assert tiers["2进3"]["rate"] == 0.0
+        assert tiers["3板以上"]["base"] == 1
+        assert tiers["3板以上"]["promoted"] == 0
+        # 对账恒等式：各档加总 = 整体
+        assert sum(t["base"] for t in tiers.values()) == 5
+        assert sum(t["promoted"] for t in tiers.values()) == 3
+        assert "1进2 3/3" in text
+
+    def test_promotion_tiers_missing_prev(self):
+        result, _ = compute.emotion(_snapshot(missing=("prev_zt",)))
+        assert result["promotion_tiers"] is None
+
+    def test_promotion_tiers_unknown_board(self):
+        snap = _snapshot()
+        snap.prev_zt.append({"code": "999999", "name": "缺板位", "change_pct": 1.0})
+        result, _ = compute.emotion(snap)
+        tiers = {t["tier"]: t for t in result["promotion_tiers"]}
+        assert "板位未知" in tiers
+        assert tiers["板位未知"]["base"] == 1
+        # 有缺板位票时恒等式仍成立（不虚增、不丢失）
+        assert sum(t["base"] for t in result["promotion_tiers"]) == 6
+        assert sum(t["promoted"] for t in result["promotion_tiers"]) == 3
+
 
 class TestDaily:
     def test_daily_readings(self):

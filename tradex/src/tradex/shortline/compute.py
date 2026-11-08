@@ -139,6 +139,34 @@ def _stock_brief(row: dict) -> dict:
 # ---------------------------------------------------------------- 八个端点
 
 
+def _promotion_tiers(prev_rows: list[dict], hit_codes: set) -> list[dict]:
+    """晋级率按昨日板位分档（1进2 / 2进3 / 3板以上）。
+
+    同一批票按昨日连板数拆开算，各档 base/promoted 加总 = 整体晋级率；
+    昨日池里板位缺失的票归「板位未知」档（仅在该档非空时出现），恒等式不被破坏。
+    """
+    tiers: list[dict] = []
+    known: set = set()
+    for name, lo, hi in (("1进2", 1, 1), ("2进3", 2, 2), ("3板以上", 3, None)):
+        codes: set = set()
+        for r in prev_rows:
+            raw = r.get("consecutive_days")
+            if raw in (None, ""):
+                continue
+            d = _i(raw, default=-1)
+            if d >= lo and (hi is None or d <= hi):
+                codes.add(r.get("code"))
+        known |= codes
+        base = len(codes)
+        p = len(codes & hit_codes)
+        tiers.append({"tier": name, "base": base, "promoted": p, "rate": _pct(p, base)})
+    unknown = {r.get("code") for r in prev_rows} - known
+    if unknown:
+        p = len(unknown & hit_codes)
+        tiers.append({"tier": "板位未知", "base": len(unknown), "promoted": p, "rate": _pct(p, len(unknown))})
+    return tiers
+
+
 def emotion(snapshot: PoolSnapshot) -> tuple[dict, str]:
     """情绪四项：赚钱效应 / 晋级率 / 连板溢价 / 梯队断层。"""
     prev = snapshot.prev_zt
@@ -160,10 +188,12 @@ def emotion(snapshot: PoolSnapshot) -> tuple[dict, str]:
 
     promoted = None
     promotion_rate = None
+    promotion_tiers = None
     if prev_ok:
         hit = _codes(prev) & _codes(snapshot.zt)
         promoted = len(hit)
         promotion_rate = _pct(promoted, len(prev))
+        promotion_tiers = _promotion_tiers(prev, hit)
 
     premium = None
     if prev_ok:
@@ -188,6 +218,7 @@ def emotion(snapshot: PoolSnapshot) -> tuple[dict, str]:
         "money_effect": money_effect,
         "promotion_rate": promotion_rate,
         "promoted": promoted,
+        "promotion_tiers": promotion_tiers,
         "premium": premium,
         "ladder_gap": ladder_gap,
         "missing_reason": missing or None,
@@ -196,6 +227,8 @@ def emotion(snapshot: PoolSnapshot) -> tuple[dict, str]:
         f"赚钱效应 {money_effect['up_ratio']}%（昨日涨停 {money_effect['up_count']}/{money_effect['sample']} 上涨）"
         if prev_ok else "赚钱效应 —（昨日涨停池缺数）",
         f"晋级率 {promotion_rate}%（{promoted}/{len(prev)}）" if prev_ok else "晋级率 —",
+        "晋级分档 " + "、".join(f"{t['tier']} {t['promoted']}/{t['base']}" for t in (promotion_tiers or []) if t["base"])
+        if prev_ok else "晋级分档 —",
         f"连板溢价 {premium['diff']:+}pct（连板均 {premium['lianban_avg']}% − 首板均 {premium['first_avg']}%）"
         if premium and premium["diff"] is not None else "连板溢价 —",
         f"梯队{'断层：缺 ' + '/'.join(str(g) for g in gaps) + ' 板' if gaps else '完整'}（最高 {max_board} 板）",

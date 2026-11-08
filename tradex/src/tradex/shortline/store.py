@@ -310,20 +310,40 @@ def history(days: int = 5, date: str = "") -> dict:
     dates = [d for d in _stored_dates() if d <= end]
     picked = dates[-n:]
     records: list[dict] = []
+    # 窗口分位与 compute.cycle 同口径：当日读数在「窗口内全部读数（含当日）」中的排名百分位；
+    # 窗口随序列增长，首日 window_days=1 时恒为 100（无历史可比，诚实标注不算错）。
+    windows: dict[str, list] = {"limit_up_count": [], "max_board": [], "break_rate": []}
     for day in picked:
         record = load(day) or {}
         metrics = record.get("daily_metrics") or {}
-        records.append({
+        readings = record.get("readings") or {}
+        daily_result = (readings.get("daily") or {}).get("result") or {}
+        emotion_result = (readings.get("emotion") or {}).get("result") or {}
+        row = {
             "date": day,
             "status": record.get("status"),
             "fetched_at": record.get("fetched_at"),
             "limit_up_count": metrics.get("limit_up_count"),
             "max_board": metrics.get("max_board"),
             "break_rate": metrics.get("break_rate"),
+            # v1 记录没有这些读数 → None（前端显示「—」），不伪造成 0
+            "first_to_second": daily_result.get("first_to_second"),
+            "promotion_rate": emotion_result.get("promotion_rate"),
             # v1 记录没有 theme_counts → None（轮动显示「—」），不伪造成 0
             "theme_counts": record.get("theme_counts"),
             "missing_reason": record.get("missing_reason"),
-        })
+        }
+        for key in windows:
+            if row[key] is not None:
+                windows[key].append(row[key])
+        percentiles = []
+        for key in ("limit_up_count", "max_board", "break_rate"):
+            values = windows[key]
+            if values and row[key] is not None:
+                percentiles.append(round(sum(1 for v in values if v <= row[key]) / len(values) * 100, 1))
+        row["composite_percentile"] = round(sum(percentiles) / len(percentiles), 1) if percentiles else None
+        row["window_days"] = min(len(windows[k]) for k in windows) if any(windows.values()) else 0
+        records.append(row)
 
     missing_dates = _weekday_gaps(picked[0], picked[-1], set(picked)) if len(picked) >= 2 else []
     return {

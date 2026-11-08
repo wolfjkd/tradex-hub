@@ -38,6 +38,8 @@ dependencies = [
     # 2.2.2 为 akshare 1.20.8 起的硬性要求，低于此值装不上 akshare 1.20.x
     "pandas>=2.2.2",
     "pydantic>=2.0.0",
+    # tradex.metrics 用官方客户端（此前靠传递依赖侥幸可用，2026-11-08 新机 uv sync 收集失败暴露）
+    "prometheus_client>=0.20.0",
     "requests>=2.28.0",
     "stockstats>=0.6.0",
     # 中证官方估值 xls 读取（fetch_index_valuation，xlrd 2.x 仅支持 .xls 恰为本场景）
