@@ -22,7 +22,7 @@ from ..data_sources import get_router
 from ..shortline import compute
 from ..shortline.compute import PoolSnapshot
 from ..shortline.meta import cache_key, get_endpoint, resolve_cache
-from ..utils.cache import cache
+from ..utils.cache import TTL_DAILY, cache
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +119,67 @@ def collect_snapshot(date: str = "", need: tuple[str, ...] = ("zt", *_AUX_POOLS)
                     logger.warning("shortline snapshot: %s 池失败(%s): %s", name, resolved_date, exc)
                     snapshot.missing.append(name)
                     snapshot.reasons[name] = str(exc)
+
     return snapshot
+
+
+def ensure_prev_zt_seal_times(snapshot: PoolSnapshot) -> None:
+    """给 prev_zt 池注入昨日首次/最后封板时间（2026-11-08 票B）。
+
+    上游 stock_zt_pool_previous_em 无封板时间列；用前一交易日的 zt 池
+    （stock_zt_pool_em，含首封/末封）按 code 对齐注入。失败只记原因，
+    不进 missing（不影响 close_fetch 的 partial 判定）。
+
+    调用点收敛在 store.close_fetch（落库定稿）——封板时间唯一消费方是
+    TradeX T8 样本页（读落库 records）；不挂在 collect_snapshot，
+    避免快照公共路径（live/daily/ladder）多发一次 zt 取数。
+    """
+    if not snapshot.prev_zt:
+        return
+    try:
+        prev_day = _prev_trading_day(snapshot.date)
+        payload, _src = _router.route(
+            "limit_up_board", board_type="zt", date=prev_day, timeout=30
+        )
+        seal_map = {
+            str(r.get("code") or ""): r
+            for r in ((payload or {}).get("data") or [])
+        }
+        injected = 0
+        for row in snapshot.prev_zt:
+            info = seal_map.get(str(row.get("code") or ""))
+            if info:
+                row["first_seal_time"] = str(info.get("first_seal_time") or "") or str(row.get("first_seal_time") or "")
+                row["last_seal_time"] = str(info.get("last_seal_time") or "")
+                injected += 1
+        if injected:
+            logger.info("prev_zt 封板时间注入 %d/%d（%s 池）", injected, len(snapshot.prev_zt), prev_day)
+        else:
+            snapshot.reasons["prev_zt_seal_times"] = f"{prev_day} 涨停池与昨日名单无交集，封板时间缺数"
+    except Exception as exc:  # noqa: BLE001 - 封板时间是增强字段，缺数不拦截
+        logger.warning("prev_zt 封板时间注入失败(%s): %s", snapshot.date, exc)
+        snapshot.reasons["prev_zt_seal_times"] = f"封板时间注入失败：{exc}"
+
+
+def _prev_trading_day(date_str: str) -> str:
+    """前一交易日（YYYYMMDD）。sina 全表日历带 TTL 缓存，跨月安全。"""
+    import pandas as pd
+    from ..data_sources.akshare_fetchers import _ak
+
+    cache_key = f"trade_dates_all:{pd.Timestamp.now().strftime('%Y%m')}"
+    cached = cache.get(cache_key)
+    if cached is None:
+        df = _ak().tool_trade_date_hist_sina()
+        if df is None or df.empty or "trade_date" not in df.columns:
+            raise ValueError("sina 交易日清单返回空或结构变化")
+        cached = pd.to_datetime(df["trade_date"], errors="coerce").dropna().dt.strftime("%Y%m%d").tolist()
+        cache.set(cache_key, cached, TTL_DAILY)
+    days = sorted(cached)
+    target = str(date_str).replace("-", "")
+    prior = [d for d in days if d < target]
+    if not prior:
+        raise ValueError(f"交易日历无 {target} 之前的记录")
+    return prior[-1]
 
 
 def _is_intraday(date_str: str) -> bool:

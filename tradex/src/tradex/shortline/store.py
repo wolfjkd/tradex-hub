@@ -157,6 +157,9 @@ def close_fetch(date: str = "", force: bool = False) -> dict:
     if not snapshot.date:
         raise RuntimeError("无法确定交易日（涨停池未返回日期）")
 
+    # 封板时间注入（2026-11-08 票B）：仅落库路径做，失败只记原因不拦截
+    shortline_service.ensure_prev_zt_seal_times(snapshot)
+
     partial = shortline_service._is_intraday(snapshot.date) or bool(snapshot.missing)
     status = "partial" if partial else "final"
 

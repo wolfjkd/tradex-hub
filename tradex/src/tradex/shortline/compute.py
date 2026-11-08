@@ -129,6 +129,7 @@ def _stock_brief(row: dict) -> dict:
         "turnover_rate": _f(row.get("turnover_rate")),
         "sealed_capital_yi": round((_f(row.get("sealed_capital")) or 0) / 1e8, 4),
         "first_seal_time": row.get("first_seal_time"),
+        "last_seal_time": row.get("last_seal_time"),
         "break_count": _i(row.get("break_count")),
         "limit_up_stats": row.get("limit_up_stats"),
         "industry": row.get("industry"),
