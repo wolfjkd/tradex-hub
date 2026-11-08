@@ -14,10 +14,11 @@ class TestServerSetup:
         历史：129→132→165→176→166 (数据源扩充 T01-T33 → akshare_em 包装层 →
         死源剥离移除期权 2 + 指数 3 + 互动 2 + 宏观 3) → 186（2026-11-06
         vibe-astock 借鉴批次：短线元数据 1 + 大市值 1 + 成交额榜 1 + 读数 8 +
-        落库 2 + 题材 4 + 字段漂移 1）.
+        落库 2 + 题材 4 + 字段漂移 1）→ 190（2026-11-07 KPL 批次 +4：
+        limit_up/sentiment/boards/bidding）.
         数量精确锁定，版本演进需同步更新本断言。"""
         tools = mcp_server._tool_manager._tools
-        assert len(tools) == 186, f"Expected 186 tools, got {len(tools)}"
+        assert len(tools) == 190, f"Expected 190 tools, got {len(tools)}"
 
     def test_v01_tools_present(self, mcp_server):
         """V0.1 company info + price data tools (8 tools)."""
@@ -132,7 +133,8 @@ class TestServerSetup:
             assert tool_name in tools, f"V0.6 tool '{tool_name}' not registered"
 
     def test_tool_count_per_version(self, mcp_server):
-        """SP-2026-10-13-001: tq 源工具 +2 (166→168)；2026-11-06 shortline 批次 +18（168→186）.
+        """SP-2026-10-13-001: tq 源工具 +2 (166→168)；2026-11-06 shortline 批次 +18（168→186）；
+        2026-11-07 KPL 批次 +4（186→190）.
         防重复注册回归。版本演进需同步更新本断言。"""
         tools = mcp_server._tool_manager._tools
-        assert len(tools) == 186
+        assert len(tools) == 190

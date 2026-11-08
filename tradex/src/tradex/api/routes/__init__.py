@@ -117,3 +117,8 @@ router.include_router(_industry_news_routes.router)
 from . import shortline as _shortline_routes  # noqa: E402
 
 router.include_router(_shortline_routes.router)
+
+# 交接文档 09 票5（2026-11-07）：开盘啦 KPL（/kpl/* 四端点）
+from . import kpl as _kpl_routes  # noqa: E402
+
+router.include_router(_kpl_routes.router)

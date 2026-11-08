@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/Python-3.13+-blue.svg" alt="Python"/>
   <img src="https://img.shields.io/badge/MCP-1.0-green.svg" alt="MCP"/>
   <img src="https://img.shields.io/badge/REST-v3.8.7-orange.svg" alt="REST"/>
-  <img src="https://img.shields.io/badge/Tools-186-orange.svg" alt="MCP Tools"/>
+  <img src="https://img.shields.io/badge/Tools-190-orange.svg" alt="MCP Tools"/>
   <img src="https://img.shields.io/badge/Endpoints-77-orange.svg" alt="REST Endpoints"/>
   <img src="https://img.shields.io/badge/License-Apache--2.0-yellow.svg" alt="License"/>
   <img src="https://img.shields.io/badge/Version-3.8.7-blue.svg" alt="Version"/>
@@ -22,7 +22,7 @@
 
 ## 项目介绍
 
-tradex-hub 是一个**本地运行的金融数据中台**，把分散在多个数据源（通达信、腾讯财经、东方财富、同花顺、新浪、巨潮、财联社、AKShare 等）的 A 股数据，统一封装成 **186 个 MCP 工具** + **77 个 REST 端点**（2026-11-06 短线数据底座接入后基线），供 AI Agent（WorkBuddy / Claude Code / Cursor / Dify / LangChain）和前端看板（TradeX）一站式调用。
+tradex-hub 是一个**本地运行的金融数据中台**，把分散在多个数据源（通达信、腾讯财经、东方财富、同花顺、新浪、巨潮、财联社、AKShare 等）的 A 股数据，统一封装成 **190 个 MCP 工具** + **81 个 REST 端点**（2026-11-07 开盘啦 KPL 接入后基线），供 AI Agent（WorkBuddy / Claude Code / Cursor / Dify / LangChain）和前端看板（TradeX）一站式调用。
 
 **核心定位**：让 AI Agent **不用关心数据从哪儿来、怎么反爬、怎么降级** —— 只管调一个统一接口，tradex-hub 自动选最优数据源、自动健康检查、自动故障隔离。
 
@@ -55,7 +55,7 @@ tradex-hub 是一个**本地运行的金融数据中台**，把分散在多个�
 │  协议层（双协议并存）                                            │
 │  ┌─────────────────────┐    ┌─────────────────────────────┐    │
 │  │  MCP Server         │    │  FastAPI REST               │    │
-│  │  186 个工具         │    │  77 个端点（/api/v1/*）      │    │
+│  │  190 个工具         │    │  81 个端点（/api/v1/*）      │    │
 │  └──────────┬──────────┘    └──────────────┬──────────────┘    │
 │             │                              │                    │
 │             └──────────┬───────────────────┘                    │
@@ -103,7 +103,7 @@ flowchart LR
     end
 
     subgraph Gateway["tradex-hub 网关 (端口 8000)"]
-        B1["MCP Server<br/>186 个工具<br/>JSON-RPC over HTTP"]
+        B1["MCP Server<br/>190 个工具<br/>JSON-RPC over HTTP"]
         B2["FastAPI REST<br/>77 个端点<br/>统一包裹响应"]
         B3["监控看板<br/>/dashboard<br/>Prometheus /metrics"]
         B1 -.共享.- B2
@@ -129,7 +129,7 @@ flowchart LR
 
 | 协议 | 适用场景 | 接口形态 |
 |------|----------|----------|
-| **MCP** | AI Agent 对话式调用（工具描述可被 LLM 理解） | JSON-RPC over HTTP，186 个工具 |
+| **MCP** | AI Agent 对话式调用（工具描述可被 LLM 理解） | JSON-RPC over HTTP，190 个工具 |
 | **REST** | 看板 / 外部系统 / 自定义脚本 | 标准 HTTP + JSON，77 端点，包裹响应 `{code, data, msg}` |
 
 两个协议返回的数据**完全一致**（仅序列化差异：MCP 返 JSON 字符串、REST 返包裹 dict），契约严格对齐。
@@ -240,7 +240,7 @@ TDX_MCP_MIN_INTERVAL=0.8
 
 ---
 
-## MCP 工具清单（186 个）
+## MCP 工具清单（190 个）
 
 完整工具清单详见 [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md)（由 `scripts/generate_tool_docs.py` 从源码 AST 生成，含每个工具的说明）。按业务领域分组：
 
