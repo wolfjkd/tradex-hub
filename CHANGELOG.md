@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ---
 
+## [3.9.0] - 2026-11-08（数据源扩容 + MCP 工具治理）
+
+### Added
+- 新增开盘啦（KPL）数据源四类型：涨停复盘（实时/历史，PidType 板位）、市场情绪（涨停跌停/炸板率/情绪值/连板高度）、精选板块（801xxx 强度）、竞价涨停委买额；免鉴权直连，字段位映射表 + 冒烟断言
+- 新增问财 WAP 通道自建实现：定位缺失 `rsh` 根因，单请求行数 10→2000，涨停归因全量化；Web 端点 TLS 指纹风控结论文档化
+- 新增 MCP 工具可见性 profile：`config/mcp_tool_profile.json` 黑名单，FastMCP 注册后摘除，仅影响 MCP 暴露层
+- 新增三入口一键启停：CLI `scripts/mcp_profile.py`（26 中文分组）、TradeX 看板设置页 tab、本数据看板面板——三方读写同一配置天然同步
+- 新增共享 IO 层 `tradex/tools/mcp_profile_io.py`（写 profile/杀网关/等健康）
+- 新增 KPL MCP 工具 4 个与 REST 端点 4 个（`/api/v1/kpl/*`）
+- pywencai 正式加入依赖（hexin-v token 生成，node 子进程）
+
+### Changed
+- MCP 工具数 186→190，REST 端点 77→81；数据源矩阵 113 类型 / 157 注册
+- 问财涨停归因升级合并制：问财全量优先、同花顺补缺（原「非空即成功」会因锁页丢归因）
+- `fetch_wencai_query` 翻页循环保留 row_count 终止 + 重复页指纹检测
+- docs/MCP_TOOLS.md 重生成（MODULE_GROUPS 登记新模块），README 重装修（190/81/113/157 口径）
+
+### Fixed
+- supervisor 单实例锁 TOCTOU 竞态（同秒双启双实例并存）：改 O_EXCL 原子创建 + 写后回读
+- pywencai 默认 Web 端点 403 导致问财源开箱不可用：自建 WAP 通道为主路
+
+### Security
+- 无
+
+---
+
 ## [3.8.7] - 2026-11-06（短线数据底座 · vibe-astock 借鉴批次 7 张工单）
 
 ### Added

@@ -11,11 +11,11 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.13+-blue.svg" alt="Python"/>
   <img src="https://img.shields.io/badge/MCP-1.0-green.svg" alt="MCP"/>
-  <img src="https://img.shields.io/badge/REST-v3.8.7-orange.svg" alt="REST"/>
+  <img src="https://img.shields.io/badge/REST-81-blue.svg" alt="REST"/>
   <img src="https://img.shields.io/badge/Tools-190-orange.svg" alt="MCP Tools"/>
-  <img src="https://img.shields.io/badge/Endpoints-77-orange.svg" alt="REST Endpoints"/>
+  <img src="https://img.shields.io/badge/Endpoints-81-blue.svg" alt="REST Endpoints"/>
   <img src="https://img.shields.io/badge/License-Apache--2.0-yellow.svg" alt="License"/>
-  <img src="https://img.shields.io/badge/Version-3.8.7-blue.svg" alt="Version"/>
+  <img src="https://img.shields.io/badge/Version-3.9.0-blue.svg" alt="Version"/>
 </p>
 
 ---
@@ -31,11 +31,14 @@ tradex-hub 是一个**本地运行的金融数据中台**，把分散在多个�
 | 能力 | 说明 |
 |------|------|
 | **统一接入** | 一套接口同时服务 MCP 客户端（AI Agent）和 HTTP 客户端（看板/前端），共享同一业务逻辑层 |
-| **多源融合** | 80 个数据类型，103 个数据源实例，按封禁风险分三梯队，自动降级 |
+| **多源融合** | 113 个数据类型，157 个数据源注册（80+ 上游），按封禁风险分梯队，自动降级 |
 | **量化计算** | 技术指标（MACD/KDJ/RSI/BOLL）、绩效指标、多因子分析、条件选股 |
 | **决策支持** | 交易信号生成、综合诊断（个股/市场/技术）、龙虎榜、涨停揭秘 |
 | **实时盯盘** | eltdx 通达信协议常驻连接，五档盘口准实时推送 |
 | **可观测性** | Prometheus 指标、监控看板、数据源健康表、端点 P95 性能、慢查询日志 |
+| **短线数据底座** | 开盘啦 KPL（涨停复盘/情绪/板块/竞价，免鉴权直连）+ 东财四池 + 15:35 收盘定稿落库 + 题材轮动 |
+| **问财自然语言** | 同花顺问财 WAP 通道（自建，rsh 解锁单请求 2000 行），涨停归因/条件筛选 |
+| **MCP 工具治理** | 工具可见性 profile（黑名单），CLI / hub 数据看板 / TradeX 看板三入口一键启停，三方同源 |
 | **接入友好** | 三层令牌桶限流 + 访问日志双写 + TypeScript / Python 双语言 SDK |
 
 ### 三层能力模型
@@ -104,7 +107,7 @@ flowchart LR
 
     subgraph Gateway["tradex-hub 网关 (端口 8000)"]
         B1["MCP Server<br/>190 个工具<br/>JSON-RPC over HTTP"]
-        B2["FastAPI REST<br/>77 个端点<br/>统一包裹响应"]
+        B2["FastAPI REST<br/>81 个端点<br/>统一包裹响应"]
         B3["监控看板<br/>/dashboard<br/>Prometheus /metrics"]
         B1 -.共享.- B2
         B2 -.共享.- B3
@@ -267,13 +270,15 @@ TDX_MCP_MIN_INTERVAL=0.8
 | 申万行业历史 | 2 | `get_sw_industry_history` / `get_sw_industry_as_of` |
 | 技术指标与绩效 | 8 | `calculate_macd` / `calculate_kdj` / `calculate_rsi` / `calculate_boll` / `calculate_performance` |
 | 决策支持 | 11 | `generate_trading_signal` / `analyze_stock_comprehensive` / `screen_stocks` / `calculate_factor_score` |
+| 开盘啦 KPL | 4 | `get_kpl_limit_up` / `get_kpl_sentiment` / `get_kpl_boards` / `get_kpl_bidding`（免鉴权直连） |
+| 短线读数与落库 | 18 | `get_shortline_emotion` / `get_shortline_themes` / `get_shortline_ladder` / `shortline_close_fetch` 等 |
 | 诊断 | 5 | `health_check` / `get_data_source_health` / `get_data_source_dashboard` |
 
 ---
 
 ## REST API
 
-77 个 REST 端点统一挂在 `/api/v1/*` 路径下，与 MCP 工具共享同一 service 层。
+81 个 REST 端点统一挂在 `/api/v1/*` 路径下，与 MCP 工具共享同一 service 层。
 
 ### 快速上手
 
@@ -363,7 +368,7 @@ if resp["code"] == 0:
 | `tradex_data_source_latency_seconds{source}` | Gauge | 数据源最近响应延迟（秒） |
 | `tradex_slow_queries_total` | Counter | 慢查询总数（超过 `TRADEX_SLOW_QUERY_MS` 默认 800ms） |
 | `tradex_gateway_uptime_seconds` | Gauge | 网关运行时长 |
-| `tradex_tools_registered` | Gauge | 已注册 MCP 工具数（186） |
+| `tradex_tools_registered` | Gauge | 已注册 MCP 工具数（190，随工具可见性 profile 变化） |
 | `tradex_cache_hits_total` / `cache_misses_total` | Counter | 缓存命中 / 未命中 |
 
 ### Dashboard 监控看板
@@ -483,7 +488,7 @@ curl http://your-host:8000/api/v1/market/overview
 ```bash
 # 健康检查
 curl http://127.0.0.1:8000/health
-# 期望: {"status":"ok","service":"tradex-mcp","tools":186}
+# 期望: {"status":"ok","service":"tradex-mcp","tools":190}
 
 # REST 端点
 curl http://127.0.0.1:8000/api/v1/ping
@@ -506,6 +511,9 @@ curl http://127.0.0.1:8000/mcp -X POST \
 | eltdx 内核 | eltdx 3.x 为 Rust 重写内核（native wheel，cp310-abi3），曾出现 pyo3 PanicException 穿透问题，v3.3.18 已加 BaseException 兜底修复 |
 | 本地部署 | 默认本地运行，不提供云服务；代理仅给 GitHub 用，国内 A 股数据源必须直连 |
 | 限流阈值 | 三层令牌桶阈值适用于通用场景；如需调整可通过环境变量 `TRADEX_RATE_LIMIT_GLOBAL` / `TRADEX_RATE_LIMIT_PER_IP` / `TRADEX_RATE_LIMIT_PER_ENDPOINT` 修改 |
+| 问财接入形态 | Web 端点被 TLS 指纹风控（浏览器环境校验），自建 WAP 通道 + hexin-v token（pywencai bundle.js 现生成）；单请求上限 2000 行 |
+| KPL 竞价历史 | 开盘啦竞价历史数据保留期极短（实测次日已查不到），交易日盘中调用价值最高 |
+| 工具可见性 | `config/mcp_tool_profile.json`（黑名单）可精简 MCP 暴露数量；文件不入 git，缺失 = 全量 190 |
 
 ---
 
@@ -539,6 +547,7 @@ cat VERSION                    # 最简：发布版本号单一真源
 
 | 版本 | 日期 | 关键里程碑 |
 |------|------|-----------|
+| **v3.9.0** | 2026-11-08 | 数据源扩容 + 工具治理：① **开盘啦 KPL 数据源**（涨停复盘/情绪/精选板块/竞价四类型，免鉴权直连，PidType 板位语义，字段位映射表 + 冒烟断言）；② **问财锁页破解**——定位缺失 `rsh` 根因，单请求 10→2000 行（涨停归因全量化）；③ KPL MCP 暴露 186→190、REST 77→81；④ **MCP 工具治理三入口**——工具可见性 profile（黑名单）+ CLI `mcp_profile.py` + TradeX 看板设置页 tab + 本数据看板面板，三方读写同一配置天然同步；⑤ 问财归因合并制（问财全量 + 同花顺补缺）；⑥ pywencai 正式入依赖；⑦ supervisor 单实例锁 O_EXCL 竞态修复。回归 1172 passed / 0 failed |
 | **v3.8.7** | 2026-11-06 | 短线数据底座（vibe-astock 借鉴批次 7 张工单）：① H1 声明式元数据（17 端点，CATALOG 三通道，缓存策略元数据驱动）；② H4 大市值名单（新浪主源+东财兜底，1h 缓存）；③ H5 全市场成交额榜（通达信盘后包 g4day 解析+实时降级）；④ H2 四池读数 8 端点（result/text/computation，口径全单测）；⑤ H3 收盘定稿落库（幂等/防覆盖/schema=2/历史回读，对抗东财约一个月保留期）；⑥ H6 题材/首板/盘面事实/题材轮动（问财→同花顺兜底）；⑦ H7 字段漂移 + 行业资金新浪第三上游 + 健康看板接入。MCP 168→186、REST 58→77 |
 | **v3.8.0** | 2026-11-01 | 依赖基线收口 + 运行时语义对齐：① 依赖下界提升（pandas≥2.2.2 / akshare≥1.20.21 / eltdx≥3.3.2），声明四方对齐生产值，uv.lock 失效雷拆除；② akshare 全局超时显式化 `set_timeout((10,30))`；③ SmartRouter 失败分级——限流轻罚不拉黑，日志区分限流/超时/硬失败；④ `eltdx_get_finance_batch` 缺失码跳过不再整批失败；⑤ 修复 `eltdx_stream.health()` 调用不存在的 `push_snapshot` 致推送统计恒空；⑥ 启动探针统一到 `tradex\.venv` 消除双环境漂移 |
 | **v3.7.0** | 2026-10-30 | 数据正确性专项：① `get_historical_price` 支持带前缀指数代码（`sh000001` 不再静默返回平安银行）并真正遵循 `start_date`/`end_date`；② `get_valuation_metrics` 修复全股票必崩（剔除非法指标名 + 删除猜测式改名兜底）；③ `get_realtime_quote` 补齐市盈率/市净率；④ `get_board_sentiment` 解除 schema 死锁，改由四池现算炸板率/连板梯队/晋级率；⑤ `get_trading_calendar` 补 sina 备源（深交所 404 时自动接管）；⑥ 新闻工具统一输出 5 字段、序列化护栏收敛到 `formatter.df_to_records`；⑦ 财务/成长/每股指标改为取最近 N 期 |
