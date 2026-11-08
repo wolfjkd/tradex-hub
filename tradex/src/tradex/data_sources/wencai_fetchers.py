@@ -12,9 +12,10 @@ WAP 通道（2026-11-07 逆向实测，对应交接文档 07/09）：
     头，form-encoded POST / GET 皆通，返回完整结构化数据；
   - hexin-v token 由 pywencai 随包的 hexin-v.bundle.js（node 执行）现生成，
     算法 0.13.1 仍有效；token 会过期，每次调用现生成；
-  - perpage 被服务端硬钳 10 条/页，且 page 参数被忽略（单会话锁页，
-    翻页参数/语义分片/getDataList perpage 覆盖均已实测无效）——单次查询
-    最多 10 行，全量需求靠消费方二级源合并（同花顺补缺）。
+  - 锁页问题已解决（2026-11-08 票3）：请求缺 `rsh`（前端本地 userId）
+    时服务端按匿名会话强制 perpage=10 且忽略 page；**带 rsh 后 perpage
+    接受至 2000**（单请求拿全量），page 参数仍被忽略但 2000 行/请求
+    已覆盖 hub 全部消费场景（涨停 33 / 题材池 / 2444 行筛选实测）。
 
 设计原则：
   - pywencai 为可选依赖（本通道只用其 token 生成），未安装时抛 ImportError
@@ -30,6 +31,7 @@ import logging
 import os
 import re
 import time
+import uuid
 from typing import Any
 
 import pandas as pd
@@ -53,7 +55,9 @@ WENCAI_UA = (
 )
 WENCAI_TIMEOUT = 30          # 单请求超时（秒）
 WENCAI_PAGE_SLEEP = 0.4      # 翻页间隔（秒），温和服务端风控
-WENCAI_MAX_PAGES = 30        # 翻页硬上限（当前服务端锁页，通常 1 页即停；未来解锁后保护至 300 行）
+WENCAI_PERPAGE = 100         # 每页行数（2026-11-08 rsh 发现后实测接受至 2000）
+WENCAI_PERPAGE_MAX = 2000    # 服务端接受的 perpage 上限（超此值被钳回）
+WENCAI_MAX_PAGES = 30        # 翻页硬上限（page 当前仍锁 1，保留以备服务端放开）
 _WENCAI_DATE_SUFFIX = re.compile(r"\[\d{8}\]$")  # 列名日期后缀，如 涨停[20261106]
 
 
@@ -89,8 +93,13 @@ def _wencai_wap_request(
     query: str,
     query_type: str,
     page: int,
+    perpage: int = WENCAI_PERPAGE,
 ) -> dict[str, Any]:
     """POST WAP 端点取一页原始应答（form-encoded）。
+
+    2026-11-08（票3）：`rsh` 是解锁 perpage 的关键字段（前端 getOldParams
+    的 be().userId，本地生成即可）；缺失时服务端按匿名会话钳 perpage=10
+    且忽略 page。
 
     Raises:
         RuntimeError: 网关返回非 0 状态码（含 -302 缺参 / 风控拒绝）。
@@ -106,7 +115,8 @@ def _wencai_wap_request(
     }
     form = {
         "question": query,
-        "perpage": "10",  # 服务端硬钳 10，传大值无效（2026-11-07 实测）
+        "rsh": uuid.uuid4().hex,  # 前端本地 userId；随机即可，解锁 perpage
+        "perpage": str(min(int(perpage), WENCAI_PERPAGE_MAX)),
         "page": page,
         "secondary_intent": query_type,
         "log_info": '{"input_type":"typewrite"}',
@@ -173,11 +183,10 @@ def fetch_wencai_query(
     hexin-v token 由 pywencai 随包 bundle.js 现生成（pywencai 未安装时抛
     ImportError 由 SmartRouter 降级）。
 
-    ⚠️ 已知限制（2026-11-07 实测）：WAP 服务端单会话锁页——perpage 硬钳 10
-    条/页，且 page 参数被忽略（重复返回第一批 10 行）。loop=True 的翻页逻辑
-    为未来服务端解锁预留（重复页首行指纹检测自动停止）；当前单次查询最多
-    返回 10 行。消费方需要全量结果时应做二级源合并（见 shortline_service
-    fetch_reasons 的问财+同花顺合并制），不要假设本函数返回全量。
+    2026-11-08（票3 强需求交付）：锁页已破——带 rsh 后单请求最多 2000 行
+    （WENCAI_PERPAGE_MAX），涨停归因等场景一次拿全，**不再依赖同花顺补缺**。
+    page 参数仍被服务端忽略（翻页循环保留：未来放开即自动生效；row_count
+    达到即停 + 重复页首行指纹防无限拼接）。
 
     Args:
         query: 自然语言查询语句，如 "2026年11月6日涨停"
@@ -209,7 +218,9 @@ def fetch_wencai_query(
         prev_first: tuple | None = None
         page = 1
         while page <= WENCAI_MAX_PAGES:
-            data = _wencai_wap_request(session, token, query, query_type, page)
+            data = _wencai_wap_request(
+                session, token, query, query_type, page, perpage=WENCAI_PERPAGE
+            )
             df_page, row_count = _extract_wap_table(data)
             if df_page.empty:
                 break

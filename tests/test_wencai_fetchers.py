@@ -233,6 +233,45 @@ class TestFetchWencaiQuery:
         assert len(df) == 1  # 忽略排序，不抛错
 
 
+class TestRshUnlock:
+    """rsh 解锁 perpage（2026-11-08 票3）：请求必须带随机 rsh，perpage 可上探。"""
+
+    def test_request_carries_rsh_and_perpage(self):
+        from tradex.data_sources.wencai_fetchers import _wencai_wap_request
+
+        captured = {}
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        resp.json.return_value = {"status_code": 0, "data": {}}
+
+        def fake_post(url, headers=None, data=None, timeout=None):
+            captured.update(data or {})
+            return resp
+
+        session = MagicMock()
+        session.post.side_effect = fake_post
+        _wencai_wap_request(session, "tok", "涨停", "stock", page=1)
+        import uuid as _uuid
+        assert len(captured.get("rsh", "")) == 32  # uuid4().hex
+        assert captured.get("perpage") == "100"
+
+    def test_perpage_clamped_to_server_max(self):
+        from tradex.data_sources.wencai_fetchers import (
+            WENCAI_PERPAGE_MAX,
+            _wencai_wap_request,
+        )
+
+        captured = {}
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        resp.json.return_value = {"status_code": 0, "data": {}}
+        session = MagicMock()
+        session.post.side_effect = lambda url, **kw: (
+            captured.update(kw.get("data") or {}), resp)[1]
+        _wencai_wap_request(session, "tok", "涨停", "stock", page=1, perpage=99999)
+        assert captured.get("perpage") == str(WENCAI_PERPAGE_MAX)
+
+
 class TestSessionDirectConnect:
     """直连铁律：WAP 会话必须禁读代理环境变量。"""
 
@@ -310,11 +349,12 @@ class TestFetchReasonsMerge:
 class TestWencaiNetworkSmoke:
     """真实联网冒烟（pytest -m network 单独跑，不进默认回归集）。"""
 
-    def test_real_query_limit_up(self):
+    def test_real_query_limit_up_full(self):
         from tradex.data_sources.wencai_fetchers import fetch_wencai_query
 
         df = fetch_wencai_query("2026年11月6日涨停")
         assert not df.empty
         assert "股票代码" in df.columns
-        # WAP 锁页限制：单次最多 10 行
-        assert len(df) <= 10
+        # 2026-11-08 rsh 解锁后：一次拿全量（2026-11-06 涨停 33 只，问财口径）
+        assert len(df) >= 30
+        assert df["股票代码"].nunique() == len(df)
