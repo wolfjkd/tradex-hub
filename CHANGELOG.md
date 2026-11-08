@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ---
 
+## [3.9.1] - 2026-11-09（零代码维护版：TradeX 全量复刻消费验证 + 数据源健康发现）
+
+> 本版无代码改动。TradeX 完成 vibe-astock 全量复刻（12 笔提交 CI 12 连绿），全程进程内消费 hub 能力，本版记录消费验证结论与发现的 hub 侧数据源问题。
+
+### 发现（待下批修复）
+- `news_data` akshare 路径 `ArrowInvalid: invalid escape sequence` 转义错误（SmartRouter 自动降级 P999 `em_news_direct` 正常出数）
+- `get_lockup_expiry`（东财 datacenter-zlsj）2026-09-23 起 P999 且实测 0 条，建议换实现或标注退役
+- `index_constituents` 路由自 2026-09-28 zealink DNS 失效后不可用；TradeX 已降级 akshare 直连中证/国证官网（`candidates.load_index_members`），可上移 hub 重建
+
+### 验证
+- 短线全家族 / K线 / 新闻 / 公告 / 宏观日历 / 业绩预告 / 龙虎榜 / 板块资金流 / 两融 / 估值 / 国债 被 TradeX 新增 6 页全量消费，接口签名零变更
+- hub 652 passed 基线未受影响（零改动未重跑）
+
 ## [3.9.0] - 2026-11-08（数据源扩容 + MCP 工具治理）
 
 ### Added
