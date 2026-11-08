@@ -70,7 +70,13 @@ def _ak():
     global _AK_TIMEOUT_APPLIED
     import akshare as ak
     if not _AK_TIMEOUT_APPLIED:
-        ak.set_timeout((10, 30))
+        # set_timeout 是 akshare 1.20.4 与「全局默认硬超时」同期引入的 API；
+        # 更旧的版本既没有此 API、也没有隐含全局超时问题，跳过即语义正确。
+        # 缺属性时绝不抬源（2026-11-08：TradeX 侧 uv.lock 锁 1.19.1，无防御会令
+        # akshare_em 源全灭、情绪复盘等下游五块全挂）。
+        set_timeout = getattr(ak, "set_timeout", None)
+        if set_timeout is not None:
+            set_timeout((10, 30))
         _AK_TIMEOUT_APPLIED = True
     return ak
 
