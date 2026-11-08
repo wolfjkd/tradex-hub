@@ -22,6 +22,9 @@ import pandas as pd
 
 logger = logging.getLogger("tradex.akshare")
 
+# 交易日全表进程内缓存（_trade_dates_recent 用，2026-11-08）
+_TRADE_DATES_CACHE: list[str] = []
+
 # v3.3.15 新增：季度末日期计算。
 # 旧实现用 f"{year}{q*3:02d}31" 硬编码 31 日，Q2(6月)/Q3(9月) 会算出
 # 20260631 / 20260931 这类**不存在的日期**，上游直接报错，而错误又被
@@ -2089,14 +2092,34 @@ def _latest_board_date(max_back_days: int = 15) -> str:
     return date_str
 
 
+def _trade_dates_recent() -> list[str]:
+    """全量交易日清单（YYYYMMDD 升序，进程内缓存）；日历工具的模块内复用版。"""
+    global _TRADE_DATES_CACHE
+    if _TRADE_DATES_CACHE:
+        return _TRADE_DATES_CACHE
+    ak = _ak()
+    df = ak.tool_trade_date_hist_sina()
+    if df is None or df.empty or "trade_date" not in df.columns:
+        raise RuntimeError("sina 交易日清单返回空或结构变化")
+    days = pd.to_datetime(df["trade_date"], errors="coerce").dropna()
+    _TRADE_DATES_CACHE = sorted(days.dt.strftime("%Y%m%d").tolist())
+    return _TRADE_DATES_CACHE
+
+
 def _latest_board_date_with_rows(
     max_back_days: int = 15,
 ) -> tuple[str, list[dict]]:
-    """同 _latest_board_date，但顺带返回涨停池已取到的行，省一次重复请求。"""
-    ak = _ak()
-    today = datetime.now()
-    for back in range(max_back_days + 1):
-        candidate = (today - timedelta(days=back)).strftime("%Y%m%d")
+    """同 _latest_board_date，但顺带返回涨停池已取到的行，省一次重复请求。
+
+    2026-11-08 修复：回溯改为只试交易日——东财对非交易日 date 不再返回
+    空表而是返回最近交易日数据（实测周日 20261108 返回 11-06 池但标签
+    写 20261108），旧逻辑 back=0 命中自然日造成日期语义污染，连累
+    collect_snapshot 的 prev_zt 封板时间注入对错位。
+    """
+    today = datetime.now().strftime("%Y%m%d")
+    trade_days = [d for d in _trade_dates_recent() if d <= today]
+    ak = _ak()  # 日历缓存命中时无需拉 akshare 模块
+    for candidate in trade_days[-max_back_days:][::-1]:
         try:
             df = ak.stock_zt_pool_em(date=candidate)
         except Exception:  # noqa: BLE001 - 单日探测失败继续回溯
@@ -2104,7 +2127,7 @@ def _latest_board_date_with_rows(
         if df is not None and not df.empty:
             return candidate, _map_pool_rows(df, "zt")
     raise RuntimeError(
-        f"近 {max_back_days} 个自然日内未取到涨停池数据，无法推断最近交易日；"
+        f"近 {max_back_days} 个交易日内未取到涨停池数据，无法推断最近交易日；"
         "请显式传 date（YYYYMMDD）"
     )
 
@@ -2454,3 +2477,45 @@ def fetch_bigcaps_em(min_mktcap_yi: float = 500, **kwargs) -> dict:
 
 
 
+
+
+# ============================================================
+# 国债收益率备源 — bond_yield_curve 第二源（2026-11-08）
+# ============================================================
+# 中债 yield_main 接口改版（JSON→JS 填充页面），主源 chinabond_official 解析
+# 出空壳已按纪律抛出；本 fetcher 走东财 datacenter（akshare bond_zh_us_rate）
+# 兜底国债曲线。仅支持 curve=国债（信用债曲线无对应上游，抛出走记账）。
+
+
+def fetch_bond_yield_cn_backup(curve: str = "国债", **kwargs) -> pd.DataFrame:
+    """中国国债收益率曲线备源（东财 datacenter，2/5/10/30 年）。
+
+    Returns:
+        DataFrame with columns: 期限, 收益率(%)——取最新有值交易日
+    """
+    if curve != "国债":
+        raise ValueError(f"备源仅支持国债曲线，收到 curve={curve}")
+    import akshare as ak
+
+    df = ak.bond_zh_us_rate()
+    if df is None or df.empty:
+        raise ValueError("bond_zh_us_rate 返回空")
+    terms = [
+        ("中国国债收益率2年", "2年"),
+        ("中国国债收益率5年", "5年"),
+        ("中国国债收益率10年", "10年"),
+        ("中国国债收益率30年", "30年"),
+    ]
+    cols_present = [c for c, _ in terms if c in df.columns]
+    valid = df.dropna(how="all", subset=cols_present)
+    if valid.empty:
+        raise ValueError("bond_zh_us_rate 全列 NaN（疑似上游改版）")
+    latest = valid.iloc[-1]  # 最新有值行；行内个别期限 NaN 则该期限不进结果
+    rows = [
+        {"期限": label, "收益率(%)": float(latest[col])}
+        for col, label in terms
+        if col in df.columns and pd.notna(latest[col])
+    ]
+    if not rows:
+        raise ValueError("bond_zh_us_rate 最新行无有效收益率")
+    return pd.DataFrame(rows)
