@@ -43,8 +43,9 @@ def _tool_profile_path() -> Path | None:
     env = os.environ.get("MCP_TOOL_PROFILE")
     if env:
         return Path(env)
-    # registry.py 位于 <root>/tradex/src/tradex/tools/ → parents[3] = 项目根
-    root = Path(__file__).resolve().parents[3]
+    # registry.py 位于 <root>/tradex/src/tradex/tools/ → parents[4] = 项目根
+    # （仓内还有一层 tradex/ 子目录，parents[3] 是它，不是根）
+    root = Path(__file__).resolve().parents[4]
     candidate = root / "config" / "mcp_tool_profile.json"
     return candidate if candidate.exists() else None
 

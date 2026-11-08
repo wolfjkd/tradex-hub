@@ -12,6 +12,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 
 @pytest.fixture(autouse=True)
+def _tool_visibility_full(monkeypatch):
+    """测试默认关闭工具可见性过滤（与根 tests/conftest.py 同款隔离），
+    保证 190 基线断言与本地 profile 文件无关。"""
+    monkeypatch.setenv("MCP_TOOL_PROFILE", "Z:/__no_such_profile__.json")
+
+
+@pytest.fixture(autouse=True)
 def _ensure_sources_registered():
     """v3.1.0：确保 SmartRouter 注册全部数据源。
 

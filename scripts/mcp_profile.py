@@ -269,20 +269,39 @@ def _gateway_tools() -> int | None:
 
 
 def _kill_gateway() -> int:
-    """杀 8000 端口网关进程（supervisor 约 5 秒自动拉起新进程）。返回杀掉的 PID 数。"""
+    """杀 8000 端口网关进程（supervisor 约 5 秒自动拉起新进程）。返回杀掉的 PID 数。
+
+    查 PID 双通道：① PowerShell Get-NetTCPConnection（主，Bash/沙箱内 netstat
+    可能被拦截误报空——AGENTS.md 已知坑）；② netstat 兜底。中文 Windows 下
+    netstat 输出 GBK，按 bytes 取回再容错解码。
+    """
+    pids: set[str] = set()
+    # 主通道：按命令行精确匹配网关进程（本机实测 Get-NetTCPConnection/netstat
+    # 对 :8000 监听都可能查不到——多进程绑定下端口表不可靠，cmdline 匹配最稳）
     try:
         out = subprocess.run(
-            ["netstat", "-ano"], capture_output=True, timeout=15
+            ["powershell", "-NoProfile", "-Command",
+             "Get-CimInstance Win32_Process -Filter \"Name='pythonw.exe' OR Name='python.exe'\" | "
+             "Where-Object {$_.CommandLine -like '*-m tradex --http*'} | "
+             "Select-Object -ExpandProperty ProcessId"],
+            capture_output=True, timeout=25,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         ).stdout.decode("utf-8", errors="replace")
+        pids |= {l.strip() for l in out.splitlines() if l.strip().isdigit()}
     except Exception as e:  # noqa: BLE001
-        print(f"⚠️ netstat 失败：{e}")
-        return 0
-    pids: set[str] = set()
-    for line in out.splitlines():
-        if ":8000" in line and "LISTENING" in line:
-            parts = line.split()
-            if len(parts) >= 5 and parts[1].endswith(":8000"):
-                pids.add(parts[-1])
+        print(f"  PowerShell 查网关进程失败（{e}），转 netstat 兜底")
+    if not pids:
+        try:
+            out = subprocess.run(
+                ["netstat", "-ano"], capture_output=True, timeout=15
+            ).stdout.decode("utf-8", errors="replace")
+            for line in out.splitlines():
+                if ":8000" in line and "LISTENING" in line:
+                    parts = line.split()
+                    if len(parts) >= 5 and parts[1].endswith(":8000"):
+                        pids.add(parts[-1])
+        except Exception as e:  # noqa: BLE001
+            print(f"⚠️ netstat 也失败：{e}")
     for pid in pids:
         subprocess.run(
             ["taskkill", "/PID", pid, "/F"],
