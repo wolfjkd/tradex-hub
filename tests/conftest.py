@@ -12,6 +12,14 @@ from unittest.mock import patch, MagicMock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tradex", "src"))
 
 
+@pytest.fixture(autouse=True)
+def _tool_visibility_full(monkeypatch):
+    """测试默认关闭工具可见性过滤（MCP_TOOL_PROFILE 指向不存在路径），
+    保证 test_server/test_tools_total_count 等 190 基线与本地 profile 无关；
+    可见性专项测试自行覆盖此 env。"""
+    monkeypatch.setenv("MCP_TOOL_PROFILE", "Z:/__no_such_profile__.json")
+
+
 @pytest.fixture
 def mock_akshare(monkeypatch):
     """Mock akshare 模块（避免真实网络请求）。"""
