@@ -97,10 +97,16 @@ def _clear_cache():
 class TestCompanyService:
     """company_service 函数返回结构。"""
 
+    pytestmark = pytest.mark.network  # 真连上游源，离线全量 -m "not network" 排除
+
     def test_search_stock_returns_matches_list(self):
         from tradex.service import company_service
         _clear_cache()
-        result = company_service.search_stock(keyword="茅台")
+        try:
+            result = company_service.search_stock(keyword="茅台")
+        except RuntimeError as e:
+            # 上游源不可用（问财缺 pywencai / 东财超时）≠ 契约失败，skip 如实留痕
+            pytest.skip(f"上游源不可用：{e}")
         assert isinstance(result, dict)
         assert "matches" in result
 
@@ -136,6 +142,8 @@ class TestCompanyService:
 class TestFinancialService:
     """financial_service 三大报表 + 5 个指标函数。"""
 
+    pytestmark = pytest.mark.network  # 真连上游源，离线全量 -m "not network" 排除
+
     def test_get_income_statement_returns_periods(self):
         from tradex.service import financial_service
         _clear_cache()
@@ -169,10 +177,11 @@ class TestFinancialService:
         _clear_cache()
         try:
             result = financial_service.get_growth_rates(symbol="600519")
-            assert isinstance(result, dict)
-            assert "growth" in result
-        except ValueError:
-            pass
+        except RuntimeError as e:
+            # SmartRouter 全源失败（akshare indicator 超时 / sina 备源不支持）≠ 契约失败，skip 留痕
+            pytest.skip(f"上游源不可用：{e}")
+        assert isinstance(result, dict)
+        assert "growth" in result
 
     def test_get_per_share_data_returns_per_share(self):
         from tradex.service import financial_service
@@ -211,6 +220,7 @@ class TestFinancialService:
 class TestCompanyRestEndpoints:
     """/api/v1/company/* 端点。"""
 
+    @pytest.mark.network
     def test_search_returns_envelope(self):
         app = _build_min_app()
         client = TestClient(app)
@@ -226,6 +236,7 @@ class TestCompanyRestEndpoints:
         body = resp.json()
         assert body["code"] == ERR_BAD_REQUEST
 
+    @pytest.mark.network
     def test_info_valid_returns_envelope(self):
         app = _build_min_app()
         client = TestClient(app)
@@ -233,6 +244,7 @@ class TestCompanyRestEndpoints:
         body = resp.json()
         assert "code" in body
 
+    @pytest.mark.network
     def test_profile_valid_returns_envelope(self):
         app = _build_min_app()
         client = TestClient(app)
@@ -244,6 +256,7 @@ class TestCompanyRestEndpoints:
 class TestFinancialRestEndpoints:
     """/api/v1/financial/* 端点。"""
 
+    @pytest.mark.network
     def test_income_valid_returns_envelope(self):
         app = _build_min_app()
         client = TestClient(app)
@@ -259,6 +272,7 @@ class TestFinancialRestEndpoints:
         body = resp.json()
         assert body["code"] == ERR_BAD_REQUEST
 
+    @pytest.mark.network
     def test_balance_valid_returns_envelope(self):
         app = _build_min_app()
         client = TestClient(app)
@@ -266,6 +280,7 @@ class TestFinancialRestEndpoints:
         body = resp.json()
         assert "code" in body
 
+    @pytest.mark.network
     def test_cashflow_valid_returns_envelope(self):
         app = _build_min_app()
         client = TestClient(app)
@@ -273,6 +288,7 @@ class TestFinancialRestEndpoints:
         body = resp.json()
         assert "code" in body
 
+    @pytest.mark.network
     def test_indicators_valid_returns_envelope(self):
         app = _build_min_app()
         client = TestClient(app)
@@ -302,6 +318,7 @@ class TestCompanyFinancialMcpContract:
         from tradex.tools import financial_stmt
         assert hasattr(financial_stmt, "financial_service")
 
+    @pytest.mark.network
     def test_company_contract_fields(self):
         """company_service 字段名（matches/info/segments/industry）三处一致。"""
         from tradex.service import company_service
@@ -313,6 +330,7 @@ class TestCompanyFinancialMcpContract:
         i = company_service.get_company_info(symbol="600519")
         assert "info" in i or "symbol" in i
 
+    @pytest.mark.network
     def test_financial_contract_fields(self):
         """financial_service 字段名（periods/indicators/growth/per_share/segments）三处一致。"""
         from tradex.service import financial_service

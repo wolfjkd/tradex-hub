@@ -48,8 +48,18 @@ class TestPrevTradingDay:
 
 class TestLatestBoardDate:
     def test_skips_non_trade_days(self):
-        """2026-11-08 是周日：即使东财对周日返回数据，也必须落到 20261106。"""
+        """固定「今天=2026-11-08 周日」：即使东财对周日返回数据，也必须落到 20261106。
+
+        原实现依赖真实运行日（datetime.now），2026-11-09 周一后必挂——
+        patch akf.datetime 与运行日解耦（同 TradeX 0be6b58 修 test_etf_scan 的口径）。"""
+        from datetime import datetime as _real_dt
+
         from tradex.data_sources import akshare_fetchers as akf
+
+        class _FixedDT(_real_dt):
+            @classmethod
+            def now(cls, tz=None):  # noqa: ARG003 - 兼容签名
+                return _real_dt(2026, 11, 8, 10, 0, 0)  # 周日
 
         fake_ak = _fake_ak()
         # 模拟东财新行为：非交易日 date 也返回最近交易日数据（不空）
@@ -59,8 +69,9 @@ class TestLatestBoardDate:
         with patch.object(akf, "_ak", return_value=fake_ak), patch.object(
             akf, "_TRADE_DATES_CACHE", []
         ):
-            # 强制重建缓存（用假日历）
-            with patch("tradex.data_sources.akshare_fetchers._TRADE_DATES_CACHE", []):
+            # 强制重建缓存（用假日历），并把「今天」钉在周日
+            with patch("tradex.data_sources.akshare_fetchers._TRADE_DATES_CACHE", []), \
+                 patch.object(akf, "datetime", _FixedDT):
                 date_str, rows = akf._latest_board_date_with_rows()
         assert date_str == "20261106", f"应落在最近交易日，实得 {date_str}"
         assert rows
