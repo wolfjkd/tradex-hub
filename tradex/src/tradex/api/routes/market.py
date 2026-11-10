@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
+from ._helpers import serve_envelope
 
 from ...api.schemas import (
     ERR_BAD_REQUEST,
@@ -35,28 +36,12 @@ router = APIRouter(prefix="/market", tags=["market"])
 @router.get("/overview", response_model=Envelope[dict])
 def overview() -> Envelope[dict]:
     """A股主要指数实时行情快照。"""
-    try:
-        return envelope_ok(market_service.get_market_overview())
-    except Exception as e:
-        raise HTTPException(
-            status_code=502,
-            detail=f"数据源不可达: {e}",
-            headers={"X-ErrCode": str(ERR_DATA_SOURCE_UNREACHABLE)},
-        )
-
+    return serve_envelope(lambda: market_service.get_market_overview())
 
 @router.get("/global", response_model=Envelope[dict])
 def global_quote(category: str = Query("", description="可选分类过滤：美股指数/热门美股/亚太指数/韩股/外汇")) -> Envelope[dict]:
     """全球市场行情快照。"""
-    try:
-        return envelope_ok(market_service.get_global_market_quote(category=category))
-    except Exception as e:
-        raise HTTPException(
-            status_code=502,
-            detail=f"数据源不可达: {e}",
-            headers={"X-ErrCode": str(ERR_DATA_SOURCE_UNREACHABLE)},
-        )
-
+    return serve_envelope(lambda: market_service.get_global_market_quote(category=category))
 
 @router.get("/limit-up-down", response_model=Envelope[dict])
 def limit_up_down(
@@ -69,26 +54,11 @@ def limit_up_down(
             detail="direction 只能是 '涨停' 或 '跌停'",
             headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
         )
-    try:
-        return envelope_ok(market_service.get_limit_up_down(direction=direction))
-    except Exception as e:
-        raise HTTPException(
-            status_code=502,
-            detail=f"数据源不可达: {e}",
-            headers={"X-ErrCode": str(ERR_DATA_SOURCE_UNREACHABLE)},
-        )
-
+    return serve_envelope(lambda: market_service.get_limit_up_down(direction=direction))
 
 @router.get("/dragon-tiger", response_model=Envelope[dict])
 def dragon_tiger(
     num_days: int = Query(5, ge=1, le=60, description="最近几个交易日，默认 5"),
 ) -> Envelope[dict]:
     """龙虎榜数据（机构和游资活跃买卖记录）。"""
-    try:
-        return envelope_ok(market_service.get_dragon_tiger(num_days=num_days))
-    except Exception as e:
-        raise HTTPException(
-            status_code=502,
-            detail=f"数据源不可达: {e}",
-            headers={"X-ErrCode": str(ERR_DATA_SOURCE_UNREACHABLE)},
-        )
+    return serve_envelope(lambda: market_service.get_dragon_tiger(num_days=num_days))

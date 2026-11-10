@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
+from ._helpers import serve_envelope, validate_symbol
 
 from ...api.schemas import (
     ERR_BAD_REQUEST,
@@ -27,65 +28,33 @@ from ...service import macro_service, sw_industry_service
 router = APIRouter(prefix="/macro", tags=["macro"])
 
 
-def _validate_symbol(symbol: str) -> None:
-    if not (len(symbol) == 6 and symbol.isdigit()):
-        raise HTTPException(
-            status_code=400,
-            detail=f"symbol 必须是 6 位数字代码，收到: {symbol}",
-            headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
-        )
-
-
-def _data_source_error(e: Exception):
-    return HTTPException(
-        status_code=502, detail=f"数据源不可达: {e}",
-        headers={"X-ErrCode": str(ERR_DATA_SOURCE_UNREACHABLE)},
-    )
-
-
 @router.get("/pmi", response_model=Envelope[dict])
 def pmi() -> Envelope[dict]:
     """统计局 PMI。"""
-    try:
-        return envelope_ok(macro_service.get_pmi())
-    except Exception as e:
-        raise _data_source_error(e)
-
+    return serve_envelope(lambda: macro_service.get_pmi())
 
 @router.get("/bond-yield-curve", response_model=Envelope[dict])
 def bond_yield_curve(
     curve: str = Query("国债", description="曲线类型：国债 / 国开债 / 农发债 等"),
 ) -> Envelope[dict]:
     """中债收益率曲线。"""
-    try:
-        return envelope_ok(macro_service.get_bond_yield_curve(curve=curve))
-    except Exception as e:
-        raise _data_source_error(e)
-
+    return serve_envelope(lambda: macro_service.get_bond_yield_curve(curve=curve))
 
 @router.get("/index-valuation", response_model=Envelope[dict])
 def index_valuation(
     index_code: str = Query("000300", description="指数代码，如 000300 沪深300"),
 ) -> Envelope[dict]:
     """中证指数官方估值（PE + 股息率）。"""
-    try:
-        return envelope_ok(macro_service.get_index_valuation(index_code=index_code))
-    except Exception as e:
-        raise _data_source_error(e)
-
+    return serve_envelope(lambda: macro_service.get_index_valuation(index_code=index_code))
 
 @router.get("/sw-industry-history", response_model=Envelope[dict])
 def sw_industry_history(
     force_refresh: bool = Query(False, description="强制刷新缓存"),
 ) -> Envelope[dict]:
     """申万行业分类变迁史（首次下载会耗时，后续走内存缓存）。"""
-    try:
-        return envelope_ok(sw_industry_service.get_sw_industry_history(
+    return serve_envelope(lambda: sw_industry_service.get_sw_industry_history(
             force_refresh=force_refresh
         ))
-    except Exception as e:
-        raise _data_source_error(e)
-
 
 @router.get("/sw-industry-as-of", response_model=Envelope[dict])
 def sw_industry_as_of(
@@ -93,10 +62,7 @@ def sw_industry_as_of(
     date: str = Query("", description="查询日期 YYYY-MM-DD，默认今天"),
 ) -> Envelope[dict]:
     """按 (code, date) 查询申万行业归属（历史回测用）。"""
-    _validate_symbol(symbol)
-    try:
-        return envelope_ok(sw_industry_service.get_sw_industry_as_of(
+    validate_symbol(symbol)
+    return serve_envelope(lambda: sw_industry_service.get_sw_industry_as_of(
             symbol=symbol, date=date
         ))
-    except Exception as e:
-        raise _data_source_error(e)

@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
+from ._helpers import serve_envelope
 
 from ...api.schemas import (
     ERR_BAD_REQUEST,
@@ -40,24 +41,9 @@ def flow(
             detail=f"symbol 必须是 6 位数字代码，收到: {symbol}",
             headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
         )
-    try:
-        return envelope_ok(market_service.get_money_flow(symbol=symbol))
-    except Exception as e:
-        raise HTTPException(
-            status_code=502,
-            detail=f"数据源不可达: {e}",
-            headers={"X-ErrCode": str(ERR_DATA_SOURCE_UNREACHABLE)},
-        )
-
+    return serve_envelope(lambda: market_service.get_money_flow(symbol=symbol))
 
 @router.get("/northbound", response_model=Envelope[dict])
 def northbound() -> Envelope[dict]:
     """北向资金（沪股通+深股通）净流入历史数据。"""
-    try:
-        return envelope_ok(market_service.get_north_bound_flow())
-    except Exception as e:
-        raise HTTPException(
-            status_code=502,
-            detail=f"数据源不可达: {e}",
-            headers={"X-ErrCode": str(ERR_DATA_SOURCE_UNREACHABLE)},
-        )
+    return serve_envelope(lambda: market_service.get_north_bound_flow())

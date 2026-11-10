@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
+from ._helpers import serve_envelope_400, serve_envelope
 
 from ...api.schemas import (
     ERR_BAD_REQUEST,
@@ -29,15 +30,7 @@ def search(
     keyword: str = Query(..., min_length=1, description="搜索关键词（名称或代码）"),
 ) -> Envelope[dict]:
     """模糊搜索 A 股股票。"""
-    try:
-        return envelope_ok(company_service.search_stock(keyword=keyword))
-    except Exception as e:
-        raise HTTPException(
-            status_code=502,
-            detail=f"数据源不可达: {e}",
-            headers={"X-ErrCode": str(ERR_DATA_SOURCE_UNREACHABLE)},
-        )
-
+    return serve_envelope(lambda: company_service.search_stock(keyword=keyword))
 
 @router.get("/info", response_model=Envelope[dict])
 def info(
@@ -50,19 +43,7 @@ def info(
             detail=f"symbol 必须是 6 位数字代码，收到: {symbol}",
             headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
         )
-    try:
-        return envelope_ok(company_service.get_company_info(symbol=symbol))
-    except ValueError as e:
-        raise HTTPException(
-            status_code=400, detail=str(e),
-            headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=502, detail=f"数据源不可达: {e}",
-            headers={"X-ErrCode": str(ERR_DATA_SOURCE_UNREACHABLE)},
-        )
-
+    return serve_envelope_400(lambda: company_service.get_company_info(symbol=symbol))
 
 @router.get("/profile", response_model=Envelope[dict])
 def profile(
@@ -74,14 +55,7 @@ def profile(
             status_code=400, detail=f"symbol 必须是 6 位数字代码，收到: {symbol}",
             headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
         )
-    try:
-        return envelope_ok(company_service.get_company_profile(symbol=symbol))
-    except Exception as e:
-        raise HTTPException(
-            status_code=502, detail=f"数据源不可达: {e}",
-            headers={"X-ErrCode": str(ERR_DATA_SOURCE_UNREACHABLE)},
-        )
-
+    return serve_envelope(lambda: company_service.get_company_profile(symbol=symbol))
 
 @router.get("/competitors", response_model=Envelope[dict])
 def competitors(
@@ -94,15 +68,4 @@ def competitors(
             status_code=400, detail=f"symbol 必须是 6 位数字代码，收到: {symbol}",
             headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
         )
-    try:
-        return envelope_ok(company_service.get_competitors(symbol=symbol, industry=industry))
-    except ValueError as e:
-        raise HTTPException(
-            status_code=400, detail=str(e),
-            headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=502, detail=f"数据源不可达: {e}",
-            headers={"X-ErrCode": str(ERR_DATA_SOURCE_UNREACHABLE)},
-        )
+    return serve_envelope_400(lambda: company_service.get_competitors(symbol=symbol, industry=industry))

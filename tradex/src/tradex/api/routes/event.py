@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
+from ._helpers import serve_envelope, validate_symbol
 
 from ...api.schemas import (
     ERR_BAD_REQUEST,
@@ -26,22 +27,6 @@ from ...service import event_service
 router = APIRouter(prefix="/event", tags=["event"])
 
 
-def _validate_symbol(symbol: str) -> None:
-    if not (len(symbol) == 6 and symbol.isdigit()):
-        raise HTTPException(
-            status_code=400,
-            detail=f"symbol 必须是 6 位数字代码，收到: {symbol}",
-            headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
-        )
-
-
-def _data_source_error(e: Exception):
-    return HTTPException(
-        status_code=502, detail=f"数据源不可达: {e}",
-        headers={"X-ErrCode": str(ERR_DATA_SOURCE_UNREACHABLE)},
-    )
-
-
 @router.get("/earnings-forecast", response_model=Envelope[dict])
 def earnings_forecast(
     symbol: str = Query(..., min_length=6, max_length=6),
@@ -49,14 +34,10 @@ def earnings_forecast(
     limit: int = Query(50, ge=1, le=200),
 ) -> Envelope[dict]:
     """业绩预告。"""
-    _validate_symbol(symbol)
-    try:
-        return envelope_ok(event_service.get_earnings_forecast(
+    validate_symbol(symbol)
+    return serve_envelope(lambda: event_service.get_earnings_forecast(
             symbol=symbol, report_date=report_date, limit=limit
         ))
-    except Exception as e:
-        raise _data_source_error(e)
-
 
 @router.get("/institution-survey", response_model=Envelope[dict])
 def institution_survey(
@@ -66,14 +47,10 @@ def institution_survey(
     limit: int = Query(50, ge=1, le=200),
 ) -> Envelope[dict]:
     """机构调研。"""
-    _validate_symbol(symbol)
-    try:
-        return envelope_ok(event_service.get_institution_survey(
+    validate_symbol(symbol)
+    return serve_envelope(lambda: event_service.get_institution_survey(
             symbol=symbol, start_date=start_date, end_date=end_date, limit=limit
         ))
-    except Exception as e:
-        raise _data_source_error(e)
-
 
 @router.get("/holder-trades", response_model=Envelope[dict])
 def holder_trades(
@@ -84,15 +61,11 @@ def holder_trades(
     limit: int = Query(50, ge=1, le=200),
 ) -> Envelope[dict]:
     """股东增减持。"""
-    _validate_symbol(symbol)
-    try:
-        return envelope_ok(event_service.get_holder_trades(
+    validate_symbol(symbol)
+    return serve_envelope(lambda: event_service.get_holder_trades(
             symbol=symbol, direction=direction,
             start_date=start_date, end_date=end_date, limit=limit
         ))
-    except Exception as e:
-        raise _data_source_error(e)
-
 
 @router.get("/share-buyback", response_model=Envelope[dict])
 def share_buyback(
@@ -101,14 +74,10 @@ def share_buyback(
     limit: int = Query(50, ge=1, le=200),
 ) -> Envelope[dict]:
     """股票回购。"""
-    _validate_symbol(symbol)
-    try:
-        return envelope_ok(event_service.get_share_buyback(
+    validate_symbol(symbol)
+    return serve_envelope(lambda: event_service.get_share_buyback(
             symbol=symbol, progress=progress, limit=limit
         ))
-    except Exception as e:
-        raise _data_source_error(e)
-
 
 @router.get("/equity-pledge", response_model=Envelope[dict])
 def equity_pledge(
@@ -117,14 +86,10 @@ def equity_pledge(
     limit: int = Query(50, ge=1, le=200),
 ) -> Envelope[dict]:
     """股权质押。"""
-    _validate_symbol(symbol)
-    try:
-        return envelope_ok(event_service.get_equity_pledge(
+    validate_symbol(symbol)
+    return serve_envelope(lambda: event_service.get_equity_pledge(
             symbol=symbol, date=date, limit=limit
         ))
-    except Exception as e:
-        raise _data_source_error(e)
-
 
 @router.get("/ipo-calendar", response_model=Envelope[dict])
 def ipo_calendar(
@@ -132,9 +97,6 @@ def ipo_calendar(
     limit: int = Query(50, ge=1, le=200),
 ) -> Envelope[dict]:
     """新股申购日历。"""
-    try:
-        return envelope_ok(event_service.get_ipo_calendar(
+    return serve_envelope(lambda: event_service.get_ipo_calendar(
             days_ahead=days_ahead, limit=limit
         ))
-    except Exception as e:
-        raise _data_source_error(e)

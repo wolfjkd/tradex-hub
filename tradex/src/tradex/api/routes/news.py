@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
+from ._helpers import serve_envelope
 
 from ...api.schemas import (
     ERR_BAD_REQUEST,
@@ -33,14 +34,7 @@ def stock(
             status_code=400, detail=f"symbol 必须是 6 位数字代码，收到: {symbol}",
             headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
         )
-    try:
-        return envelope_ok(news_service.get_stock_news(symbol=symbol))
-    except Exception as e:
-        raise HTTPException(
-            status_code=502, detail=f"数据源不可达: {e}",
-            headers={"X-ErrCode": str(ERR_DATA_SOURCE_UNREACHABLE)},
-        )
-
+    return serve_envelope(lambda: news_service.get_stock_news(symbol=symbol))
 
 @router.get("/announcements", response_model=Envelope[dict])
 def announcements(
@@ -53,16 +47,7 @@ def announcements(
             status_code=400, detail=f"symbol 必须是 6 位数字代码，收到: {symbol}",
             headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
         )
-    try:
-        return envelope_ok(
-            news_service.get_company_announcements(symbol=symbol, num_results=num_results)
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=502, detail=f"数据源不可达: {e}",
-            headers={"X-ErrCode": str(ERR_DATA_SOURCE_UNREACHABLE)},
-        )
-
+    return serve_envelope(lambda: news_service.get_company_announcements(symbol=symbol, num_results=num_results))
 
 @router.get("/search", response_model=Envelope[dict])
 def search(
@@ -76,12 +61,4 @@ def search(
             status_code=400, detail=f"symbol 必须是 6 位数字代码，收到: {symbol}",
             headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
         )
-    try:
-        return envelope_ok(
-            news_service.search_news(keyword=keyword, symbol=symbol, num_results=num_results)
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=502, detail=f"数据源不可达: {e}",
-            headers={"X-ErrCode": str(ERR_DATA_SOURCE_UNREACHABLE)},
-        )
+    return serve_envelope(lambda: news_service.search_news(keyword=keyword, symbol=symbol, num_results=num_results))

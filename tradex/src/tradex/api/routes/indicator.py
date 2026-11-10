@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
 
+from ._helpers import validate_symbol
+
 from ...api.schemas import (
     ERR_BAD_REQUEST,
     ERR_DATA_SOURCE_UNREACHABLE,
@@ -26,15 +28,6 @@ from ...api.schemas import (
 from ...service import indicator_service
 
 router = APIRouter(prefix="/indicator", tags=["indicator"])
-
-
-def _validate_symbol(symbol: str) -> None:
-    if not (len(symbol) == 6 and symbol.isdigit()):
-        raise HTTPException(
-            status_code=400,
-            detail=f"symbol 必须是 6 位数字代码，收到: {symbol}",
-            headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
-        )
 
 
 def _validate_period(period: str) -> None:
@@ -55,7 +48,7 @@ def macd(
     signal_period: int = Query(9, ge=2, le=50),
 ) -> Envelope[dict]:
     """MACD 指标（按 symbol 自动取 K 线计算）。"""
-    _validate_symbol(symbol)
+    validate_symbol(symbol)
     _validate_period(period)
     try:
         return envelope_ok(indicator_service.calc_macd_by_symbol(
@@ -80,7 +73,7 @@ def kdj(
     d_period: int = Query(3, ge=2, le=10),
 ) -> Envelope[dict]:
     """KDJ 指标。"""
-    _validate_symbol(symbol)
+    validate_symbol(symbol)
     _validate_period(period)
     try:
         return envelope_ok(indicator_service.calc_kdj_by_symbol(
@@ -102,7 +95,7 @@ def rsi(
     rsi_period: int = Query(14, ge=2, le=50),
 ) -> Envelope[dict]:
     """RSI 指标。"""
-    _validate_symbol(symbol)
+    validate_symbol(symbol)
     _validate_period(period)
     try:
         return envelope_ok(indicator_service.calc_rsi_by_symbol(
@@ -124,7 +117,7 @@ def boll(
     k: float = Query(2.0, ge=0.5, le=5.0),
 ) -> Envelope[dict]:
     """BOLL 布林带。"""
-    _validate_symbol(symbol)
+    validate_symbol(symbol)
     _validate_period(period)
     try:
         return envelope_ok(indicator_service.calc_boll_by_symbol(

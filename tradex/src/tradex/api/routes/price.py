@@ -15,6 +15,7 @@ service 层异常（含 RuntimeError 包装后的原 panic）一律转 502 + cod
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
+from ._helpers import serve_envelope_400, serve_envelope
 
 from ...api.schemas import (
     ERR_BAD_REQUEST,
@@ -32,23 +33,7 @@ def quote(
     symbol: str = Query(..., min_length=2, description="A 股 6 位代码（600519）或全球代码（usDJI）"),
 ) -> Envelope[dict]:
     """实时报价。"""
-    try:
-        return envelope_ok(price_service.get_realtime_quote(symbol=symbol))
-    except ValueError as e:
-        # 业务级错误（如代码未找到） → 400
-        raise HTTPException(
-            status_code=400,
-            detail=str(e),
-            headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
-        )
-    except Exception as e:
-        # 数据源异常（含 panic 转 RuntimeError） → 502
-        raise HTTPException(
-            status_code=502,
-            detail=f"数据源不可达: {e}",
-            headers={"X-ErrCode": str(ERR_DATA_SOURCE_UNREACHABLE)},
-        )
-
+    return serve_envelope_400(lambda: price_service.get_realtime_quote(symbol=symbol))
 
 @router.get("/kline", response_model=Envelope[dict])
 def kline(
@@ -71,23 +56,13 @@ def kline(
             detail=f"symbol 必须是 6 位数字代码，收到: {symbol}",
             headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
         )
-    try:
-        return envelope_ok(
-            price_service.get_historical_price(
+    return serve_envelope(lambda: price_service.get_historical_price(
                 symbol=symbol,
                 period=period,
                 start_date=start_date,
                 end_date=end_date,
                 adjust=adjust,
-            )
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=502,
-            detail=f"数据源不可达: {e}",
-            headers={"X-ErrCode": str(ERR_DATA_SOURCE_UNREACHABLE)},
-        )
-
+            ))
 
 @router.get("/intraday", response_model=Envelope[dict])
 def intraday(
@@ -100,17 +75,4 @@ def intraday(
             detail=f"symbol 必须是 6 位数字代码，收到: {symbol}",
             headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
         )
-    try:
-        return envelope_ok(price_service.get_intraday_data(symbol=symbol))
-    except ValueError as e:
-        raise HTTPException(
-            status_code=400,
-            detail=str(e),
-            headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=502,
-            detail=f"数据源不可达: {e}",
-            headers={"X-ErrCode": str(ERR_DATA_SOURCE_UNREACHABLE)},
-        )
+    return serve_envelope_400(lambda: price_service.get_intraday_data(symbol=symbol))

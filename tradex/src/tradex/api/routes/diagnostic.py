@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
+from ._helpers import data_source_error
 
 from ...api.schemas import (
     ERR_BAD_REQUEST,
@@ -26,13 +27,6 @@ from ...api.schemas import (
 from ...service import diagnostic_service
 
 router = APIRouter(prefix="/diagnostic", tags=["diagnostic"])
-
-
-def _data_source_error(e: Exception):
-    return HTTPException(
-        status_code=502, detail=f"数据源不可达: {e}",
-        headers={"X-ErrCode": str(ERR_DATA_SOURCE_UNREACHABLE)},
-    )
 
 
 @router.get("/stock", response_model=Envelope[dict])
@@ -50,7 +44,7 @@ async def stock(
         data = await diagnostic_service.analyze_stock_comprehensive(symbol)
         return envelope_ok(data)
     except Exception as e:
-        raise _data_source_error(e)
+        raise data_source_error(e)
 
 
 @router.get("/market", response_model=Envelope[dict])
@@ -60,7 +54,7 @@ async def market() -> Envelope[dict]:
         data = await diagnostic_service.analyze_market_overview()
         return envelope_ok(data)
     except Exception as e:
-        raise _data_source_error(e)
+        raise data_source_error(e)
 
 
 @router.get("/technical", response_model=Envelope[dict])
@@ -88,4 +82,4 @@ async def technical(
     except HTTPException:
         raise
     except Exception as e:
-        raise _data_source_error(e)
+        raise data_source_error(e)

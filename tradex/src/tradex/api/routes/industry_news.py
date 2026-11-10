@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
+from ._helpers import data_source_error, serve_envelope
 
 from ...api.schemas import (
     ERR_BAD_REQUEST,
@@ -31,13 +32,6 @@ _VALID_TRACKS = {
     "ai", "semi", "robot", "auto", "energy", "bio",
     "space", "security", "tech", "consumer", "macro", "science",
 }
-
-
-def _data_source_error(e: Exception):
-    return HTTPException(
-        status_code=502, detail=f"数据源不可达: {e}",
-        headers={"X-ErrCode": str(ERR_DATA_SOURCE_UNREACHABLE)},
-    )
 
 
 @router.get("/get", response_model=Envelope[dict])
@@ -69,17 +63,14 @@ def get_news(
             "source": src, "count": len(records),
         })
     except Exception as e:
-        raise _data_source_error(e)
+        raise data_source_error(e)
 
 
 @router.get("/tracks", response_model=Envelope[dict])
 def tracks() -> Envelope[dict]:
     """列出所有可用赛道 + 当前冻结版源总数。"""
-    try:
-        return envelope_ok({
+    return serve_envelope(lambda: {
             "tracks": list_tracks(),
             "source_count": get_source_count(),
             "frozen_at": "2026-09-23",
         })
-    except Exception as e:
-        raise _data_source_error(e)
