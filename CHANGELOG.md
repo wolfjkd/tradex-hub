@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ---
 
+## [3.9.4] - 2026-11-11（审计批次 D：环境护栏，无人值守施工）
+
+> 依据 [[审计-2026-11-10-v3.9.1代码审核与架构巡检]] 复盘节（#1 护栏缺失 / #2 导航缺失 / #3 发版流程缺口）。
+
+### 代码变更
+- 仓内新增 `AGENTS.md` 一页：环境口径（venv / 回归命令 / uv）+ 11 条硬约定（依赖双处同步、计数断言护栏、跨仓消费仓 grep、network 标、`_ak()` 防御、哨兵异常、缓存边界、visibility_catalog、REST 样板、信封契约、注册表数据化）+ 文档指针（承载 TradeX 复盘项⑥）
+- 确定性检查脚本三件 + 断言一件（本仓无 CI，此即 CI 替代）：
+  - `scripts/check_dep_sync.py`：pyproject↔requirements 包名集合对比——**实抓并修复 `fastapi` 漏声明**（http 组其余三件都在、唯独它缺，硬违规#1 同形态真发现）
+  - `scripts/check_readme_counts.py`：README 计数 vs 实跑（MCP 191 / REST 82 / 类型 115 / 注册 160）——实抓并修复 L34「114 类型/159 注册」被批次 B 甩下 + 图内 78/102 陈旧计数
+  - `tests/test_rest_count.py`：REST 端点数纳入计数断言家族（OpenAPI /api/v1 路径数 == 82）
+  - `scripts/check_changelog_claims.py`：版本段措辞 vs git log 史实（勘误语境识别、lockfile-only 不算代码提交），`--selftest` 内置 v3.9.1 失实样例实证报错
+
+### 验证
+- 四件检查全绿；全量回归 1227 passed / 5 skipped / 36 deselected
+
+---
+
+## [3.9.3] - 2026-11-11（审计批次 C：架构深化五候选全做，无人值守施工）
+
+> C1→C2→C3→C4→C5 严格串行（防冲突按 14 号排产内容序）。纯重构行为不变，全量回归不破为验收硬标准。
+
+### 代码变更
+- **C1** shortline 信封五抄收拢：`_serve`/`get_cycle`/`_themes_envelope`/`get_theme_rotation`/`get_history` 共 5 份 25 行信封 dict 收拢为 `_build_envelope` 单点（shortline.history 无 compliance/cache 段原状保留）
+- **C2** registry 注册表数据化：160 条逐条 `router.register` 转模块级 `_SOURCE_TABLE` 五元组声明表，顶部手抄矩阵 docstring 删除（双份知识合一），160 条历史裁决注释随行内联；改前/改后 `_sources` 快照逐条一致（160 注册/115 类型）
+- **C3** 东财 RPT_LIFT_STAGE 字段映射收敛单点 `_lockup_row`：JSON/文本版四处取值合一——顺带修复批次 A 漏改面（文本版仍读旧字段名=假 0 空壳，红回路 2 测试锁死）
+- **C4（Top 候选）** 缓存序列化边界吞进 `TwoLevelCache.get_or_set`：9 个 service 文件 35 处「get→isinstance 判型 loads→compute→set」收敛（降级出口语义保留）；批次 A 的 `_TRADE_DATES_CACHE` 手工日戳并入统一边界（键含获取日期跨天/跨年自然重拉 + TTL 到午夜）；tools 层 df_to_json 字符串缓存契约不走本接口
+- **C5** REST 错误样板收拢 `routes/_helpers.py`：`serve_envelope`（B 形全→502）/`serve_envelope_400`（A 形 ValueError→400）双入口，10 个 route 文件 41 处收敛、本地 helper 定义 6 份删除；kpl ERR_INTERNAL 头怪癖等特例保持 bespoke
+
+### 验证
+- C2 快照等价实证 + 路由定向 107 绿；C3 lockup 4 绿；C4/C5 后全量 1217 passed / 5 skipped / 36 deselected
+
+---
+
+## [3.9.2] - 2026-11-11（审计批次 B：防御加固，无人值守施工）
+
+### 代码变更
+- `news_data`/stock_news_em ArrowInvalid 转调防御：捕获 akshare 库内 `\u3000` 转义 bug（pyarrow 环境）自动转调 `em_news_direct` 同 schema 兜底（红回路 monkeypatch 4 测试）
+- `index_constituents` 复活：中证官网 OSS cons 文件（`oss-ch.csindex.com.cn`，与 fetch_index_valuation 同模式 requests+trust_env=False）；三坑逐个处理——①404 转译标注仅中证系覆盖（国证 399 实测 404）②`engine="calamine"` 防 pandas4 移除 xlrd（新增 python-calamine 0.9.1，依赖三处同步 pyproject/uv.lock/requirements）③双语表头子串定位；数值代码 zfill(6)；真机验收 000300 实拉 300 行非空（network 标）
+- 依赖补声明：requirements.txt 补 python-calamine（uv add 同步 pyproject/uv.lock）
+
+### 计数
+- 注册 159→160、类型 114→115（+index_constituents csindex_official 主源，test_v3314/v3315 断言同步）
+
+### 验证
+- 全量回归 1199 passed / 5 skipped / 36 deselected（基线 1188 + 新增 11）
+
+---
+
 ## [3.9.1] - 2026-11-09（发版说明 2026-11-10 勘误：原「零代码维护版」与版本区间不符）
 
 > **勘误**：版本区间 v3.9.0..v3.9.1 实含 6 个代码提交（`f1cea7a`..`ec07154`），并非零代码——原说明把「vibe 全量复刻批次 hub 零改动」误写成了「版本零改动」。口径：MCP 190→191 / REST 81→82 / 类型 113→114 / 注册 157→159。

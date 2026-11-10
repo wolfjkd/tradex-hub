@@ -1,7 +1,7 @@
 # MCP 工具清单
 
 > 本文件由 `scripts/generate_tool_docs.py` 从源码 AST 生成（`tradex/src/tradex/tools/*.py`
-> 中带 `@mcp.tool` 装饰器的函数），**请勿手工编辑**。当前版本 **v3.9.1**，共 **191 个工具**。
+> 中带 `@mcp.tool` 装饰器的函数），**请勿手工编辑**。当前版本 **v3.9.4**，共 **191 个工具**。
 > 工具增删后重跑脚本即可：`python scripts/generate_tool_docs.py`。
 
 ## 总览
