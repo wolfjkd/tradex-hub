@@ -588,6 +588,22 @@ def fetch_market_overview(symbol: str = "", **kwargs):
 # news_data — 新闻与公告（多 endpoint）
 # ============================================================
 
+def _is_arrow_escape_invalid(e: BaseException) -> bool:
+    """判定是否 akshare stock_news_em 的 pyarrow ArrowInvalid 库内 bug。
+
+    akshare stock_news_em 内部 `.str.replace(r"\\u3000",…, regex=True)` 在装了
+    pyarrow 的环境由 RE2 内核执行，不支持 `\\u` 转义 → ArrowInvalid("invalid
+    escape sequence")。hub venv 无 pyarrow 不触发，下游环境（如 TradeX）必炸。
+    pyarrow 可导入时按 isinstance 精判；否则按类型名 + 消息特征兜底（测试用
+    假异常与真 ArrowInvalid 同名同特征）。
+    """
+    try:
+        from pyarrow.lib import ArrowInvalid  # noqa: PLC0415 仅 pyarrow 环境可导入
+    except ImportError:
+        return type(e).__name__ == "ArrowInvalid" or "invalid escape sequence" in str(e)
+    return isinstance(e, ArrowInvalid)
+
+
 def fetch_news_data(
     endpoint: str = "stock_news_em",
     symbol: str = "",
@@ -597,7 +613,7 @@ def fetch_news_data(
     """新闻数据（多 endpoint 分派）。
 
     endpoint:
-      - stock_news_em:       个股新闻
+      - stock_news_em:       个股新闻（ArrowInvalid 库内 bug 时自动转调 em_news_direct）
       - stock_report_disclosure: 财报披露时间表
       - stock_notice_report: 公告
       - stock_news_main_cx:  财新网新闻
@@ -605,7 +621,21 @@ def fetch_news_data(
     """
     ak = _ak()
     if endpoint == "stock_news_em":
-        return ak.stock_news_em(symbol=symbol)
+        try:
+            return ak.stock_news_em(symbol=symbol)
+        except Exception as e:
+            if _is_arrow_escape_invalid(e):
+                # 批次B①（2026-11-11）：akshare 库内 bug 与源健康无关，转调同
+                # schema 的 em_news_direct（registry news_data 的 P999 备源）。
+                from tradex.data_sources.news_fetchers import fetch_em_news_direct
+
+                logger.warning(
+                    "fetch_news_data(stock_news_em): akshare ArrowInvalid bug, "
+                    "fallback to em_news_direct: %s",
+                    e,
+                )
+                return fetch_em_news_direct(symbol=symbol)
+            raise
     if endpoint == "stock_report_disclosure":
         # 尝试传递 period 参数（akshare 可能按报告期过滤）
         if date:

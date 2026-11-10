@@ -7,6 +7,8 @@ pydantic>=2.0.0
 requests>=2.28.0
 stockstats>=0.6.0
 xlrd>=2.0.2
+# 中证官方文件 xls 读取（fetch_index_constituents；calamine 引擎防 pandas4 移除 xlrd）
+python-calamine>=0.9.1
 # Prometheus 指标导出（2026-11-10 补：v3.9.0 起仅声明于 pyproject，requirements 漏同步）
 prometheus_client>=0.20.0
 python-dotenv>=1.0.0

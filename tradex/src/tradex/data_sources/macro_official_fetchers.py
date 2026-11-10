@@ -303,3 +303,86 @@ def fetch_index_valuation(index_code: str = "000300", **kwargs) -> pd.DataFrame:
     except Exception as e:
         logger.warning("fetch_index_valuation(%s) failed: %s", index_code, e)
         raise  # 失败必须抛出，由 SmartRouter 记账降级（v3.3.15 起约定）
+
+
+# ============================================================
+# 中证指数官方成分股 — index_constituents（2026-11-11 批次B② 复活）
+# ============================================================
+
+# 2026-09-28 死源剥离时 zealink/国证双通道齐灭；现走中证官网 OSS 自动成分文件
+# （与 fetch_index_valuation 同一 OSS，官方一手，日度更新）。
+_CSI_CONS_URL = (
+    "https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/"
+    "file/autofile/cons/{index_code}cons.xls"
+)
+
+
+def fetch_index_constituents(index_code: str = "000300", **kwargs) -> pd.DataFrame:
+    """中证指数官方成分股名单（全量成分，日度文件）。
+
+    覆盖范围（坑①）：**仅中证系指数**有 cons 文件（000300 沪深300、000905
+    中证500、980017 等中证公司发布代码）；国证系（399 开头，如 399006）文件
+    不存在（2026-11-11 实测 404），请求即抛「文件不存在」并在消息中注明覆盖
+    范围。index_weights 无源仍死（2026-11-10 审计确认，本仓不救）。
+
+    Args:
+        index_code: 指数代码，默认 000300 沪深300
+
+    Returns:
+        DataFrame with columns: 日期, 成分券代码, 成分券名称, 交易所；
+        成分券代码为 6 位左补零字符串（xls 数值型 1 → "000001"），按代码升序
+    """
+    try:
+        url = _CSI_CONS_URL.format(index_code=index_code)
+        headers = {
+            "User-Agent": _UA,
+            "Referer": "https://www.csindex.com.cn/",
+            "Accept": "*/*",
+        }
+        resp = _csi_session.get(url, headers=headers, timeout=_TIMEOUT)
+        if resp.status_code == 404:
+            raise ValueError(
+                f"中证成分股文件不存在（{index_code}）：本源仅覆盖中证系指数，"
+                f"国证系（399 开头）无文件（实测 404）——{url}"
+            )
+        resp.raise_for_status()
+        # 坑②：xlrd 引擎被 pandas4 弃用（Pandas4Warning 实测），改 calamine
+        # （python-calamine 0.9.1，按内容自动识别 OLE2 xls，免引擎漂移）。
+        df = pd.read_excel(io.BytesIO(resp.content), engine="calamine")
+        if df.empty:
+            raise ValueError(f"中证成分股文件为空：{url}")
+
+        # 坑③：双语表头按关键子串定位，防中证改英文列名/列序
+        # （照 fetch_index_valuation 双语定位模式；成份/成分两种写法都认）。
+        col_date = next(c for c in df.columns if "日期" in str(c))
+        col_code = next(
+            c for c in df.columns if "成份券代码" in str(c) or "成分券代码" in str(c)
+        )
+        col_name = next(
+            c for c in df.columns if "成份券名称" in str(c) or "成分券名称" in str(c)
+        )
+        col_exch = next(
+            c for c in df.columns if "交易所" in str(c) and "英文" not in str(c)
+        )
+
+        out = df[[col_date, col_code, col_name, col_exch]].copy()
+        out.columns = ["日期", "成分券代码", "成分券名称", "交易所"]
+        out["日期"] = out["日期"].astype(str).str.split(" ").str[0].str.replace("-", "", regex=False)
+        # xls 数值型代码（1=000001 平安银行）→ 6 位左补零字符串还原
+        out["成分券代码"] = (
+            out["成分券代码"]
+            .astype(str)
+            .str.strip()
+            .str.replace(r"\.0$", "", regex=True)
+            .str.zfill(6)
+        )
+        for c in ("成分券名称", "交易所"):
+            out[c] = out[c].astype(str).str.strip()
+        out = out.dropna(subset=["日期", "成分券代码"]).sort_values("成分券代码").reset_index(drop=True)
+        if out.empty:
+            raise ValueError(f"中证成分股文件解析后无有效行：{url}")
+        return out
+
+    except Exception as e:
+        logger.warning("fetch_index_constituents(%s) failed: %s", index_code, e)
+        raise  # 失败必须抛出，由 SmartRouter 记账降级（v3.3.15 起约定）

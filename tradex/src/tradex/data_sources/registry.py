@@ -376,6 +376,8 @@ def _do_register() -> None:
     # 中证 zealink 域名（csi-web.cn.zealink.com）全球 DNS 失效、国证 API 404，
     # index_constituents / index_weights / index_valuation 三类型双源齐挂，
     # fetcher 模块一并移除；复启需改走 csindex.com.cn 官网抓取。
+    # （2026-11-11 现状：index_valuation / index_constituents 已按此路径复活，
+    # index_weights 仍死无源。）
 
     # ── 宏观 5 件套 → 2 件套：2026-09-28 死源剥离（老板拍板）──
     # 移除 social_financing（人行 404）/ repo_fixing_rate + lpr_history
@@ -389,6 +391,11 @@ def _do_register() -> None:
     # 2026-11-08 复活：v3.6.0 曾以 zealink 实现指数估值（后 DNS 死亡被剥离），
     # 现换中证官网 OSS 自动估值文件（oss-ch.csindex.com.cn，一手，xls）。
     router.register("index_valuation", "csindex_official", macro_off.fetch_index_valuation, priority=1)
+
+    # 2026-11-11 批次B② 复活：成分股同走中证官网 OSS cons 文件（一手，xls）。
+    # 覆盖范围仅中证系（国证 399 开头无 cons 文件，实测 404）；index_weights
+    # 仍死无源不救（2026-11-10 审计确认）。
+    router.register("index_constituents", "csindex_official", macro_off.fetch_index_constituents, priority=1)
 
     # ── 投资者互动 2 件套：2026-09-28 死源剥离（老板拍板）──
     # 巨潮互动易上游 500、上交所 e互动 404（主站存活、接口层死亡），
