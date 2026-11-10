@@ -297,6 +297,38 @@ class TwoLevelCache:
         if self._file is not None:
             self._file.invalidate(key)
 
+    def get_or_set(self, key: str, factory, ttl: int = TTL_DAILY) -> Any:
+        """读-算-写一体入口：序列化边界收进缓存层（批次C4，2026-11-11）。
+
+        调用方一律传/收 Python 对象（dict/list/DataFrame…），不再各自判型
+        loads/dumps：
+          - 读：命中为历史 json.dumps 写入的 str 条目时自动 loads 还原；
+            非 JSON 字符串原样返回（tools 层 df_to_json 字符串缓存不走本接口）。
+          - 写：factory() 返回值对象直存（内存层原样、文件层本就 JSON 落盘）；
+            **None 不缓存**——保持「失败/空值不冻结」语义（空结果下次重算）。
+
+        Args:
+            key: 缓存键
+            factory: 未命中时的取数回调（无参），异常向上抛且不缓存
+            ttl: TTL 秒数
+
+        Returns:
+            缓存命中值（已还原为对象）或 factory() 结果
+        """
+        cached = self.get(key)
+        if cached is not None:
+            if isinstance(cached, str):
+                try:
+                    return json.loads(cached)
+                except (ValueError, TypeError):
+                    logger.debug("get_or_set: 非 JSON 字符串条目原样返回 %s", key)
+                    return cached
+            return cached
+        value = factory()
+        if value is not None:
+            self.set(key, value, ttl)
+        return value
+
     def clear(self) -> None:
         """清空所有缓存。"""
         self._memory.clear()

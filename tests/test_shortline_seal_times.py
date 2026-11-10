@@ -66,26 +66,30 @@ class TestLatestBoardDate:
         fake_ak.stock_zt_pool_em.return_value = pd.DataFrame(
             {"代码": ["600000"], "名称": ["假数据"]}
         )
-        with patch.object(akf, "_ak", return_value=fake_ak), patch.object(
-            akf, "_TRADE_DATES_CACHE", None
-        ):
-            # 强制重建缓存（用假日历），并把「今天」钉在周日
-            with patch("tradex.data_sources.akshare_fetchers._TRADE_DATES_CACHE", None), \
-                 patch.object(akf, "datetime", _FixedDT):
+        # 批次C4：日历缓存并入统一边界（键含获取日期）。钉住「今天=周日」后
+        # 今日键必然缺席 → 走 _fetch 重拉假日历；测后清键防污染共享缓存。
+        from tradex.utils.cache import cache as _shared_cache
+
+        with patch.object(akf, "_ak", return_value=fake_ak), \
+             patch.object(akf, "datetime", _FixedDT):
+            _key = "trade_dates_recent:20261108"
+            _shared_cache.invalidate(_key)
+            try:
                 date_str, rows = akf._latest_board_date_with_rows()
+            finally:
+                _shared_cache.invalidate(_key)
         assert date_str == "20261106", f"应落在最近交易日，实得 {date_str}"
         assert rows
 
     def test_cache_reuse(self):
         from tradex.data_sources import akshare_fetchers as akf
+        from tradex.utils.cache import cache as _shared_cache
 
-        old = akf._TRADE_DATES_CACHE
+        # 2026-11-11 批次C4：缓存并入统一边界，键含获取日期（trade_dates_recent:{today}）
+        today = akf.datetime.now().strftime("%Y%m%d")
+        key = f"trade_dates_recent:{today}"
+        _shared_cache.set(key, ["20261105", "20261106"], ttl=86400)
         try:
-            # 2026-11-10 缓存结构改为 (获取日戳, days)：日戳与今天一致才命中
-            akf._TRADE_DATES_CACHE = (
-                akf.datetime.now().strftime("%Y%m%d"),
-                ["20261105", "20261106"],
-            )
             fake_ak = _fake_ak()
             fake_ak.stock_zt_pool_em.return_value = pd.DataFrame(
                 {"代码": ["600000"], "名称": ["A"]}
@@ -96,7 +100,7 @@ class TestLatestBoardDate:
             fake_ak.tool_trade_date_hist_sina.assert_not_called()
             assert date_str == "20261106"
         finally:
-            akf._TRADE_DATES_CACHE = old
+            _shared_cache.invalidate(key)
 
 
 class TestEnrichPrevZtSealTimes:

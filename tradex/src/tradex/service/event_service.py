@@ -38,19 +38,17 @@ def get_earnings_forecast(
 ) -> dict[str, Any]:
     """业绩预告。"""
     symbol = normalize_symbol(symbol)
-    cache_key = f"earnings_forecast:{symbol}:{report_date}:{limit}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        import json
-        return json.loads(cached) if isinstance(cached, str) else cached
 
-    df, src = _router.route(
-        "earnings_forecast", symbol=symbol, report_date=report_date, limit=limit
+    def _factory() -> dict[str, Any]:
+        df, src = _router.route(
+            "earnings_forecast", symbol=symbol, report_date=report_date, limit=limit
+        )
+        records = _df_to_records(df, max_rows=limit)
+        return {"symbol": symbol, "forecasts": records, "source": src, "count": len(records)}
+
+    return cache.get_or_set(
+        f"earnings_forecast:{symbol}:{report_date}:{limit}", _factory, TTL_DAILY
     )
-    records = _df_to_records(df, max_rows=limit)
-    result = {"symbol": symbol, "forecasts": records, "source": src, "count": len(records)}
-    cache.set(cache_key, result, TTL_DAILY)
-    return result
 
 
 def get_institution_survey(
@@ -58,20 +56,18 @@ def get_institution_survey(
 ) -> dict[str, Any]:
     """机构调研。"""
     symbol = normalize_symbol(symbol)
-    cache_key = f"institution_survey:{symbol}:{start_date}:{end_date}:{limit}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        import json
-        return json.loads(cached) if isinstance(cached, str) else cached
 
-    df, src = _router.route(
-        "institution_survey",
-        symbol=symbol, start_date=start_date, end_date=end_date, limit=limit,
+    def _factory() -> dict[str, Any]:
+        df, src = _router.route(
+            "institution_survey",
+            symbol=symbol, start_date=start_date, end_date=end_date, limit=limit,
+        )
+        records = _df_to_records(df, max_rows=limit)
+        return {"symbol": symbol, "surveys": records, "source": src, "count": len(records)}
+
+    return cache.get_or_set(
+        f"institution_survey:{symbol}:{start_date}:{end_date}:{limit}", _factory, TTL_DAILY
     )
-    records = _df_to_records(df, max_rows=limit)
-    result = {"symbol": symbol, "surveys": records, "source": src, "count": len(records)}
-    cache.set(cache_key, result, TTL_DAILY)
-    return result
 
 
 def get_holder_trades(
@@ -80,71 +76,60 @@ def get_holder_trades(
 ) -> dict[str, Any]:
     """股东增减持。"""
     symbol = normalize_symbol(symbol)
-    cache_key = f"holder_trades:{symbol}:{direction}:{start_date}:{end_date}:{limit}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        import json
-        return json.loads(cached) if isinstance(cached, str) else cached
 
-    df, src = _router.route(
-        "holder_trades",
-        symbol=symbol, direction=direction,
-        start_date=start_date, end_date=end_date, limit=limit,
+    def _factory() -> dict[str, Any]:
+        df, src = _router.route(
+            "holder_trades",
+            symbol=symbol, direction=direction,
+            start_date=start_date, end_date=end_date, limit=limit,
+        )
+        records = _df_to_records(df, max_rows=limit)
+        return {"symbol": symbol, "trades": records, "source": src, "count": len(records)}
+
+    return cache.get_or_set(
+        f"holder_trades:{symbol}:{direction}:{start_date}:{end_date}:{limit}", _factory, TTL_DAILY
     )
-    records = _df_to_records(df, max_rows=limit)
-    result = {"symbol": symbol, "trades": records, "source": src, "count": len(records)}
-    cache.set(cache_key, result, TTL_DAILY)
-    return result
 
 
 def get_share_buyback(symbol: str, progress: str = "", limit: int = 50) -> dict[str, Any]:
     """股票回购。"""
     symbol = normalize_symbol(symbol)
-    cache_key = f"share_buyback:{symbol}:{progress}:{limit}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        import json
-        return json.loads(cached) if isinstance(cached, str) else cached
 
-    df, src = _router.route(
-        "share_buyback", symbol=symbol, progress=progress, limit=limit
+    def _factory() -> dict[str, Any]:
+        df, src = _router.route(
+            "share_buyback", symbol=symbol, progress=progress, limit=limit
+        )
+        records = _df_to_records(df, max_rows=limit)
+        return {"symbol": symbol, "buybacks": records, "source": src, "count": len(records)}
+
+    return cache.get_or_set(
+        f"share_buyback:{symbol}:{progress}:{limit}", _factory, TTL_DAILY
     )
-    records = _df_to_records(df, max_rows=limit)
-    result = {"symbol": symbol, "buybacks": records, "source": src, "count": len(records)}
-    cache.set(cache_key, result, TTL_DAILY)
-    return result
 
 
 def get_equity_pledge(symbol: str, date: str = "", limit: int = 50) -> dict[str, Any]:
     """股权质押。"""
     symbol = normalize_symbol(symbol)
-    cache_key = f"equity_pledge:{symbol}:{date}:{limit}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        import json
-        return json.loads(cached) if isinstance(cached, str) else cached
 
-    df, src = _router.route(
-        "equity_pledge", symbol=symbol, date=date, limit=limit
+    def _factory() -> dict[str, Any]:
+        df, src = _router.route(
+            "equity_pledge", symbol=symbol, date=date, limit=limit
+        )
+        records = _df_to_records(df, max_rows=limit)
+        return {"symbol": symbol, "pledges": records, "source": src, "count": len(records)}
+
+    return cache.get_or_set(
+        f"equity_pledge:{symbol}:{date}:{limit}", _factory, TTL_DAILY
     )
-    records = _df_to_records(df, max_rows=limit)
-    result = {"symbol": symbol, "pledges": records, "source": src, "count": len(records)}
-    cache.set(cache_key, result, TTL_DAILY)
-    return result
 
 
 def get_ipo_calendar(days_ahead: int = 30, limit: int = 50) -> dict[str, Any]:
     """新股申购日历。"""
-    cache_key = f"ipo_calendar:{days_ahead}:{limit}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        import json
-        return json.loads(cached) if isinstance(cached, str) else cached
+    def _factory() -> dict[str, Any]:
+        df, src = _router.route(
+            "ipo_calendar", days_ahead=days_ahead, limit=limit
+        )
+        records = _df_to_records(df, max_rows=limit)
+        return {"ipos": records, "source": src, "count": len(records)}
 
-    df, src = _router.route(
-        "ipo_calendar", days_ahead=days_ahead, limit=limit
-    )
-    records = _df_to_records(df, max_rows=limit)
-    result = {"ipos": records, "source": src, "count": len(records)}
-    cache.set(cache_key, result, TTL_DAILY)
-    return result
+    return cache.get_or_set(f"ipo_calendar:{days_ahead}:{limit}", _factory, TTL_DAILY)

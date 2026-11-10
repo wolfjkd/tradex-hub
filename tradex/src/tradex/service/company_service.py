@@ -47,21 +47,16 @@ def search_stock(keyword: str) -> dict[str, Any]:
     Raises:
         Exception: 数据源异常时向上抛。
     """
-    cache_key = f"search_stock:{keyword}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        import json
-        return json.loads(cached) if isinstance(cached, str) else cached
+    def _factory() -> dict[str, Any]:
+        df, _src = _router.route("company_info", endpoint="code_name")
+        mask = df["code"].str.contains(keyword, case=False, na=False) | df[
+            "name"
+        ].str.contains(keyword, case=False, na=False)
+        matched = df[mask].head(20)
+        records = df_to_records(matched)
+        return {"keyword": keyword, "matches": records, "source": _src}
 
-    df, _src = _router.route("company_info", endpoint="code_name")
-    mask = df["code"].str.contains(keyword, case=False, na=False) | df[
-        "name"
-    ].str.contains(keyword, case=False, na=False)
-    matched = df[mask].head(20)
-    records = df_to_records(matched)
-    result = {"keyword": keyword, "matches": records, "source": _src}
-    cache.set(cache_key, result, TTL_COMPANY)
-    return result
+    return cache.get_or_set(f"search_stock:{keyword}", _factory, TTL_COMPANY)
 
 
 def get_company_info(symbol: str) -> dict[str, Any]:
@@ -79,38 +74,32 @@ def get_company_info(symbol: str) -> dict[str, Any]:
     """
     from ..utils.symbol import normalize_symbol
     symbol = normalize_symbol(symbol)
-    cache_key = f"company_info:{symbol}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        import json
-        return json.loads(cached) if isinstance(cached, str) else cached
 
-    # Primary: 东方财富个股信息
-    try:
-        df, _src = _router.route(
-            "company_info", endpoint="individual_info", symbol=symbol
-        )
-        if df is not None and not df.empty:
-            info = {}
-            for _, row in df.iterrows():
-                info[row.iloc[0]] = row.iloc[1]
-            if info:
-                result = {"symbol": symbol, "info": info, "source": _src}
-                cache.set(cache_key, result, TTL_COMPANY)
-                return result
-    except Exception as e:
-        logger.debug("company_info primary 失败(%s): %s", symbol, e)
+    def _factory() -> dict[str, Any]:
+        # Primary: 东方财富个股信息
+        try:
+            df, _src = _router.route(
+                "company_info", endpoint="individual_info", symbol=symbol
+            )
+            if df is not None and not df.empty:
+                info = {}
+                for _, row in df.iterrows():
+                    info[row.iloc[0]] = row.iloc[1]
+                if info:
+                    return {"symbol": symbol, "info": info, "source": _src}
+        except Exception as e:
+            logger.debug("company_info primary 失败(%s): %s", symbol, e)
 
-    # Fallback: 全量行情列表提取
-    df, _src = _router.route("realtime_quote", symbol="")
-    code_col = _find_code_col(df)
-    row = df[df[code_col].astype(str).str.strip() == symbol]
-    if row.empty:
-        raise ValueError(f"未找到股票 {symbol} 的公司信息")
-    records = df_to_records(row)
-    result = {"symbol": symbol, "info": records[0] if records else {}, "source": _src}
-    cache.set(cache_key, result, TTL_COMPANY)
-    return result
+        # Fallback: 全量行情列表提取
+        df, _src = _router.route("realtime_quote", symbol="")
+        code_col = _find_code_col(df)
+        row = df[df[code_col].astype(str).str.strip() == symbol]
+        if row.empty:
+            raise ValueError(f"未找到股票 {symbol} 的公司信息")
+        records = df_to_records(row)
+        return {"symbol": symbol, "info": records[0] if records else {}, "source": _src}
+
+    return cache.get_or_set(f"company_info:{symbol}", _factory, TTL_COMPANY)
 
 
 def get_company_profile(symbol: str) -> dict[str, Any]:
@@ -127,20 +116,15 @@ def get_company_profile(symbol: str) -> dict[str, Any]:
     """
     from ..utils.symbol import normalize_symbol
     symbol = normalize_symbol(symbol)
-    cache_key = f"company_profile:{symbol}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        import json
-        return json.loads(cached) if isinstance(cached, str) else cached
 
-    df, _src = _router.route("company_info", endpoint="profile", symbol=symbol)
-    if df is None or df.empty:
-        result = {"symbol": symbol, "segments": [], "source": _src}
-    else:
+    def _factory() -> dict[str, Any]:
+        df, _src = _router.route("company_info", endpoint="profile", symbol=symbol)
+        if df is None or df.empty:
+            return {"symbol": symbol, "segments": [], "source": _src}
         records = df_to_records(df)
-        result = {"symbol": symbol, "segments": records, "source": _src}
-    cache.set(cache_key, result, TTL_COMPANY)
-    return result
+        return {"symbol": symbol, "segments": records, "source": _src}
+
+    return cache.get_or_set(f"company_profile:{symbol}", _factory, TTL_COMPANY)
 
 
 def get_competitors(symbol: str, industry: str = "") -> dict[str, Any]:
@@ -159,53 +143,50 @@ def get_competitors(symbol: str, industry: str = "") -> dict[str, Any]:
     """
     from ..utils.symbol import normalize_symbol
     symbol = normalize_symbol(symbol)
-    cache_key = f"competitors:{symbol}:{industry}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        import json
-        return json.loads(cached) if isinstance(cached, str) else cached
 
-    # 行业推断
-    if not industry:
-        try:
-            df, _src = _router.route(
-                "company_info", endpoint="individual_info", symbol=symbol
-            )
-            if df is not None and not df.empty:
-                for _, row in df.iterrows():
-                    key = str(row.iloc[0])
-                    if "行业" in key:
-                        industry = str(row.iloc[1])
-                        break
-        except Exception:
-            pass
+    def _factory() -> dict[str, Any]:
+        nonlocal industry  # 行业推断会对参数重赋值（闭包内赋值须显式声明）
+        # 行业推断
+        if not industry:
+            try:
+                df, _src = _router.route(
+                    "company_info", endpoint="individual_info", symbol=symbol
+                )
+                if df is not None and not df.empty:
+                    for _, row in df.iterrows():
+                        key = str(row.iloc[0])
+                        if "行业" in key:
+                            industry = str(row.iloc[1])
+                            break
+            except Exception:
+                pass
 
-    if not industry:
-        try:
-            board_df, _src = _router.route(
-                "industry_data", endpoint="board_industry_name_em"
-            )
-            if board_df is not None and not board_df.empty:
-                spot_df, _src2 = _router.route("realtime_quote", symbol="")
-                if spot_df is not None and not spot_df.empty:
-                    code_col = _find_code_col(spot_df)
-                    row = spot_df[spot_df[code_col].astype(str).str.strip() == symbol]
-                    if not row.empty:
-                        for c in row.columns:
-                            if "行业" in c or "板块" in c:
-                                industry = str(row.iloc[0][c])
-                                break
-        except Exception:
-            pass
+        if not industry:
+            try:
+                board_df, _src = _router.route(
+                    "industry_data", endpoint="board_industry_name_em"
+                )
+                if board_df is not None and not board_df.empty:
+                    spot_df, _src2 = _router.route("realtime_quote", symbol="")
+                    if spot_df is not None and not spot_df.empty:
+                        code_col = _find_code_col(spot_df)
+                        row = spot_df[spot_df[code_col].astype(str).str.strip() == symbol]
+                        if not row.empty:
+                            for c in row.columns:
+                                if "行业" in c or "板块" in c:
+                                    industry = str(row.iloc[0][c])
+                                    break
+            except Exception:
+                pass
 
-    if not industry:
-        raise ValueError(f"无法确定 {symbol} 所属行业，请手动传入 industry 参数")
+        if not industry:
+            raise ValueError(f"无法确定 {symbol} 所属行业，请手动传入 industry 参数")
 
-    df, _src = _router.route(
-        "industry_data", endpoint="board_industry_cons_em", industry=industry
-    )
-    df = slim_df(df)
-    records = df_to_records(df)[:30]
-    result = {"symbol": symbol, "industry": industry, "peers": records, "source": _src}
-    cache.set(cache_key, result, TTL_COMPANY)
-    return result
+        df, _src = _router.route(
+            "industry_data", endpoint="board_industry_cons_em", industry=industry
+        )
+        df = slim_df(df)
+        records = df_to_records(df)[:30]
+        return {"symbol": symbol, "industry": industry, "peers": records, "source": _src}
+
+    return cache.get_or_set(f"competitors:{symbol}:{industry}", _factory, TTL_COMPANY)

@@ -20,13 +20,9 @@ from typing import Any
 
 import pandas as pd
 
-logger = logging.getLogger("tradex.akshare")
+from ..utils.cache import cache
 
-# 交易日全表进程内缓存（_trade_dates_recent 用，2026-11-08）。
-# 2026-11-10 审计修复：sina 日历只含当年（实测 max=2026-12-31），原「永不失效」缓存
-# 在进程跨年后让 _latest_board_date 回溯只试去年日期——复活「东财对旧日期返回最近池
-# +错标签」污染。改为按获取日戳刷新：跨天即重拉（每天一次 API 成本换正确性）。
-_TRADE_DATES_CACHE: tuple[str, list[str]] | None = None  # (fetched_on, days)
+logger = logging.getLogger("tradex.akshare")
 
 # v3.3.15 新增：季度末日期计算。
 # 旧实现用 f"{year}{q*3:02d}31" 硬编码 31 日，Q2(6月)/Q3(9月) 会算出
@@ -2132,23 +2128,25 @@ def _latest_board_date(max_back_days: int = 15) -> str:
 
 
 def _trade_dates_recent() -> list[str]:
-    """全量交易日清单（YYYYMMDD 升序；按获取日戳刷新的进程内缓存）。
+    """全量交易日清单（YYYYMMDD 升序；TTL 到当日午夜的统一缓存条目）。
 
-    缓存键含获取日期，跨天（含跨年）即重拉——保证清单始终覆盖「今天」所在年份。
+    批次C4 并入统一序列化边界（get_or_set）：缓存键含获取日期 → 跨天（含
+    跨年）即自然换键重拉（保证清单始终覆盖「今天」所在年份，替代批次A的
+    (获取日戳, days) 手工日戳结构）；TTL 设到当日午夜，进程内最多一日一拉。
     """
-    global _TRADE_DATES_CACHE
     today = datetime.now().strftime("%Y%m%d")
-    if _TRADE_DATES_CACHE is not None:
-        fetched_on, days_cached = _TRADE_DATES_CACHE
-        if fetched_on == today:
-            return days_cached
-    ak = _ak()
-    df = ak.tool_trade_date_hist_sina()
-    if df is None or df.empty or "trade_date" not in df.columns:
-        raise RuntimeError("sina 交易日清单返回空或结构变化")
-    days = pd.to_datetime(df["trade_date"], errors="coerce").dropna()
-    _TRADE_DATES_CACHE = (today, sorted(days.dt.strftime("%Y%m%d").tolist()))
-    return _TRADE_DATES_CACHE[1]
+
+    def _fetch() -> list[str]:
+        ak = _ak()
+        df = ak.tool_trade_date_hist_sina()
+        if df is None or df.empty or "trade_date" not in df.columns:
+            raise RuntimeError("sina 交易日清单返回空或结构变化")
+        days = pd.to_datetime(df["trade_date"], errors="coerce").dropna()
+        return sorted(days.dt.strftime("%Y%m%d").tolist())
+
+    midnight = datetime.strptime(today, "%Y%m%d") + timedelta(days=1)
+    ttl = max(60, int((midnight - datetime.now()).total_seconds()))
+    return cache.get_or_set(f"trade_dates_recent:{today}", _fetch, ttl=ttl)
 
 
 def _latest_board_date_with_rows(

@@ -31,35 +31,27 @@ def _df_to_records(df: pd.DataFrame, max_rows: int | None = None) -> list[dict]:
 
 def get_sw_industry_history(force_refresh: bool = False) -> dict[str, Any]:
     """申万行业分类变迁史。"""
-    if not force_refresh:
-        cache_key = "sw_industry_history"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            import json
-            return json.loads(cached) if isinstance(cached, str) else cached
+    def _factory() -> dict[str, Any]:
+        df, src = _router.route("sw_industry_history", force_refresh=force_refresh)
+        records = _df_to_records(df, max_rows=500)
+        return {"history": records, "source": src, "count": len(records)}
 
-    df, src = _router.route("sw_industry_history", force_refresh=force_refresh)
-    records = _df_to_records(df, max_rows=500)
-    result = {"history": records, "source": src, "count": len(records)}
-    if not force_refresh:
-        cache.set(cache_key, result, TTL_DAILY)
-    return result
+    if force_refresh:
+        # 语义保留：强刷不读缓存也不写缓存（原 if not force_refresh 双跳过）
+        return _factory()
+    return cache.get_or_set("sw_industry_history", _factory, TTL_DAILY)
 
 
 def get_sw_industry_as_of(symbol: str, date: str = "") -> dict[str, Any]:
     """按 (code, date) 查询股票的申万行业归属。"""
     symbol = normalize_symbol(symbol)
-    cache_key = f"sw_as_of:{symbol}:{date}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        import json
-        return json.loads(cached) if isinstance(cached, str) else cached
 
-    df, src = _router.route("sw_industry_as_of", symbol=symbol, date=date)
-    records = _df_to_records(df)
-    result = {
-        "symbol": symbol, "date": date,
-        "industry": records, "source": src, "count": len(records),
-    }
-    cache.set(cache_key, result, TTL_DAILY)
-    return result
+    def _factory() -> dict[str, Any]:
+        df, src = _router.route("sw_industry_as_of", symbol=symbol, date=date)
+        records = _df_to_records(df)
+        return {
+            "symbol": symbol, "date": date,
+            "industry": records, "source": src, "count": len(records),
+        }
+
+    return cache.get_or_set(f"sw_as_of:{symbol}:{date}", _factory, TTL_DAILY)

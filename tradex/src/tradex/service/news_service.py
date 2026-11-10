@@ -111,22 +111,18 @@ def get_stock_news(symbol: str) -> dict[str, Any]:
         Exception: 数据源异常。
     """
     symbol = normalize_symbol(symbol)
-    cache_key = f"stock_news:{symbol}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        import json
-        return json.loads(cached) if isinstance(cached, str) else cached
 
-    df, _src = _router.route("news_data", symbol=symbol)
-    # 与 search_news 用同一套归一：两个新闻工具的返回结构必须一致，
-    # 否则调用方要按工具分别适配字段（2026-10-30 专项重构统一）
-    records = [
-        _unify_news_record(rec)
-        for rec in _df_to_records(_tag_source(df, _src), max_rows=30)
-    ]
-    result = {"symbol": symbol, "news": records, "source": _src}
-    cache.set(cache_key, result, TTL_REALTIME)
-    return result
+    def _factory() -> dict[str, Any]:
+        df, _src = _router.route("news_data", symbol=symbol)
+        # 与 search_news 用同一套归一：两个新闻工具的返回结构必须一致，
+        # 否则调用方要按工具分别适配字段（2026-10-30 专项重构统一）
+        records = [
+            _unify_news_record(rec)
+            for rec in _df_to_records(_tag_source(df, _src), max_rows=30)
+        ]
+        return {"symbol": symbol, "news": records, "source": _src}
+
+    return cache.get_or_set(f"stock_news:{symbol}", _factory, TTL_REALTIME)
 
 
 def get_company_announcements(symbol: str = "", num_results: int = 30) -> dict[str, Any]:
@@ -144,23 +140,19 @@ def get_company_announcements(symbol: str = "", num_results: int = 30) -> dict[s
     """
     if symbol:
         symbol = normalize_symbol(symbol)
-    cache_key = f"announcements:{symbol}:{num_results}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        import json
-        return json.loads(cached) if isinstance(cached, str) else cached
 
-    df, _src = _router.route("cninfo_announcement", symbol=symbol)
-    df = df.head(num_results)
-    records = _df_to_records(df)
-    result = {
-        "symbol": symbol or "全市场",
-        "announcements": records,
-        "count": len(records),
-        "source": _src,
-    }
-    cache.set(cache_key, result, TTL_DAILY)
-    return result
+    def _factory() -> dict[str, Any]:
+        df, _src = _router.route("cninfo_announcement", symbol=symbol)
+        df = df.head(num_results)
+        records = _df_to_records(df)
+        return {
+            "symbol": symbol or "全市场",
+            "announcements": records,
+            "count": len(records),
+            "source": _src,
+        }
+
+    return cache.get_or_set(f"announcements:{symbol}:{num_results}", _factory, TTL_DAILY)
 
 
 def search_news(
@@ -181,76 +173,72 @@ def search_news(
     Raises:
         Exception: 数据源异常。
     """
-    cache_key = f"search_news:{keyword}:{symbol}:{num_results}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        import json
-        return json.loads(cached) if isinstance(cached, str) else cached
+    def _factory() -> dict[str, Any]:
+        nonlocal symbol  # 工厂内归一化重赋值（闭包内赋值须显式声明）
+        all_dfs: list[pd.DataFrame] = []
 
-    all_dfs: list[pd.DataFrame] = []
-
-    if symbol:
-        symbol = normalize_symbol(symbol)
-        try:
-            df, _src = _router.route("news_data", symbol=symbol)
-            if df is not None and not df.empty:
-                all_dfs.append(_tag_source(df, _src))
-        except Exception as exc:
-            logger.debug("个股新闻源失败(%s): %s", symbol, exc)
-
-    if not all_dfs:
-        # 多源全市场
-        for source_cmd in [
-            ("telegraph_news", {"num_results": num_results}),
-            ("sina_finance_news", {"num_results": 20}),
-            ("futures_news", {"symbol": "全部"}),
-            ("hot_search", {"symbol": "A股"}),
-        ]:
+        if symbol:
+            symbol = normalize_symbol(symbol)
             try:
-                route_type, kwargs = source_cmd
-                df, _src = _router.route(route_type, **kwargs)
+                df, _src = _router.route("news_data", symbol=symbol)
                 if df is not None and not df.empty:
                     all_dfs.append(_tag_source(df, _src))
             except Exception as exc:
-                logger.debug("%s 源失败: %s", route_type, exc)
-        # 百度交易提醒（多个 endpoint）
-        try:
-            for ep in ["suspend", "dividend", "report_time"]:
-                df, _src = _router.route("baidu_trade_notify", endpoint=ep, date="")
-                if df is not None and not df.empty:
-                    all_dfs.append(_tag_source(df, _src))
-        except Exception as exc:
-            logger.debug("百度交易提醒源失败: %s", exc)
+                logger.debug("个股新闻源失败(%s): %s", symbol, exc)
 
-    if not all_dfs:
-        result = {"keyword": keyword, "symbol": symbol, "news": [], "count": 0}
-        cache.set(cache_key, result, TTL_REALTIME)
-        return result
+        if not all_dfs:
+            # 多源全市场
+            for source_cmd in [
+                ("telegraph_news", {"num_results": num_results}),
+                ("sina_finance_news", {"num_results": 20}),
+                ("futures_news", {"symbol": "全部"}),
+                ("hot_search", {"symbol": "A股"}),
+            ]:
+                try:
+                    route_type, kwargs = source_cmd
+                    df, _src = _router.route(route_type, **kwargs)
+                    if df is not None and not df.empty:
+                        all_dfs.append(_tag_source(df, _src))
+                except Exception as exc:
+                    logger.debug("%s 源失败: %s", route_type, exc)
+            # 百度交易提醒（多个 endpoint）
+            try:
+                for ep in ["suspend", "dividend", "report_time"]:
+                    df, _src = _router.route("baidu_trade_notify", endpoint=ep, date="")
+                    if df is not None and not df.empty:
+                        all_dfs.append(_tag_source(df, _src))
+            except Exception as exc:
+                logger.debug("百度交易提醒源失败: %s", exc)
 
-    combined = pd.concat(all_dfs, ignore_index=True)
+        if not all_dfs:
+            return {"keyword": keyword, "symbol": symbol, "news": [], "count": 0}
 
-    # 各子源 schema 不同，直接 union 会得到 40+ 列、绝大多数为 NaN 的宽表
-    # （单条约 500 字节无效负载，纯烧 LLM 上下文）。先归一到统一字段再过滤。
-    records = [_unify_news_record(rec) for rec in _df_to_records(combined)]
+        combined = pd.concat(all_dfs, ignore_index=True)
 
-    keywords = [
-        kw.strip() for kw in keyword.replace(",", " ").replace("，", " ").split()
-        if kw.strip()
-    ]
+        # 各子源 schema 不同，直接 union 会得到 40+ 列、绝大多数为 NaN 的宽表
+        # （单条约 500 字节无效负载，纯烧 LLM 上下文）。先归一到统一字段再过滤。
+        records = [_unify_news_record(rec) for rec in _df_to_records(combined)]
 
-    def _match(record: dict, kws: list[str]) -> bool:
-        haystack = f"{record['标题']} {record['摘要']}".lower()
-        return any(kw.lower() in haystack for kw in kws)
+        keywords = [
+            kw.strip() for kw in keyword.replace(",", " ").replace("，", " ").split()
+            if kw.strip()
+        ]
 
-    matched = [r for r in records if _match(r, keywords)] if keywords else records
-    # 过滤后为空 → 退回未过滤结果（宁可给全量，也不返回空列表让上层误判无新闻）
-    news = (matched or records)[:num_results]
+        def _match(record: dict, kws: list[str]) -> bool:
+            haystack = f"{record['标题']} {record['摘要']}".lower()
+            return any(kw.lower() in haystack for kw in kws)
 
-    result = {
-        "keyword": keyword,
-        "symbol": symbol,
-        "news": news,
-        "count": len(news),
-    }
-    cache.set(cache_key, result, TTL_REALTIME)
-    return result
+        matched = [r for r in records if _match(r, keywords)] if keywords else records
+        # 过滤后为空 → 退回未过滤结果（宁可给全量，也不返回空列表让上层误判无新闻）
+        news = (matched or records)[:num_results]
+
+        return {
+            "keyword": keyword,
+            "symbol": symbol,
+            "news": news,
+            "count": len(news),
+        }
+
+    return cache.get_or_set(
+        f"search_news:{keyword}:{symbol}:{num_results}", _factory, TTL_REALTIME
+    )

@@ -227,67 +227,57 @@ def get_realtime_quote(symbol: str) -> dict[str, Any]:
     """
     # 全球代码分支
     if _is_global_code(symbol):
-        cache_key = f"global_quote:{symbol}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            # tools 原返回 JSON 字符串；service 层统一返回 dict（此处 cached 是 JSON 串需解析）
-            import json
-            return json.loads(cached) if isinstance(cached, str) else cached
+        def _global_factory() -> dict[str, Any]:
+            df, _src = _router.route("global_market_quote")
+            if df is None or df.empty:
+                raise ValueError(f"获取全球行情失败 ({symbol}): 数据源返回空数据")
+            row = df[df["代码"] == symbol]
+            if row.empty:
+                raise ValueError(f"未找到代码 {symbol} 的全球行情")
+            # 取首条记录（兼容 df_to_json 行为）；缓存为 dict（统一 service 层契约）
+            records = df_to_records(row)
+            return {"quote": records[0] if records else {}, "source": _src}
 
-        df, _src = _router.route("global_market_quote")
-        if df is None or df.empty:
-            raise ValueError(f"获取全球行情失败 ({symbol}): 数据源返回空数据")
-        row = df[df["代码"] == symbol]
-        if row.empty:
-            raise ValueError(f"未找到代码 {symbol} 的全球行情")
-        # 取首条记录（兼容 df_to_json 行为）
-        records = df_to_records(row)
-        result = {"quote": records[0] if records else {}, "source": _src}
-        # 缓存为 dict（统一 service 层契约）
-        cache.set(cache_key, result, TTL_REALTIME)
-        return result
+        return cache.get_or_set(f"global_quote:{symbol}", _global_factory, TTL_REALTIME)
 
     # A 股分支
     symbol, is_index = _resolve_symbol(symbol)
-    cache_key = f"realtime_quote:{symbol}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        import json
-        return json.loads(cached) if isinstance(cached, str) else cached
 
-    df, _src = _router.route("realtime_quote", symbol=symbol)
-    if df is None or df.empty:
-        raise ValueError(f"获取实时行情失败 ({symbol}): 数据源返回空数据")
-    code_col = _find_code_col(df)
-    if len(df) > 1:
-        # 数据源回填的代码可能不带交易所前缀，两种形态都要认
-        wanted = {symbol, normalize_symbol(symbol)}
-        row = df[df[code_col].astype(str).str.strip().isin(wanted)]
-        if row.empty:
-            raise ValueError(f"未找到股票 {symbol} 的实时行情")
-    else:
-        row = df
-    records = df_to_records(row)
-    quote = records[0] if records else {}
-    # 主源不带估值字段 → 补一层（按日缓存，失败留 None）
-    missing = [field for field in ("市盈率", "市净率") if quote.get(field) in (None, "")]
-    if missing:
-        snapshot = _fetch_valuation_snapshot(symbol)
-        for field in missing:
-            quote[field] = snapshot.get(field)
-    result = {
-        "quote": quote,
-        "symbol": symbol,
-        "is_index": is_index,
-        "source": _src,
-    }
-    if any(quote.get(field) is None for field in ("市盈率", "市净率")):
-        result["valuation_note"] = (
-            "市盈率/市净率缺失：实时行情主源不带估值字段，估值备源当日亦未取到；"
-            "需要时改用 get_valuation_metrics"
-        )
-    cache.set(cache_key, result, TTL_REALTIME)
-    return result
+    def _a_factory() -> dict[str, Any]:
+        df, _src = _router.route("realtime_quote", symbol=symbol)
+        if df is None or df.empty:
+            raise ValueError(f"获取实时行情失败 ({symbol}): 数据源返回空数据")
+        code_col = _find_code_col(df)
+        if len(df) > 1:
+            # 数据源回填的代码可能不带交易所前缀，两种形态都要认
+            wanted = {symbol, normalize_symbol(symbol)}
+            row = df[df[code_col].astype(str).str.strip().isin(wanted)]
+            if row.empty:
+                raise ValueError(f"未找到股票 {symbol} 的实时行情")
+        else:
+            row = df
+        records = df_to_records(row)
+        quote = records[0] if records else {}
+        # 主源不带估值字段 → 补一层（按日缓存，失败留 None）
+        missing = [field for field in ("市盈率", "市净率") if quote.get(field) in (None, "")]
+        if missing:
+            snapshot = _fetch_valuation_snapshot(symbol)
+            for field in missing:
+                quote[field] = snapshot.get(field)
+        result = {
+            "quote": quote,
+            "symbol": symbol,
+            "is_index": is_index,
+            "source": _src,
+        }
+        if any(quote.get(field) is None for field in ("市盈率", "市净率")):
+            result["valuation_note"] = (
+                "市盈率/市净率缺失：实时行情主源不带估值字段，估值备源当日亦未取到；"
+                "需要时改用 get_valuation_metrics"
+            )
+        return result
+
+    return cache.get_or_set(f"realtime_quote:{symbol}", _a_factory, TTL_REALTIME)
 
 
 def get_historical_price(
@@ -319,34 +309,28 @@ def get_historical_price(
     if start is not None and end is not None and start > end:
         raise ValueError(f"start_date 不能晚于 end_date（{start_date} > {end_date}）")
 
-    cache_key = f"hist_price:{code}:{period}:{start_date}:{end_date}:{adjust}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        import json
-        return json.loads(cached) if isinstance(cached, str) else cached
-
-    route_kwargs: dict[str, Any] = {
-        "symbol": code,
-        "period": period,
-        "start_date": start_date,
-        "end_date": end_date,
-        "adjust": adjust,
-    }
-    # 只认 count 不认日期区间的主源（eltdx/tdx_mcp）靠估算根数覆盖目标区间
-    estimate = _estimate_bar_count(period, start, end)
-    if estimate is not None:
-        route_kwargs["count"] = estimate
-
-    df, _src = _router.route("historical_kline", **route_kwargs)
-    if df is None or df.empty:
-        result = {
+    def _factory() -> dict[str, Any]:
+        route_kwargs: dict[str, Any] = {
             "symbol": code,
             "period": period,
-            "is_index": is_index,
-            "bars": [],
-            "source": _src,
+            "start_date": start_date,
+            "end_date": end_date,
+            "adjust": adjust,
         }
-    else:
+        # 只认 count 不认日期区间的主源（eltdx/tdx_mcp）靠估算根数覆盖目标区间
+        estimate = _estimate_bar_count(period, start, end)
+        if estimate is not None:
+            route_kwargs["count"] = estimate
+
+        df, _src = _router.route("historical_kline", **route_kwargs)
+        if df is None or df.empty:
+            return {
+                "symbol": code,
+                "period": period,
+                "is_index": is_index,
+                "bars": [],
+                "source": _src,
+            }
         df = _filter_by_date(df, start, end)
         if df.empty:
             raise ValueError(
@@ -360,7 +344,7 @@ def get_historical_price(
             for k, v in list(bar.items()):
                 if isinstance(v, str) and "T" in v and len(v) >= 10:
                     bar[k] = v[:10]
-        result = {
+        return {
             "symbol": code,
             "period": period,
             "adjust": adjust,
@@ -369,8 +353,10 @@ def get_historical_price(
             "bars": bars,
             "source": _src,
         }
-    cache.set(cache_key, result, TTL_DAILY)
-    return result
+
+    return cache.get_or_set(
+        f"hist_price:{code}:{period}:{start_date}:{end_date}:{adjust}", _factory, TTL_DAILY
+    )
 
 
 def get_intraday_data(symbol: str) -> dict[str, Any]:
@@ -387,53 +373,49 @@ def get_intraday_data(symbol: str) -> dict[str, Any]:
         Exception: 数据源异常时向上抛。
     """
     code, is_index = _resolve_symbol(symbol)
-    cache_key = f"intraday:{code}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        import json
-        return json.loads(cached) if isinstance(cached, str) else cached
 
-    df, _src = _router.route("minute_data", symbol=code)
-    if df is None or df.empty:
-        raise ValueError(f"获取分时数据失败 ({code}): 数据源返回空数据")
+    def _factory() -> dict[str, Any]:
+        df, _src = _router.route("minute_data", symbol=code)
+        if df is None or df.empty:
+            raise ValueError(f"获取分时数据失败 ({code}): 数据源返回空数据")
 
-    # 兼容 akshare(时间/开盘/收盘/均价/成交量) 与 eltdx(时间/价格/均价/成交量) 列名
-    col_map = {
-        "时间": "time", "time": "time",
-        "开盘": "open", "open": "open",
-        "收盘": "close", "close": "close", "价格": "close", "price": "close",
-        "最高": "high", "high": "high",
-        "最低": "low", "low": "low",
-        "均价": "avg_price", "avg_price": "avg_price",
-        "成交量": "volume", "volume": "volume",
-        "成交额": "amount", "amount": "amount",
-    }
-    df = df.rename(columns={k: v for k, v in col_map.items() if k in df.columns})
+        # 兼容 akshare(时间/开盘/收盘/均价/成交量) 与 eltdx(时间/价格/均价/成交量) 列名
+        col_map = {
+            "时间": "time", "time": "time",
+            "开盘": "open", "open": "open",
+            "收盘": "close", "close": "close", "价格": "close", "price": "close",
+            "最高": "high", "high": "high",
+            "最低": "low", "low": "low",
+            "均价": "avg_price", "avg_price": "avg_price",
+            "成交量": "volume", "volume": "volume",
+            "成交额": "amount", "amount": "amount",
+        }
+        df = df.rename(columns={k: v for k, v in col_map.items() if k in df.columns})
 
-    points = []
-    for _, row in df.iterrows():
-        time_val = str(row.get("time", ""))
-        price_val = float(row.get("close", row.get("price", 0)) or 0)
-        avg_val = float(row.get("avg_price", 0) or 0)
-        vol_val = int(row.get("volume", 0) or 0)
+        points = []
+        for _, row in df.iterrows():
+            time_val = str(row.get("time", ""))
+            price_val = float(row.get("close", row.get("price", 0)) or 0)
+            avg_val = float(row.get("avg_price", 0) or 0)
+            vol_val = int(row.get("volume", 0) or 0)
 
-        if time_val and price_val > 0:
-            points.append({
-                "time": time_val,
-                "price": price_val,
-                "avg_price": avg_val,
-                "volume": vol_val,
-            })
+            if time_val and price_val > 0:
+                points.append({
+                    "time": time_val,
+                    "price": price_val,
+                    "avg_price": avg_val,
+                    "volume": vol_val,
+                })
 
-    if not points:
-        raise ValueError(f"获取分时数据失败 ({code}): 无有效数据点")
+        if not points:
+            raise ValueError(f"获取分时数据失败 ({code}): 无有效数据点")
 
-    result = {
-        "code": code,
-        "is_index": is_index,
-        "point_count": len(points),
-        "points": points,
-        "source": _src,
-    }
-    cache.set(cache_key, result, TTL_REALTIME)
-    return result
+        return {
+            "code": code,
+            "is_index": is_index,
+            "point_count": len(points),
+            "points": points,
+            "source": _src,
+        }
+
+    return cache.get_or_set(f"intraday:{code}", _factory, TTL_REALTIME)

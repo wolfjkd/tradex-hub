@@ -33,49 +33,34 @@ def _df_to_records(df: pd.DataFrame, max_rows: int | None = None) -> list[dict]:
 
 def get_pmi() -> dict[str, Any]:
     """统计局 PMI。"""
-    cache_key = "pmi_data"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        import json
-        return json.loads(cached) if isinstance(cached, str) else cached
+    def _factory() -> dict[str, Any]:
+        df, src = _router.route("pmi_data")
+        records = _df_to_records(df)
+        return {"data": records, "source": src, "count": len(records)}
 
-    df, src = _router.route("pmi_data")
-    records = _df_to_records(df)
-    result = {"data": records, "source": src, "count": len(records)}
-    cache.set(cache_key, result, TTL_DAILY)
-    return result
+    return cache.get_or_set("pmi_data", _factory, TTL_DAILY)
 
 
 def get_bond_yield_curve(curve: str = "国债") -> dict[str, Any]:
     """中债收益率曲线。"""
-    cache_key = f"bond_yield_curve:{curve}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        import json
-        return json.loads(cached) if isinstance(cached, str) else cached
+    def _factory() -> dict[str, Any]:
+        df, src = _router.route("bond_yield_curve", curve=curve)
+        records = _df_to_records(df)
+        return {"curve": curve, "data": records, "source": src, "count": len(records)}
 
-    df, src = _router.route("bond_yield_curve", curve=curve)
-    records = _df_to_records(df)
-    result = {"curve": curve, "data": records, "source": src, "count": len(records)}
-    cache.set(cache_key, result, TTL_DAILY)
-    return result
+    return cache.get_or_set(f"bond_yield_curve:{curve}", _factory, TTL_DAILY)
 
 
 def get_index_valuation(index_code: str = "000300") -> dict[str, Any]:
     """中证指数官方估值（PE + 股息率，oss-ch.csindex.com.cn 一手文件）。"""
-    cache_key = f"index_valuation:{index_code}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        import json
-        return json.loads(cached) if isinstance(cached, str) else cached
+    def _factory() -> dict[str, Any]:
+        df, src = _router.route("index_valuation", index_code=index_code)
+        records = _df_to_records(df)
+        return {
+            "index_code": index_code,
+            "data": records,
+            "source": src,
+            "count": len(records),
+        }
 
-    df, src = _router.route("index_valuation", index_code=index_code)
-    records = _df_to_records(df)
-    result = {
-        "index_code": index_code,
-        "data": records,
-        "source": src,
-        "count": len(records),
-    }
-    cache.set(cache_key, result, TTL_DAILY)
-    return result
+    return cache.get_or_set(f"index_valuation:{index_code}", _factory, TTL_DAILY)
