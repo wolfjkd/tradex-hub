@@ -18,6 +18,32 @@ from .anti_ban_client import em_datacenter
 
 logger = logging.getLogger(__name__)
 
+# ── 东财 RPT_LIFT_STAGE 字段映射单点（批次C3 收敛，2026-11-11）──
+# 2026-11-10 实测字段改版：LIMITED_STOCK_TYPE→FREE_SHARES_TYPE、
+# FREE_SHARES_NUM→CURRENT_FREE_SHARES/FREE_SHARES。新名优先旧名兜底，
+# 对再次改版容忍（按旧名取值全空串=空壳行，比断更隐蔽）。
+# 此前 JSON 版 history/upcoming 两处 + 文本版 history/upcoming 两处各写一份
+# 取值逻辑，重映射只修了 JSON 版 → 文本版漏成假 0（审计候选⑤实证）。
+_LOCKUP_TYPE_FIELDS = ("FREE_SHARES_TYPE", "LIMITED_STOCK_TYPE")
+_LOCKUP_SHARES_FIELDS = ("CURRENT_FREE_SHARES", "FREE_SHARES", "FREE_SHARES_NUM")
+
+
+def _lockup_row(row: dict) -> dict:
+    """RPT_LIFT_STAGE 行 → 统一 {date, type, shares, ratio}（映射单点）。"""
+    def _first(*fields):
+        for f in fields:
+            v = row.get(f)
+            if v not in (None, ""):
+                return v
+        return ""
+
+    return {
+        "date": str(row.get("FREE_DATE", ""))[:10],
+        "type": _first(*_LOCKUP_TYPE_FIELDS),
+        "shares": _first(*_LOCKUP_SHARES_FIELDS),
+        "ratio": row.get("FREE_RATIO", ""),
+    }
+
 
 def get_lockup_expiry(
     ticker: str,
@@ -51,11 +77,12 @@ def get_lockup_expiry(
             lines.append(f"\n## 个股解禁记录 (共 {len(history_data)} 批)")
             lines.append("解禁时间 | 类型 | 解禁数量 | 占比")
             for row in history_data:
+                r = _lockup_row(row)
                 lines.append(
-                    f"  {str(row.get('FREE_DATE', ''))[:10]} "
-                    f"| {row.get('LIMITED_STOCK_TYPE', '')} "
-                    f"| {row.get('FREE_SHARES_NUM', '')} "
-                    f"| {row.get('FREE_RATIO', '')}"
+                    f"  {r['date']} "
+                    f"| {r['type']} "
+                    f"| {r['shares']} "
+                    f"| {r['ratio']}"
                 )
         else:
             lines.append("\n无历史解禁记录。")
@@ -83,11 +110,12 @@ def get_lockup_expiry(
         if upcoming_data:
             lines.append(f"\n## 未来 {forward_days} 天待解禁")
             for row in upcoming_data:
+                r = _lockup_row(row)
                 lines.append(
-                    f"  {str(row.get('FREE_DATE', ''))[:10]} "
-                    f"| {row.get('LIMITED_STOCK_TYPE', '')} "
-                    f"| 数量 {row.get('FREE_SHARES_NUM', '')} "
-                    f"| 占比 {row.get('FREE_RATIO', '')}"
+                    f"  {r['date']} "
+                    f"| {r['type']} "
+                    f"| 数量 {r['shares']} "
+                    f"| 占比 {r['ratio']}"
                 )
 
             # Risk summary
@@ -138,15 +166,7 @@ def get_lockup_expiry_json(
             sort_types="-1",
         )
         for row in (history_data or []):
-            # 2026-11-10 字段改版重映射：东财 RPT_LIFT_STAGE 实测改名
-            # LIMITED_STOCK_TYPE→FREE_SHARES_TYPE、FREE_SHARES_NUM→CURRENT_FREE_SHARES/FREE_SHARES；
-            # 旧名兜底保留，对再次改版容忍（此前按旧名取值全空串=空壳行，比断更隐蔽）。
-            result["history"].append({
-                "date": str(row.get("FREE_DATE", ""))[:10],
-                "type": row.get("FREE_SHARES_TYPE") or row.get("LIMITED_STOCK_TYPE") or "",
-                "shares": row.get("CURRENT_FREE_SHARES") or row.get("FREE_SHARES") or row.get("FREE_SHARES_NUM") or "",
-                "ratio": row.get("FREE_RATIO", ""),
-            })
+            result["history"].append(_lockup_row(row))
     except Exception as e:
         history_error = str(e)
 
@@ -168,12 +188,7 @@ def get_lockup_expiry_json(
         )
         total_ratio = 0.0
         for row in (upcoming_data or []):
-            result["upcoming"].append({
-                "date": str(row.get("FREE_DATE", ""))[:10],
-                "type": row.get("FREE_SHARES_TYPE") or row.get("LIMITED_STOCK_TYPE") or "",
-                "shares": row.get("CURRENT_FREE_SHARES") or row.get("FREE_SHARES") or row.get("FREE_SHARES_NUM") or "",
-                "ratio": row.get("FREE_RATIO", ""),
-            })
+            result["upcoming"].append(_lockup_row(row))
             try:
                 total_ratio += float(row.get("FREE_RATIO", 0))
             except (ValueError, TypeError):

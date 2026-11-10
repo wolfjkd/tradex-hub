@@ -47,3 +47,26 @@ class TestLockupFieldMapping:
             result = get_lockup_expiry_json("600170", "2026-06-24", 90)
         assert result["history"][0]["type"] == "定向增发"
         assert result["history"][0]["shares"] != ""
+
+
+class TestLockupTextFieldMapping:
+    def test_text_version_new_field_names_populate(self):
+        """文本版 get_lockup_expiry 同样吃字段映射单点（批次C3）。
+
+        2026-11-10 重映射只修了 JSON 版两处，文本版两处漏改仍读旧名
+        ——正是审计「列名漂移漏一处=假 0」的现行实例，本测试锁死收敛后行为。
+        """
+        from astock_signals.lockup import get_lockup_expiry
+
+        with patch("astock_signals.lockup.em_datacenter", return_value=[_NEW_ROW]):
+            text = get_lockup_expiry("600170", "2026-06-24", 90)
+        assert "定向增发" in text, "文本版 history 段不得空壳（新字段名必须出数）"
+        assert "12345" in text
+
+    def test_text_version_old_field_names_fallback(self):
+        from astock_signals.lockup import get_lockup_expiry
+
+        with patch("astock_signals.lockup.em_datacenter", return_value=[_OLD_ROW]):
+            text = get_lockup_expiry("600170", "2026-06-24", 90)
+        assert "定向增发" in text
+        assert "12345" in text
