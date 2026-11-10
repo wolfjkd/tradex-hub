@@ -202,6 +202,65 @@ def _effective_date(date: str) -> str:
 # ---------------------------------------------------------------- 统一信封
 
 
+def _build_envelope(
+    *,
+    endpoint_id: str,
+    date: str,
+    source: str,
+    partial: bool,
+    missing_reason,
+    payload,
+    text: str,
+    params: dict,
+    definitions: dict | None = None,
+    pools_used: list | None = None,
+    missing_pools: list | None = None,
+    compliance: str | None = None,
+    cache_info: tuple | None = None,
+) -> dict:
+    """统一信封单点构造（批次C1：原先手抄 5 份收拢于此）。
+
+    可选段：definitions / pools_used / missing_pools 进 computation；compliance
+    与 cache（cache_info = (policy, decision)）只在走缓存链的端点给出——
+    shortline.history 纯落库读取两段皆无，保持原状。
+    """
+    computation: dict = {
+        "params": params,
+        "computed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    if pools_used is not None:
+        computation["pools_used"] = pools_used
+    if missing_pools is not None:
+        computation["missing_pools"] = missing_pools
+    if definitions is not None:
+        computation["definitions"] = definitions
+
+    envelope: dict = {
+        "endpoint": endpoint_id,
+        "date": date,
+        "as_of": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "source": source,
+    }
+    if compliance is not None:
+        envelope["compliance"] = compliance
+    envelope.update({
+        "partial": partial,
+        "missing_reason": missing_reason,
+        "result": payload,
+        "text": text,
+        "computation": computation,
+        "cache_hit": False,
+    })
+    if cache_info is not None:
+        policy, decision = cache_info
+        envelope["cache"] = {
+            "policy": policy,
+            "ttl_seconds": decision.ttl_seconds,
+            "reason": decision.reason,
+        }
+    return envelope
+
+
 def _serve(endpoint_id: str, date: str, need: tuple[str, ...], compute_fn) -> dict:
     meta = get_endpoint(endpoint_id)
     key = cache_key(endpoint_id, date=_effective_date(date))
@@ -225,30 +284,21 @@ def _serve(endpoint_id: str, date: str, need: tuple[str, ...], compute_fn) -> di
         reasons["endpoint"] = endpoint_missing
 
     decision = resolve_cache(meta.cache_policy, partial=partial)
-    envelope = {
-        "endpoint": endpoint_id,
-        "date": snapshot.date,
-        "as_of": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "source": _SOURCE,
-        "compliance": _COMPLIANCE,
-        "partial": partial,
-        "missing_reason": reasons or None,
-        "result": payload,
-        "text": text,
-        "computation": {
-            "params": {"date": date or "auto"},
-            "pools_used": ["zt", *(p for p in _AUX_POOLS if snapshot.has(p))],
-            "missing_pools": list(snapshot.missing),
-            "definitions": _DEFINITIONS.get(endpoint_id, {}),
-            "computed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        },
-        "cache": {
-            "policy": meta.cache_policy,
-            "ttl_seconds": decision.ttl_seconds,
-            "reason": decision.reason,
-        },
-        "cache_hit": False,
-    }
+    envelope = _build_envelope(
+        endpoint_id=endpoint_id,
+        date=snapshot.date,
+        source=_SOURCE,
+        partial=partial,
+        missing_reason=reasons or None,
+        payload=payload,
+        text=text,
+        params={"date": date or "auto"},
+        definitions=_DEFINITIONS.get(endpoint_id, {}),
+        pools_used=["zt", *(p for p in _AUX_POOLS if snapshot.has(p))],
+        missing_pools=list(snapshot.missing),
+        compliance=_COMPLIANCE,
+        cache_info=(meta.cache_policy, decision),
+    )
     if decision.enabled:
         cache.set(key, envelope, decision.ttl_seconds)
     return envelope
@@ -322,30 +372,21 @@ def get_cycle(days: int = 5, date: str = "") -> dict:
         reasons["endpoint"] = payload["missing_reason"]
 
     decision = resolve_cache(meta.cache_policy, partial=partial)
-    envelope = {
-        "endpoint": "shortline.cycle",
-        "date": snapshot.date,
-        "as_of": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "source": f"shortline_store + {_SOURCE}",
-        "compliance": _COMPLIANCE,
-        "partial": partial,
-        "missing_reason": reasons or None,
-        "result": payload,
-        "text": text,
-        "computation": {
-            "params": {"days": window_days, "date": date or "auto"},
-            "pools_used": ["zt", *(p for p in _AUX_POOLS if snapshot.has(p))],
-            "missing_pools": list(snapshot.missing),
-            "definitions": _DEFINITIONS.get("shortline.cycle", {}),
-            "computed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        },
-        "cache": {
-            "policy": meta.cache_policy,
-            "ttl_seconds": decision.ttl_seconds,
-            "reason": decision.reason,
-        },
-        "cache_hit": False,
-    }
+    envelope = _build_envelope(
+        endpoint_id="shortline.cycle",
+        date=snapshot.date,
+        source=f"shortline_store + {_SOURCE}",
+        partial=partial,
+        missing_reason=reasons or None,
+        payload=payload,
+        text=text,
+        params={"days": window_days, "date": date or "auto"},
+        definitions=_DEFINITIONS.get("shortline.cycle", {}),
+        pools_used=["zt", *(p for p in _AUX_POOLS if snapshot.has(p))],
+        missing_pools=list(snapshot.missing),
+        compliance=_COMPLIANCE,
+        cache_info=(meta.cache_policy, decision),
+    )
     if decision.enabled:
         cache.set(key, envelope, decision.ttl_seconds)
     return envelope
@@ -480,30 +521,21 @@ def _themes_envelope(endpoint_id: str, date: str) -> dict:
     reasons_map: dict = dict(snapshot.reasons)
     if problems:
         reasons_map["theme_source"] = problems
-    envelope = {
-        "endpoint": endpoint_id,
-        "date": snapshot.date,
-        "as_of": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "source": source,
-        "compliance": _COMPLIANCE,
-        "partial": partial,
-        "missing_reason": reasons_map or None,
-        "result": payload,
-        "text": text,
-        "computation": {
-            "params": {"date": date or "auto"},
-            "pools_used": ["zt"],
-            "missing_pools": list(snapshot.missing),
-            "definitions": {"题材事件树": _THEME_DEFINITIONS["题材事件树"]},
-            "computed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        },
-        "cache": {
-            "policy": meta.cache_policy,
-            "ttl_seconds": decision.ttl_seconds,
-            "reason": decision.reason,
-        },
-        "cache_hit": False,
-    }
+    envelope = _build_envelope(
+        endpoint_id=endpoint_id,
+        date=snapshot.date,
+        source=source,
+        partial=partial,
+        missing_reason=reasons_map or None,
+        payload=payload,
+        text=text,
+        params={"date": date or "auto"},
+        definitions={"题材事件树": _THEME_DEFINITIONS["题材事件树"]},
+        pools_used=["zt"],
+        missing_pools=list(snapshot.missing),
+        compliance=_COMPLIANCE,
+        cache_info=(meta.cache_policy, decision),
+    )
     if decision.enabled:
         cache.set(key, envelope, decision.ttl_seconds)
     return envelope
@@ -578,30 +610,21 @@ def get_theme_rotation(days: int = 5, date: str = "") -> dict:
         )
 
     decision = resolve_cache(meta.cache_policy, partial=partial)
-    envelope = {
-        "endpoint": "shortline.theme_rotation",
-        "date": snapshot.date,
-        "as_of": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "source": f"{source} + shortline_store",
-        "compliance": _COMPLIANCE,
-        "partial": partial,
-        "missing_reason": reasons_map or None,
-        "result": rotation,
-        "text": text,
-        "computation": {
-            "params": {"days": window, "date": date or "auto"},
-            "pools_used": ["zt"],
-            "missing_pools": list(snapshot.missing),
-            "definitions": {"题材轮动": _THEME_DEFINITIONS["题材轮动"]},
-            "computed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        },
-        "cache": {
-            "policy": meta.cache_policy,
-            "ttl_seconds": decision.ttl_seconds,
-            "reason": decision.reason,
-        },
-        "cache_hit": False,
-    }
+    envelope = _build_envelope(
+        endpoint_id="shortline.theme_rotation",
+        date=snapshot.date,
+        source=f"{source} + shortline_store",
+        partial=partial,
+        missing_reason=reasons_map or None,
+        payload=rotation,
+        text=text,
+        params={"days": window, "date": date or "auto"},
+        definitions={"题材轮动": _THEME_DEFINITIONS["题材轮动"]},
+        pools_used=["zt"],
+        missing_pools=list(snapshot.missing),
+        compliance=_COMPLIANCE,
+        cache_info=(meta.cache_policy, decision),
+    )
     if decision.enabled:
         cache.set(key, envelope, decision.ttl_seconds)
     return envelope
@@ -633,33 +656,27 @@ def get_history(days: int = 10, date: str = "") -> dict:
             missing.append("落库历史为空（需先跑收盘定稿落库，窗口分位无历史可比）")
         dates = payload.get("dates") or []
         span = f"{dates[0]}…{dates[-1]}" if dates else "—"
-        return {
-            "endpoint": "shortline.history",
-            "date": _effective_date(date),
-            "as_of": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "source": "shortline.store",
-            "partial": False,
-            "missing_reason": missing or None,
-            "result": payload,
-            "text": f"落库 {payload.get('count', 0)} 天（{span}），缺 {len(payload.get('missing_dates', []))} 个工作日",
-            "computation": {
-                "params": {"days": window, "date": date or "auto"},
-                "definitions": {
-                    "composite_percentile": "当日涨停数/最高板/炸板率在落库窗口中的排名百分位均值（与 shortline.cycle 同口径）",
-                },
+        return _build_envelope(
+            endpoint_id="shortline.history",
+            date=_effective_date(date),
+            source="shortline.store",
+            partial=False,
+            missing_reason=missing or None,
+            payload=payload,
+            text=f"落库 {payload.get('count', 0)} 天（{span}），缺 {len(payload.get('missing_dates', []))} 个工作日",
+            params={"days": window, "date": date or "auto"},
+            definitions={
+                "composite_percentile": "当日涨停数/最高板/炸板率在落库窗口中的排名百分位均值（与 shortline.cycle 同口径）",
             },
-            "cache_hit": False,
-        }
+        )
     except Exception as exc:  # noqa: BLE001 —— 历史不可读整块降级
-        return {
-            "endpoint": "shortline.history",
-            "date": _effective_date(date),
-            "as_of": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "source": "shortline.store",
-            "partial": False,
-            "missing_reason": f"落库历史不可读：{exc}",
-            "result": {},
-            "text": "",
-            "computation": {"params": {"days": window, "date": date or "auto"}},
-            "cache_hit": False,
-        }
+        return _build_envelope(
+            endpoint_id="shortline.history",
+            date=_effective_date(date),
+            source="shortline.store",
+            partial=False,
+            missing_reason=f"落库历史不可读：{exc}",
+            payload={},
+            text="",
+            params={"days": window, "date": date or "auto"},
+        )
