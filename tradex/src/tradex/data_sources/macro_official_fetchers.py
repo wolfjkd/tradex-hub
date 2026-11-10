@@ -114,6 +114,44 @@ def fetch_nbs_pmi(**kwargs) -> pd.DataFrame:
 # 中债收益率曲线 — chinabond_yield_curve
 # ============================================================
 
+class ChinabondEmptyShellError(RuntimeError):
+    """中债接口返回空壳/空表（接口疑似改版）。
+
+    假数据比 5xx 更糟（健康分正常但读数无效），必须抛出走 SmartRouter 降级。
+    2026-11-10 引入：取代「空壳 in str(e)」消息字符串匹配哨兵——上游文案改了不再断语义。
+    """
+
+
+def _chinabond_html_to_curve_df(html_text: str) -> pd.DataFrame:
+    """HTML 兜底解析：归一成与 JSON 分支同 schema（期限/收益率(%)），失败/空壳返回空表。
+
+    2026-11-10 审计修复（双 schema）：read_html 分支此前原样返回 HTML 表，
+    列名与 JSON 分支不一致，下游 macro_service 规整逻辑对其必错位——现统一在此归一。
+    """
+    try:
+        tables = pd.read_html(io.StringIO(html_text))
+    except Exception:
+        return pd.DataFrame()
+    if not tables:
+        return pd.DataFrame()
+    t = tables[0].head(15)
+    if t.empty or not t.notna().to_numpy().any():
+        return pd.DataFrame()
+    col_term = next((c for c in t.columns if "期限" in str(c)), None)
+    col_yield = next((c for c in t.columns if "收益率" in str(c) or "利率" in str(c)), None)
+    if col_term is None or col_yield is None:
+        return pd.DataFrame()
+    out = pd.DataFrame(
+        {
+            "期限": t[col_term].astype(str).str.strip(),
+            "收益率(%)": pd.to_numeric(t[col_yield], errors="coerce"),
+        }
+    ).dropna(subset=["收益率(%)"])
+    if out.empty or (out["收益率(%)"] == 0).all():
+        return pd.DataFrame()
+    return out.reset_index(drop=True)
+
+
 def fetch_chinabond_yield_curve(
     curve: str = "国债",  # 国债 / 商业银行AAA / 中短票AAA
     **kwargs,
@@ -149,23 +187,16 @@ def fetch_chinabond_yield_curve(
         resp.raise_for_status()
         try:
             data = resp.json()
-        except Exception:
-            # 可能返回 HTML，尝试解析表格
-            try:
-                tables = pd.read_html(io.StringIO(resp.text))
-                if tables:
-                    t = tables[0].head(15)
-                    # 2026-11-08：yield_main 已改版为 JS 填充页面，read_html 只能
-                    # 拿到空壳骨架——假数据比 5xx 更糟，空壳必须抛出走降级。
-                    if not t.empty and t.notna().to_numpy().any():
-                        return t
-                    raise ValueError("中债收益率曲线 HTML 表格为空壳（接口疑似改版）")
-            except ValueError as ve:
-                if "空壳" in str(ve):
-                    raise
-            except Exception:
-                pass
-            raise  # 2026-09-28 审计修复：失败必须抛出，由 SmartRouter 记账降级（吞成空表会让降级链与健康分全部失效）
+        except Exception as json_exc:
+            # JSON 失败（接口半回归时可能返回 HTML 表）→ HTML 兜底归一解析；
+            # 2026-11-10 重构：消除「空壳 in str(e)」哨兵与 except 块外裸 raise，
+            # 失败显式抛 RuntimeError（带 json 真因链），由 SmartRouter 记账降级。
+            df = _chinabond_html_to_curve_df(resp.text)
+            if df.empty:
+                raise RuntimeError(
+                    f"中债收益率曲线空壳：json 解析失败({json_exc})且 HTML 表为空壳或无法归一"
+                ) from json_exc
+            return df
 
         items = data.get("data") or []
         if not items:
@@ -183,7 +214,9 @@ def fetch_chinabond_yield_curve(
         # 2026-11-08 修复：yield_main 已改版为 JS 填充页面，read_html 会解析出
         # 全 NaN 空壳——假数据比 5xx 更糟（健康分正常但读数无效），必须抛出走降级。
         if out.empty or out["收益率(%)"].isna().all() or (out["收益率(%)"] == 0).all():
-            raise ValueError(f"中债收益率曲线返回空壳（接口疑似改版），curve={curve}")
+            raise ChinabondEmptyShellError(
+                f"中债收益率曲线返回空壳（接口疑似改版），curve={curve}"
+            )
         return out
 
     except Exception as e:

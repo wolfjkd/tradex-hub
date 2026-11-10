@@ -11,9 +11,9 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.13+-blue.svg" alt="Python"/>
   <img src="https://img.shields.io/badge/MCP-1.0-green.svg" alt="MCP"/>
-  <img src="https://img.shields.io/badge/REST-81-blue.svg" alt="REST"/>
+  <img src="https://img.shields.io/badge/REST-82-blue.svg" alt="REST"/>
   <img src="https://img.shields.io/badge/Tools-191-orange.svg" alt="MCP Tools"/>
-  <img src="https://img.shields.io/badge/Endpoints-81-blue.svg" alt="REST Endpoints"/>
+  <img src="https://img.shields.io/badge/Endpoints-82-blue.svg" alt="REST Endpoints"/>
   <img src="https://img.shields.io/badge/License-Apache--2.0-yellow.svg" alt="License"/>
   <img src="https://img.shields.io/badge/Version-3.9.1-blue.svg" alt="Version"/>
 </p>
@@ -31,7 +31,7 @@ tradex-hub 是一个**本地运行的金融数据中台**，把分散在多个�
 | 能力 | 说明 |
 |------|------|
 | **统一接入** | 一套接口同时服务 MCP 客户端（AI Agent）和 HTTP 客户端（看板/前端），共享同一业务逻辑层 |
-| **多源融合** | 114 个数据类型，158 个数据源注册（80+ 上游），按封禁风险分梯队，自动降级 |
+| **多源融合** | 114 个数据类型，159 个数据源注册（80+ 上游），按封禁风险分梯队，自动降级 |
 | **量化计算** | 技术指标（MACD/KDJ/RSI/BOLL）、绩效指标、多因子分析、条件选股 |
 | **决策支持** | 交易信号生成、综合诊断（个股/市场/技术）、龙虎榜、涨停揭秘 |
 | **实时盯盘** | eltdx 通达信协议常驻连接，五档盘口准实时推送 |
@@ -133,7 +133,7 @@ flowchart LR
 | 协议 | 适用场景 | 接口形态 |
 |------|----------|----------|
 | **MCP** | AI Agent 对话式调用（工具描述可被 LLM 理解） | JSON-RPC over HTTP，191 个工具 |
-| **REST** | 看板 / 外部系统 / 自定义脚本 | 标准 HTTP + JSON，77 端点，包裹响应 `{code, data, msg}` |
+| **REST** | 看板 / 外部系统 / 自定义脚本 | 标准 HTTP + JSON，82 端点，包裹响应 `{code, data, msg}` |
 
 两个协议返回的数据**完全一致**（仅序列化差异：MCP 返 JSON 字符串、REST 返包裹 dict），契约严格对齐。
 
@@ -547,7 +547,7 @@ cat VERSION                    # 最简：发布版本号单一真源
 
 | 版本 | 日期 | 关键里程碑 |
 |------|------|-----------|
-| **v3.9.1** | 2026-11-09 | 零代码维护版：TradeX vibe 全量复刻消费验证（新增 6 页全量进程内消费，接口签名零变更）；数据源健康发现三项（news_data akshare 路径转义错误 / lockup 源 0 条 / index_constituents 路由待重建，均已被 TradeX 侧降级兜底） |
+| **v3.9.1** | 2026-11-09 | 接手清偿发版（原说明「零代码」已于 2026-11-10 勘误）：index_valuation 复活 + 中债空壳拦截/东财国债备源降级链 + prev_zt 封板时间注入 + shortline 晋级率分档 + akshare set_timeout 防御；MCP 190→191、REST 81→82、注册 157→159；另记录 TradeX vibe 全量复刻消费验证与数据源健康发现三项 |
 | **v3.9.0** | 2026-11-08 | 数据源扩容 + 工具治理：① **开盘啦 KPL 数据源**（涨停复盘/情绪/精选板块/竞价四类型，免鉴权直连，PidType 板位语义，字段位映射表 + 冒烟断言）；② **问财锁页破解**——定位缺失 `rsh` 根因，单请求 10→2000 行（涨停归因全量化）；③ KPL MCP 暴露 186→190、REST 77→81；④ **MCP 工具治理三入口**——工具可见性 profile（黑名单）+ CLI `mcp_profile.py` + TradeX 看板设置页 tab + 本数据看板面板，三方读写同一配置天然同步；⑤ 问财归因合并制（问财全量 + 同花顺补缺）；⑥ pywencai 正式入依赖；⑦ supervisor 单实例锁 O_EXCL 竞态修复。回归 1172 passed / 0 failed |
 | **v3.8.7** | 2026-11-06 | 短线数据底座（vibe-astock 借鉴批次 7 张工单）：① H1 声明式元数据（17 端点，CATALOG 三通道，缓存策略元数据驱动）；② H4 大市值名单（新浪主源+东财兜底，1h 缓存）；③ H5 全市场成交额榜（通达信盘后包 g4day 解析+实时降级）；④ H2 四池读数 8 端点（result/text/computation，口径全单测）；⑤ H3 收盘定稿落库（幂等/防覆盖/schema=2/历史回读，对抗东财约一个月保留期）；⑥ H6 题材/首板/盘面事实/题材轮动（问财→同花顺兜底）；⑦ H7 字段漂移 + 行业资金新浪第三上游 + 健康看板接入。MCP 168→186、REST 58→77 |
 | **v3.8.0** | 2026-11-01 | 依赖基线收口 + 运行时语义对齐：① 依赖下界提升（pandas≥2.2.2 / akshare≥1.20.21 / eltdx≥3.3.2），声明四方对齐生产值，uv.lock 失效雷拆除；② akshare 全局超时显式化 `set_timeout((10,30))`；③ SmartRouter 失败分级——限流轻罚不拉黑，日志区分限流/超时/硬失败；④ `eltdx_get_finance_batch` 缺失码跳过不再整批失败；⑤ 修复 `eltdx_stream.health()` 调用不存在的 `push_snapshot` 致推送统计恒空；⑥ 启动探针统一到 `tradex\.venv` 消除双环境漂移 |

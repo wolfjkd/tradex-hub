@@ -138,10 +138,13 @@ def get_lockup_expiry_json(
             sort_types="-1",
         )
         for row in (history_data or []):
+            # 2026-11-10 字段改版重映射：东财 RPT_LIFT_STAGE 实测改名
+            # LIMITED_STOCK_TYPE→FREE_SHARES_TYPE、FREE_SHARES_NUM→CURRENT_FREE_SHARES/FREE_SHARES；
+            # 旧名兜底保留，对再次改版容忍（此前按旧名取值全空串=空壳行，比断更隐蔽）。
             result["history"].append({
                 "date": str(row.get("FREE_DATE", ""))[:10],
-                "type": row.get("LIMITED_STOCK_TYPE", ""),
-                "shares": row.get("FREE_SHARES_NUM", ""),
+                "type": row.get("FREE_SHARES_TYPE") or row.get("LIMITED_STOCK_TYPE") or "",
+                "shares": row.get("CURRENT_FREE_SHARES") or row.get("FREE_SHARES") or row.get("FREE_SHARES_NUM") or "",
                 "ratio": row.get("FREE_RATIO", ""),
             })
     except Exception as e:
@@ -167,8 +170,8 @@ def get_lockup_expiry_json(
         for row in (upcoming_data or []):
             result["upcoming"].append({
                 "date": str(row.get("FREE_DATE", ""))[:10],
-                "type": row.get("LIMITED_STOCK_TYPE", ""),
-                "shares": row.get("FREE_SHARES_NUM", ""),
+                "type": row.get("FREE_SHARES_TYPE") or row.get("LIMITED_STOCK_TYPE") or "",
+                "shares": row.get("CURRENT_FREE_SHARES") or row.get("FREE_SHARES") or row.get("FREE_SHARES_NUM") or "",
                 "ratio": row.get("FREE_RATIO", ""),
             })
             try:

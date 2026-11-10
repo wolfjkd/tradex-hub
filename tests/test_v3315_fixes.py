@@ -259,7 +259,8 @@ class TestBackupSourceRegistration:
         #   → 153（2026-11-06 shortline 批次：bigcaps 2 + tdx_daily_package 1
         #          + industry_comparison sina_industry 1）
         #   → 157（2026-11-07 KPL 批次：kpl_* 4 类型各 1 独占注册）
-        assert sum(len(v) for v in router._sources.values()) == 159  # 2026-11-08 +index_valuation +em_bond_backup 备源
+        #   → 159（2026-11-08 接手清偿：+index_valuation 类型 +em_bond_backup 备源）
+        assert sum(len(v) for v in router._sources.values()) == 159
 
     def test_new_sources_registered_with_priority(self, router):
         for data_type, name, prio in NEW_SOURCES:

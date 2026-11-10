@@ -7,9 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ---
 
-## [3.9.1] - 2026-11-09（零代码维护版：TradeX 全量复刻消费验证 + 数据源健康发现）
+## [3.9.1] - 2026-11-09（发版说明 2026-11-10 勘误：原「零代码维护版」与版本区间不符）
 
-> 本版无代码改动。TradeX 完成 vibe-astock 全量复刻（12 笔提交 CI 12 连绿），全程进程内消费 hub 能力，本版记录消费验证结论与发现的 hub 侧数据源问题。
+> **勘误**：版本区间 v3.9.0..v3.9.1 实含 6 个代码提交（`f1cea7a`..`ec07154`），并非零代码——原说明把「vibe 全量复刻批次 hub 零改动」误写成了「版本零改动」。口径：MCP 190→191 / REST 81→82 / 类型 113→114 / 注册 157→159。
+> TradeX 完成 vibe-astock 全量复刻（12 笔提交 CI 12 连绿），全程进程内消费 hub 能力。
+
+### 代码变更（随本版发布）
+- `index_valuation` 复活：中证官方 OSS 一手估值文件（`f1cea7a`）
+- 中债 yield_main 改版空壳假数据拦截 + 东财国债备源降级链（`b5477da`）
+- prev_zt 封板时间注入 + 涨停池日期污染修复（`2926a24`）
+- akshare `_ak()` set_timeout getattr 防御（`fa90e37`）
+- shortline 晋级率三档分档 + 定稿历史增强（`b7103b5`）
+- 移除误提交的仓库根 uv.lock（`ec07154`）
 
 ### 发现（待下批修复）
 - `news_data` akshare 路径 `ArrowInvalid: invalid escape sequence` 转义错误（SmartRouter 自动降级 P999 `em_news_direct` 正常出数）
@@ -18,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ### 验证
 - 短线全家族 / K线 / 新闻 / 公告 / 宏观日历 / 业绩预告 / 龙虎榜 / 板块资金流 / 两融 / 估值 / 国债 被 TradeX 新增 6 页全量消费，接口签名零变更
-- hub 652 passed 基线未受影响（零改动未重跑）
+- 全量回归 1194 passed / 0 failed（11-08 清偿批次实测）；652 为 TradeX 复刻消费验证时的内层子集基线
 
 ## [3.9.0] - 2026-11-08（数据源扩容 + MCP 工具治理）
 

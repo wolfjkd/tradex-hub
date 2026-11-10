@@ -75,6 +75,89 @@ class TestChinabondGuard:
         assert df.notna().to_numpy().any()
 
 
+    def test_json_branch_shell_raises_custom(self):
+        """JSON 分支空壳 → ChinabondEmptyShellError（2026-11-10 补：票B json 分支此前无测试覆盖）。"""
+        from tradex.data_sources.macro_official_fetchers import (
+            ChinabondEmptyShellError,
+            fetch_chinabond_yield_curve,
+        )
+
+        class FakeResp:
+            text = "{}"
+            content = b"{}"
+
+            def json(self):
+                # 全 0 收益率 = 空壳（与全 NaN 同判）
+                return {"data": [{"term": "10年", "yield": 0}, {"term": "5年", "yield": 0}]}
+
+            def raise_for_status(self):
+                return None
+
+        with patch(
+            "tradex.data_sources.macro_official_fetchers.curl_requests.get",
+            return_value=FakeResp(),
+        ):
+            with pytest.raises(ChinabondEmptyShellError, match="空壳"):
+                fetch_chinabond_yield_curve()
+
+    def test_html_fallback_normalized_schema(self):
+        """HTML 兜底归一（2026-11-10 B2）：返回列必须与 JSON 分支同 schema（期限/收益率(%)）。"""
+        from tradex.data_sources.macro_official_fetchers import (
+            fetch_chinabond_yield_curve,
+        )
+
+        good_html = (
+            "<table><tr><th>期限</th><th>收益率(%)</th></tr>"
+            "<tr><td>10年</td><td>1.5868</td></tr>"
+            "<tr><td>5年</td><td>1.31</td></tr></table>"
+        )
+
+        class FakeResp:
+            text = good_html
+            content = good_html.encode()
+
+            def json(self):
+                raise ValueError("not json")
+
+            def raise_for_status(self):
+                return None
+
+        with patch(
+            "tradex.data_sources.macro_official_fetchers.curl_requests.get",
+            return_value=FakeResp(),
+        ):
+            df = fetch_chinabond_yield_curve()
+        assert list(df.columns) == ["期限", "收益率(%)"]
+        assert df[df["期限"] == "10年"]["收益率(%)"].iloc[0] == pytest.approx(1.5868)
+
+    def test_html_unrecognizable_columns_raises(self):
+        """HTML 表列名无法归一（无期限/收益率列）→ 抛出走降级，不返回错位 schema。"""
+        from tradex.data_sources.macro_official_fetchers import (
+            fetch_chinabond_yield_curve,
+        )
+
+        weird_html = (
+            "<table><tr><th>颜色</th><th>数值</th></tr><tr><td>红</td><td>1.5</td></tr></table>"
+        )
+
+        class FakeResp:
+            text = weird_html
+            content = weird_html.encode()
+
+            def json(self):
+                raise ValueError("not json")
+
+            def raise_for_status(self):
+                return None
+
+        with patch(
+            "tradex.data_sources.macro_official_fetchers.curl_requests.get",
+            return_value=FakeResp(),
+        ):
+            with pytest.raises(RuntimeError, match="空壳"):
+                fetch_chinabond_yield_curve()
+
+
 class TestEmBondBackup:
     def test_curve_guard(self):
         """备源仅支持国债曲线，其余抛出走记账。"""

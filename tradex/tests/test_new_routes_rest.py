@@ -149,6 +149,10 @@ class TestEventRest:
 class TestMacroRest:
     """/api/v1/macro/*"""
 
+    # 2026-11-10 批次A收尾补标：本用例真连国家统计局官网（SmartRouter 12s 超时实证，
+    # 源连接被重置时 502 ≠ 契约失败）——按 7747e2b 对 company_financial_rest 的同款
+    # 模式打 network 标，离线全量 -m "not network" 排除（与本文件 docstring 声明对齐）。
+    @pytest.mark.network
     def test_pmi_returns_envelope(self, client):
         _clear_cache()
         r = client.get("/api/v1/macro/pmi")
