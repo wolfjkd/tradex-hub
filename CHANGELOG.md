@@ -22,6 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 ### 验证
 - 四件检查全绿；全量回归 1227 passed / 5 skipped / 36 deselected
 
+### 裁决执行（2026-11-11 老板四条裁决，同版本段补记）
+- **① index_constituents 暴露**：新增 MCP 工具 `get_index_constituents`（192，L1 149→150）+ REST `GET /api/v1/macro/index-constituents`（83）；service/macro_service 加 get_index_constituents（get_or_set 统一边界）；visibility_catalog 归组；MCP_TOOLS.md 重生成；计数四处一体（REST 断言/工具断言/README badge+正文/MCP_TOOLS）
+- **② REST 错误语义统一**：废除 B 形怪癖（ValueError→502），全仓单一 serve_envelope 语义（ValueError→400 / 其余→502 / HTTPException 穿透）；13 处 serve_envelope_400 调用归一、_helpers 单点重写、helper 测试改形
+- **③ D2 挂载（老板授权 AI 定）**：四件检查核心进全量回归（pytest 内 main() 断言，见 tests/test_guard_checks.py）+ CLI 保留手动用法——每次施工验证门自动核验，零环境依赖
+- **④ 发版时机**：老板自控，不再提醒（tag/Release 仍禁做，等老板自然触发）
+
 ---
 
 ## [3.9.3] - 2026-11-11（审计批次 C：架构深化五候选全做，无人值守施工）

@@ -150,3 +150,27 @@ class TestIndexConstituentsLive:
         assert not df.empty
         assert len(df) == 300
         assert df.iloc[0]["成分券代码"] == "000001"  # 平安银行，补零正确
+
+
+class TestIndexConstituentsService:
+    def test_service_wraps_router_records(self):
+        """service.get_index_constituents：路由结果 → records 包装（裁决① 暴露链）。"""
+        from unittest.mock import MagicMock, patch
+
+        import pandas as pd
+
+        from tradex.service import macro_service
+
+        df = pd.DataFrame({
+            "日期": ["20261110", "20261110"],
+            "成分券代码": ["000001", "600000"],
+            "成分券名称": ["平安银行", "浦发银行"],
+            "交易所": ["深圳证券交易所", "上海证券交易所"],
+        })
+        with patch.object(macro_service, "_router") as mock_router:
+            mock_router.route.return_value = (df, "csindex_official")
+            out = macro_service.get_index_constituents("000300")
+        assert out["index_code"] == "000300"
+        assert out["count"] == 2
+        assert out["source"] == "csindex_official"
+        assert out["constituents"][0]["成分券代码"] == "000001"

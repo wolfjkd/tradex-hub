@@ -15,7 +15,7 @@ service 层异常（含 RuntimeError 包装后的原 panic）一律转 502 + cod
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
-from ._helpers import serve_envelope_400, serve_envelope
+from ._helpers import serve_envelope
 
 from ...api.schemas import (
     ERR_BAD_REQUEST,
@@ -33,7 +33,7 @@ def quote(
     symbol: str = Query(..., min_length=2, description="A 股 6 位代码（600519）或全球代码（usDJI）"),
 ) -> Envelope[dict]:
     """实时报价。"""
-    return serve_envelope_400(lambda: price_service.get_realtime_quote(symbol=symbol))
+    return serve_envelope(lambda: price_service.get_realtime_quote(symbol=symbol))
 
 @router.get("/kline", response_model=Envelope[dict])
 def kline(
@@ -75,4 +75,4 @@ def intraday(
             detail=f"symbol 必须是 6 位数字代码，收到: {symbol}",
             headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
         )
-    return serve_envelope_400(lambda: price_service.get_intraday_data(symbol=symbol))
+    return serve_envelope(lambda: price_service.get_intraday_data(symbol=symbol))

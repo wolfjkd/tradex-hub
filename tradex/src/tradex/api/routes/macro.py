@@ -47,6 +47,13 @@ def index_valuation(
     """中证指数官方估值（PE + 股息率）。"""
     return serve_envelope(lambda: macro_service.get_index_valuation(index_code=index_code))
 
+@router.get("/index-constituents", response_model=Envelope[dict])
+def index_constituents(
+    index_code: str = Query("000300", description="指数代码，如 000300 沪深300"),
+) -> Envelope[dict]:
+    """中证指数官方成分股名单（仅中证系，国证 399 开头无文件）。"""
+    return serve_envelope(lambda: macro_service.get_index_constituents(index_code=index_code))
+
 @router.get("/sw-industry-history", response_model=Envelope[dict])
 def sw_industry_history(
     force_refresh: bool = Query(False, description="强制刷新缓存"),

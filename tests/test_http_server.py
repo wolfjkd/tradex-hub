@@ -47,7 +47,7 @@ def test_health_ok():
     assert body["status"] == "ok"
     assert body["service"] == "tradex-mcp"
     assert body["version"]  # 非空即满足（版本由 VERSION 单一事实源驱动）
-    assert body["tools"] == 191  # 2026-11-08 中证估值复活 +1（190→191）
+    assert body["tools"] == 192  # 2026-11-08 中证估值复活 +1；2026-11-11 裁决① index_constituents 暴露 +1
     assert body["uptime_seconds"] >= 0
 
 

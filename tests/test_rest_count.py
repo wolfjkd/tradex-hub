@@ -32,5 +32,5 @@ def _rest_path_count() -> int:
 
 class TestRestEndpointCount:
     def test_rest_endpoint_count(self):
-        """REST 端点数护栏：82（2026-11-11 批次D2③；B/C/D 未增删端点）。"""
-        assert _rest_path_count() == 82
+        """REST 端点数护栏：83（2026-11-11 裁决①：+GET /macro/index-constituents）。"""
+        assert _rest_path_count() == 83

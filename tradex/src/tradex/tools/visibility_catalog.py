@@ -93,6 +93,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         "get_macro_cpi", "get_macro_gdp", "get_macro_money_supply", "get_macro_pmi",
         "get_pmi", "get_bond_yield_curve", "get_bond_yield_curve_official",
         "get_index_valuation",
+        "get_index_constituents",
         "get_fx_rate", "get_futures_news", "get_global_market_quote",
         "get_wallstreetcn_lives", "get_macro_calendar", "query_macro_indicator",
         "get_cctv_news",

@@ -8,7 +8,7 @@
 - **venv 口径**：pytest 在 `tradex/.venv`（仓库根 `.venv` 无 pytest；`tradex/venv` 不存在）。
 - **全量回归**（两层，`tests` + `tradex/tests` 各自 conftest）：
   `./tradex/.venv/Scripts/python.exe -m pytest tests tradex/tests -m "not network" -q`
-  基线 **1207 passed / 5 skipped / 36 deselected**（2026-11-11，批次BCD 后）。
+  基线 **1230 passed / 5 skipped / 36 deselected**（2026-11-11，批次BCD + 裁决①②③ 执行后）。
   只认「退出码 + 总结行」；跑前确认无遗留 python/pytest 进程（并发 pytest 互污染 `.pytest_cache`）。
 - 依赖用 **uv** 管理（`tradex/uv.lock`）；装新依赖 `cd tradex && uv add <pkg>`。
 
@@ -34,8 +34,8 @@
 8. **visibility_catalog 手工归组**（`tradex/tools/visibility_catalog.py` 纯数据真源）：
    加 MCP 工具后在此归组，工具计数断言同步。
 9. **REST 错误样板**：新端点用 `routes/_helpers.py` 的
-   `serve_envelope`（全→502）/ `serve_envelope_400`（ValueError→400）+
-   `validate_symbol`；不要新定义本地错误转换 helper。
+   `serve_envelope`（**唯一语义**（2026-11-11 裁决统一）：ValueError→400 /
+   其余→502 / HTTPException 穿透）+ `validate_symbol`；不要新定义本地错误转换 helper。
 10. **collect_snapshot 契约**：shortline 四池快照经 `_serve`/`_build_envelope`
     统一信封出（含 compliance/cache 段）；`shortline.history` 例外无此两段（纯落库读）。
 11. **数据源注册**：改 `registry.py` 的 `_SOURCE_TABLE` 五元组表（历史裁决注释随行内联），
@@ -47,7 +47,8 @@
 - 版本管理：SemVer；发版 SOP 见真源 `2-独立规则/版本管理规则.md`（软件项目 6 处同步）。
 - CHANGELOG 措辞必须对照 git log 史实（v3.9.1「零代码」失实教训）；
   `scripts/check_changelog_claims.py` 可机械核验（发版前跑）。
-- 确定性检查脚本（本仓 CI 替代，无 GitHub Actions，发版/改计数前必跑）：
+- 确定性检查脚本（**挂载 = 全量回归门内自动核验**（2026-11-11 裁决③，tests/test_guard_checks.py
+  跑 main() 断言）+ CLI 手动用法保留；无 GitHub Actions）：
   `scripts/check_dep_sync.py`（依赖双处）、
   `scripts/check_readme_counts.py`（README 计数 vs 实跑）、
   `scripts/check_changelog_claims.py`（CHANGELOG 措辞 vs git log，`--selftest` 自证）；

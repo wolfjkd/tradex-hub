@@ -48,11 +48,11 @@ class TestTdxMcpToolCount:
         assert os.path.exists(p), f"tdx_tq.py 不存在: {p}"
         assert _count_decorators(p) == 2
 
-    def test_total_tool_count_is_190(self):
-        """全量工具数 = 191（2026-11-08 中证官方估值复活 +1：190→191）。"""
+    def test_total_tool_count_is_192(self):
+        """全量工具数 = 192（2026-11-11 裁决① index_constituents 暴露 +1：191→192）。"""
         total = 0
         for py in glob.glob(os.path.join(_TOOLS_DIR, "*.py")):
             if py.endswith("__init__.py") or py.endswith("registry.py"):
                 continue
             total += _count_decorators(py)
-        assert total == 191, f"期望工具总数 191，实得 {total}"
+        assert total == 192, f"期望工具总数 192，实得 {total}"

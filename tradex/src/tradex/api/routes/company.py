@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
-from ._helpers import serve_envelope_400, serve_envelope
+from ._helpers import serve_envelope
 
 from ...api.schemas import (
     ERR_BAD_REQUEST,
@@ -43,7 +43,7 @@ def info(
             detail=f"symbol 必须是 6 位数字代码，收到: {symbol}",
             headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
         )
-    return serve_envelope_400(lambda: company_service.get_company_info(symbol=symbol))
+    return serve_envelope(lambda: company_service.get_company_info(symbol=symbol))
 
 @router.get("/profile", response_model=Envelope[dict])
 def profile(
@@ -68,4 +68,4 @@ def competitors(
             status_code=400, detail=f"symbol 必须是 6 位数字代码，收到: {symbol}",
             headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
         )
-    return serve_envelope_400(lambda: company_service.get_competitors(symbol=symbol, industry=industry))
+    return serve_envelope(lambda: company_service.get_competitors(symbol=symbol, industry=industry))

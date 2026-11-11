@@ -78,3 +78,25 @@ def register(mcp: FastMCP):
             return json.dumps(result, ensure_ascii=False)
         except Exception as e:
             return error_response(f"获取指数估值失败: {e}", "get_index_valuation")
+
+    @mcp.tool()
+    async def get_index_constituents(index_code: str = "000300") -> str:
+        """
+        获取中证指数官方成分股名单（中证官网一手文件，日度更新）。
+
+        仅覆盖中证系指数（000300 沪深300 / 000905 中证500 / 980017 等
+        中证公司发布代码）；国证系（399 开头，如 399006 创业板指）无
+        cons 文件，请求会返回错误。
+
+        Args:
+            index_code: 指数代码，默认 000300 沪深300
+
+        Returns:
+            成分名单 (JSON)，含日期、成分券代码（6 位补零）、成分券名称、
+            交易所，按代码升序。
+        """
+        try:
+            result = macro_service.get_index_constituents(index_code=index_code)
+            return json.dumps(result, ensure_ascii=False)
+        except Exception as e:
+            return error_response(f"获取指数成分股失败: {e}", "get_index_constituents")

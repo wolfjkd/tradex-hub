@@ -64,3 +64,23 @@ def get_index_valuation(index_code: str = "000300") -> dict[str, Any]:
         }
 
     return cache.get_or_set(f"index_valuation:{index_code}", _factory, TTL_DAILY)
+
+
+def get_index_constituents(index_code: str = "000300") -> dict[str, Any]:
+    """中证指数官方成分股名单（oss-ch.csindex.com.cn 一手文件，仅中证系）。
+
+    2026-11-11 老板裁决：index_constituents 加 MCP/REST 暴露（此前仅 hub
+    内部路由可达）。国证系（399 开头）无源文件，路由层会抛错（fetcher 404
+    转译已注明覆盖范围）。
+    """
+    def _factory() -> dict[str, Any]:
+        df, src = _router.route("index_constituents", index_code=index_code)
+        records = _df_to_records(df)
+        return {
+            "index_code": index_code,
+            "constituents": records,
+            "source": src,
+            "count": len(records),
+        }
+
+    return cache.get_or_set(f"index_constituents:{index_code}", _factory, TTL_DAILY)

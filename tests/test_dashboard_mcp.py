@@ -34,12 +34,12 @@ def _isolate(monkeypatch, tmp_path):
 
 def test_catalog_shape():
     data = dash.get_mcp_catalog_data()
-    assert data["total"] == 191
+    assert data["total"] == 192
     assert len(data["groups"]) == 26
     assert data["profile"] == "full"  # tmp 无 profile 文件 → full
     assert data["gateway_tools"] == 116
     names = [t["name"] for g in data["groups"] for t in g["tools"]]
-    assert len(names) == 191
+    assert len(names) == 192
 
 
 def test_apply_lean_writes_and_invalidates_cache(monkeypatch):
@@ -54,13 +54,13 @@ def test_apply_lean_writes_and_invalidates_cache(monkeypatch):
         mcp_profile_io.profile_path().read_text(encoding="utf-8")
     )
     assert written["profile"] == "lean"
-    assert len(written["hidden_tools"]) == 75  # 2026-11-08 191 工具：get_index_valuation 归低频组，lean 隐藏
+    assert len(written["hidden_tools"]) == 76  # 2026-11-08 191 工具 get_index_valuation + 2026-11-11 get_index_constituents 均归低频组，lean 隐藏
 
 
 def test_apply_full_clears_hidden(monkeypatch):
     dash.apply_mcp_preset("lean")
     out = dash.apply_mcp_preset("full")
-    assert out["enabled"] == 191
+    assert out["enabled"] == 192
     from tradex.tools import mcp_profile_io
 
     written = json.loads(

@@ -16,7 +16,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
-from ._helpers import serve_envelope_400, validate_symbol
+from ._helpers import serve_envelope, validate_symbol
 
 from ...api.schemas import (
     ERR_BAD_REQUEST,
@@ -36,7 +36,7 @@ def income(
 ) -> Envelope[dict]:
     """利润表（按季度）。"""
     validate_symbol(symbol)
-    return serve_envelope_400(lambda: financial_service.get_income_statement(symbol=symbol, num_quarters=num_quarters))
+    return serve_envelope(lambda: financial_service.get_income_statement(symbol=symbol, num_quarters=num_quarters))
 
 @router.get("/balance", response_model=Envelope[dict])
 def balance(
@@ -45,7 +45,7 @@ def balance(
 ) -> Envelope[dict]:
     """资产负债表（按季度）。"""
     validate_symbol(symbol)
-    return serve_envelope_400(lambda: financial_service.get_balance_sheet(symbol=symbol, num_quarters=num_quarters))
+    return serve_envelope(lambda: financial_service.get_balance_sheet(symbol=symbol, num_quarters=num_quarters))
 
 @router.get("/cashflow", response_model=Envelope[dict])
 def cashflow(
@@ -54,7 +54,7 @@ def cashflow(
 ) -> Envelope[dict]:
     """现金流量表（按季度）。"""
     validate_symbol(symbol)
-    return serve_envelope_400(lambda: financial_service.get_cash_flow_statement(symbol=symbol, num_quarters=num_quarters))
+    return serve_envelope(lambda: financial_service.get_cash_flow_statement(symbol=symbol, num_quarters=num_quarters))
 
 @router.get("/line-item", response_model=Envelope[dict])
 def line_item(
@@ -64,7 +64,7 @@ def line_item(
 ) -> Envelope[dict]:
     """从三大财务报表中提取特定科目。"""
     validate_symbol(symbol)
-    return serve_envelope_400(lambda: financial_service.get_financial_line_item(symbol=symbol, item=item, num_quarters=num_quarters))
+    return serve_envelope(lambda: financial_service.get_financial_line_item(symbol=symbol, item=item, num_quarters=num_quarters))
 
 @router.get("/indicators", response_model=Envelope[dict])
 def indicators(
@@ -73,7 +73,7 @@ def indicators(
 ) -> Envelope[dict]:
     """财务分析指标（ROE/毛利率/资产负债率等）。"""
     validate_symbol(symbol)
-    return serve_envelope_400(lambda: financial_service.get_financial_indicators(symbol=symbol, num_periods=num_periods))
+    return serve_envelope(lambda: financial_service.get_financial_indicators(symbol=symbol, num_periods=num_periods))
 
 @router.get("/growth", response_model=Envelope[dict])
 def growth(
@@ -82,7 +82,7 @@ def growth(
 ) -> Envelope[dict]:
     """成长性指标（营收/净利润增长率）。"""
     validate_symbol(symbol)
-    return serve_envelope_400(lambda: financial_service.get_growth_rates(symbol=symbol, num_periods=num_periods))
+    return serve_envelope(lambda: financial_service.get_growth_rates(symbol=symbol, num_periods=num_periods))
 
 @router.get("/per-share", response_model=Envelope[dict])
 def per_share(
@@ -91,7 +91,7 @@ def per_share(
 ) -> Envelope[dict]:
     """每股指标（EPS/BPS/CFPS）。"""
     validate_symbol(symbol)
-    return serve_envelope_400(lambda: financial_service.get_per_share_data(symbol=symbol, num_periods=num_periods))
+    return serve_envelope(lambda: financial_service.get_per_share_data(symbol=symbol, num_periods=num_periods))
 
 @router.get("/segments", response_model=Envelope[dict])
 def segments(
@@ -99,4 +99,4 @@ def segments(
 ) -> Envelope[dict]:
     """主营业务构成（按产品/地区分拆营收）。"""
     validate_symbol(symbol)
-    return serve_envelope_400(lambda: financial_service.get_segments_revenue(symbol=symbol))
+    return serve_envelope(lambda: financial_service.get_segments_revenue(symbol=symbol))
