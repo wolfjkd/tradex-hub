@@ -540,3 +540,65 @@ def fetch_industry_comparison_sina(
     }
 
 
+def fetch_sina_world_index(code: str = "KOSPI", **kwargs) -> dict[str, Any]:
+    """新浪全球指数实时（znb_ 族，hq.sinajs.cn 直连）——东财限流时的独立备源。
+
+    2026-11-14 实测（KOSPI）：与东财全球指数表/大智慧365 本地源三方交叉验证一致
+    （首尔综合指数 5290.53、涨跌幅 -0.98%）。适用场景：TradeX 指数关注池海外指数
+    在东财 push2 限流冷却期内的独立直连备源（hq.sinajs.cn 与 push2 不同桶）。
+
+    Args:
+        code: 新浪 znb 指数代码（**大写**），如 KOSPI（首尔综合指数）；完整代码
+              清单见 finance.sina.com.cn/money/globalindex/ 页面（hq_znb_XXX 容器）。
+
+    Returns:
+        {name, point, pct, lastclose, open, high, low, amount=0}；
+        znb_ 族**无成交额字段**（amount=0，前端隐藏成交额行——该空必须空）；
+        **不含恒生科技**（HSTECH 走腾讯 hk 源）。
+
+    注意：代码大小写敏感（实测 znb_kospi 小写返回空，znb_KOSPI 正常）。
+    """
+    url = "https://hq.sinajs.cn/list=znb_" + code
+    resp = curl_requests.get(
+        url,
+        headers={"User-Agent": _UA, "Referer": "https://finance.sina.com.cn"},
+        timeout=_TIMEOUT,
+        impersonate="chrome120",
+    )
+    # hq.sinajs.cn 返回 GBK；空代码族返回 var hq_str_znb_XXX="";
+    text = resp.content.decode("gbk", errors="ignore")
+    if '"' not in text:
+        return {}
+    fields = text.split('"')[1].split(",")
+    return _parse_znb_fields(fields)
+
+
+def _parse_znb_fields(fields: list[str]) -> dict[str, Any]:
+    """znb_ 行解析（纯函数便于单测）。字段位次 2026-11-14 实测：
+    0=名称 1=最新价 2=涨跌额 3=涨跌幅 8=开盘 9=昨收 10=最高 11=最低。"""
+    if not fields or not fields[0]:
+        return {}
+
+    def _f(idx: int) -> float | None:
+        try:
+            return float(fields[idx])
+        except (IndexError, TypeError, ValueError):
+            return None
+
+    point = _f(1)
+    if point is None:
+        return {}
+    lastclose = _f(9)
+    pct = _f(3)
+    return {
+        "name": fields[0],
+        "point": point,
+        "pct": pct,
+        "lastclose": lastclose,
+        "open": _f(8),
+        "high": _f(10),
+        "low": _f(11),
+        "amount": 0.0,  # znb 族无成交额字段 → 0（前端隐藏成交额行——该空必须空）
+    }
+
+
