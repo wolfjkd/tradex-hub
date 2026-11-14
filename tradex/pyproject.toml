@@ -43,6 +43,9 @@ dependencies = [
     # registry 主链顶层 import（tq_fetchers/tdx_mcp_fetchers，stdio 模式必加载），此前靠
     # mcp SDK 传递依赖侥幸可用——与 prometheus_client 同款隐患（Issue #2 全量依赖审计补声明）
     "httpx>=0.28.1",
+    # 大智慧365 本地 WS 源（dzh_fetchers：本机 127.0.0.1 回环行情，含韩国KOSPI 等
+    # IX*.index 全球指数——东财 push2 限流的备份源；协议破译源自 dzh-queue 项目）
+    "websocket-client>=1.6.0",
     # 东财 push2his 直连绕系统代理（akshare_fetchers 主源路径使用）；akshare 硬传递依赖显式化，
     # 不依赖上游依赖树实现细节（同上，Issue #2 全量依赖审计补声明）
     "curl_cffi>=0.17.0",
