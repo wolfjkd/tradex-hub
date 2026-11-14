@@ -2575,3 +2575,19 @@ def fetch_bond_yield_cn_backup(curve: str = "国债", **kwargs) -> pd.DataFrame:
     if not rows:
         raise ValueError("bond_zh_us_rate 最新行无有效收益率")
     return pd.DataFrame(rows)
+
+
+def fetch_global_index_spot(**kwargs) -> pd.DataFrame:
+    """东财全球指数实时快照（ak.index_global_spot_em）。
+
+    一次返回 56 个全球指数（韩国KOSPI=KS11、KOSPI200、恒生、恒生科技、日经、
+    纳指、道指等），含 最新价/涨跌额/涨跌幅/开高低/昨收/振幅/最新行情时间；
+    **无成交额字段**（东财全球指数不提供）。
+
+    用途：TradeX 指数关注池海外指数行情（gi 前缀代码，如 giKS11 韩国KOSPI）。
+
+    频控铁律：底层为 push2 clist 端点，一次取全表即可覆盖全部全球指数，
+    调用方必须做 ≥60s 级缓存，勿做秒级轮询（push2 对高频有 IP 风控）。
+    """
+    df = _ak().index_global_spot_em()
+    return df if df is not None else pd.DataFrame()
