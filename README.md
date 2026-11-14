@@ -547,7 +547,7 @@ cat VERSION                    # 最简：发布版本号单一真源
 
 | 版本 | 日期 | 关键里程碑 |
 |------|------|-----------|
-| **v3.9.4** | 2026-11-11 | 审计批次 D 环境护栏：仓内 AGENTS.md + 确定性检查脚本三件一断言（依赖双处对比——实抓修复 fastapi 漏声明 / README 计数对齐 / REST 端点计数断言 / CHANGELOG 措辞 vs git log 核验）；挂载方式待拍板 |
+| **v3.9.4** | 2026-11-14 | 审计批次 D 环境护栏（D2 挂载进回归门自动核验）：确定性检查五件套（依赖双处对比——实抓修复 fastapi 漏声明 / README 计数对齐 / REST 端点计数断言 / CHANGELOG 措辞 vs git log 核验 / import×声明比对护栏）；Issue #2 依赖审计补记：httpx+curl_cffi 补双处声明（传递依赖侥幸防线），基线 1231 |
 | **v3.9.3** | 2026-11-11 | 审计批次 C 架构深化五候选全做（纯重构行为不变）：shortline 信封收拢单点 / registry 注册表数据化（160 注册快照等价）/ lockup 字段映射单点（文本版假 0 顺带修复）/ 缓存序列化边界 get_or_set（Top，9 文件 35 处收敛 + 交易日缓存并入）/ REST 错误样板 _helpers 双入口（41 处收敛） |
 | **v3.9.2** | 2026-11-11 | 审计批次 B 防御加固：news_data ArrowInvalid 转调兜底（akshare 库内 bug × pyarrow 环境）+ index_constituents 复活（中证 OSS cons 文件，calamine 引擎，三坑处理，真机 000300 300 行验收）；注册 159→160、类型 114→115 |
 | **v3.9.1** | 2026-11-09 | 接手清偿发版（原说明「零代码」已于 2026-11-10 勘误）：index_valuation 复活 + 中债空壳拦截/东财国债备源降级链 + prev_zt 封板时间注入 + shortline 晋级率分档 + akshare set_timeout 防御；MCP 190→191、REST 81→82、注册 157→159；另记录 TradeX vibe 全量复刻消费验证与数据源健康发现三项 |

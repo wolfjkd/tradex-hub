@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ---
 
-## [3.9.4] - 2026-11-11（审计批次 D：环境护栏，无人值守施工）
+## [3.9.4] - 2026-11-14（审计批次 D：环境护栏，无人值守施工）
 
 > 依据 [[审计-2026-11-10-v3.9.1代码审核与架构巡检]] 复盘节（#1 护栏缺失 / #2 导航缺失 / #3 发版流程缺口）。
 
@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 - **② REST 错误语义统一**：废除 B 形怪癖（ValueError→502），全仓单一 serve_envelope 语义（ValueError→400 / 其余→502 / HTTPException 穿透）；13 处 serve_envelope_400 调用归一、_helpers 单点重写、helper 测试改形
 - **③ D2 挂载（老板授权 AI 定）**：四件检查核心进全量回归（pytest 内 main() 断言，见 tests/test_guard_checks.py）+ CLI 保留手动用法——每次施工验证门自动核验，零环境依赖
 - **④ 发版时机**：老板自控，不再提醒（tag/Release 仍禁做，等老板自然触发）
+
+### Issue #2 依赖审计补记（2026-11-14，ae3b8ec + 46d15d5）
+- GitHub Issue #2（用户反馈 v3.1.0 漏写 fastapi/prometheus_client 坑新装用户）核实属实，主体已修（fastapi 于 v3.6.0 入 http extras / prometheus_client 2026-11-08 入核心依赖）；借反馈做「全源码顶层 import × 声明依赖」全量比对，再补两处同款传递依赖侥幸：`httpx`（registry 主链顶层 import，靠 mcp SDK 传递，下界 0.28.1）+ `curl_cffi`（东财 push2his 直连主源，靠 akshare 传递，下界 0.17.0），pyproject/requirements/uv.lock 三处同步
+- 依赖护栏固化：`scripts/check_undeclared_imports.py` 三态判定（顶层裸 import=必炸形态 / 惰性未白名单=新漏网 / 白名单包顶层裸=白名单失效；白名单 baostock/mootdx/pyarrow 设计内可选依赖）挂进回归门，确定性检查四件→五件，基线 1230→1231
+- 验证：反向七用例全过；全量回归两次独立 1231 passed / 5 skipped / 36 deselected；发版前数据源直连审计 proxy hits=[]，冒烟 market_overview/northbound/industry_comparison 命中真实数据 + fund_flow 降级链健康（sina 备源顶上）；Issue #2 已回复说明
 
 ---
 
