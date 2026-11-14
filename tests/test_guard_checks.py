@@ -1,11 +1,12 @@
 """D2 确定性检查挂载测试（2026-11-11 裁决③：老板授权 AI 定挂载方式）。
 
-决定：四件检查核心进**全量回归门**——每次施工验证门自动核验，零环境依赖
+决定：检查核心进**全量回归门**——每次施工验证门自动核验，零环境依赖
 （不依赖 pre-commit 安装、无 GitHub Actions）；CLI 手动用法保留（发版前跑）。
 
-- check_dep_sync.main()         → 0 一致
-- check_readme_counts.main()    → 0 计数一致（MCP/REST/注册/类型）
-- check_changelog_claims.main() → 0 措辞与 git log 一致
+- check_dep_sync.main()             → 0 一致
+- check_readme_counts.main()        → 0 计数一致（MCP/REST/注册/类型）
+- check_changelog_claims.main()     → 0 措辞与 git log 一致
+- check_undeclared_imports.main()   → 0 import×声明比对全过（2026-11-14 Issue #2 护栏）
 - REST 端点数断言另见 tests/test_rest_count.py（独立更快）
 """
 
@@ -31,3 +32,8 @@ class TestGuardChecksMain:
         from check_changelog_claims import main
 
         assert main() == 0, "CHANGELOG 措辞与 git log 史实不符（v3.9.1 失实教训）"
+
+    def test_undeclared_imports(self):
+        from check_undeclared_imports import main
+
+        assert main() == 0, "存在 import 未声明的第三方包（传递依赖侥幸形态）——补声明双处或白名单注明降级依据"

@@ -8,7 +8,9 @@
 - **venv 口径**：pytest 在 `tradex/.venv`（仓库根 `.venv` 无 pytest；`tradex/venv` 不存在）。
 - **全量回归**（两层，`tests` + `tradex/tests` 各自 conftest）：
   `./tradex/.venv/Scripts/python.exe -m pytest tests tradex/tests -m "not network" -q`
-  基线 **1230 passed / 5 skipped / 36 deselected**（2026-11-11，批次BCD + 裁决①②③ 执行后）。
+  基线 **1231 passed / 5 skipped / 36 deselected**（2026-11-14，+test_undeclared_imports 挂载）。
+  ⚠️ 偶发「测试全绿但 pytest 进程不退出（CPU 0 挂住）」——某测试泄漏阻塞退出资源（flaky，
+  非 tests 内容失败）；总结行以日志为准，超 3 分钟无输出先查日志再判卡死。
   只认「退出码 + 总结行」；跑前确认无遗留 python/pytest 进程（并发 pytest 互污染 `.pytest_cache`）。
 - 依赖用 **uv** 管理（`tradex/uv.lock`）；装新依赖 `cd tradex && uv add <pkg>`。
 
@@ -50,6 +52,7 @@
 - 确定性检查脚本（**挂载 = 全量回归门内自动核验**（2026-11-11 裁决③，tests/test_guard_checks.py
   跑 main() 断言）+ CLI 手动用法保留；无 GitHub Actions）：
   `scripts/check_dep_sync.py`（依赖双处）、
+  `scripts/check_undeclared_imports.py`（import×声明比对，传递依赖侥幸防线，白名单=设计内可选依赖）、
   `scripts/check_readme_counts.py`（README 计数 vs 实跑）、
   `scripts/check_changelog_claims.py`（CHANGELOG 措辞 vs git log，`--selftest` 自证）；
   REST 端点计数在 `tests/test_rest_count.py` 断言（改端点四处一体：断言/README badge/正文/CHANGELOG）。
