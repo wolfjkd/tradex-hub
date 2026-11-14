@@ -11,6 +11,10 @@ xlrd>=2.0.2
 python-calamine>=0.9.1
 # Prometheus 指标导出（2026-11-10 补：v3.9.0 起仅声明于 pyproject，requirements 漏同步）
 prometheus_client>=0.20.0
+# registry 主链顶层 import（tq/tdx_mcp fetchers），此前靠 mcp SDK 传递依赖侥幸可用（Issue #2 审计补）
+httpx>=0.28.1
+# 东财 push2his 直连绕代理（akshare_fetchers 主源路径）；akshare 硬传递依赖显式化（Issue #2 审计补）
+curl_cffi>=0.17.0
 python-dotenv>=1.0.0
 # HTTP/SSE mode (optional)
 uvicorn>=0.29.0

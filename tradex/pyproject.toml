@@ -40,6 +40,12 @@ dependencies = [
     "pydantic>=2.0.0",
     # tradex.metrics 用官方客户端（此前靠传递依赖侥幸可用，2026-11-08 新机 uv sync 收集失败暴露）
     "prometheus_client>=0.20.0",
+    # registry 主链顶层 import（tq_fetchers/tdx_mcp_fetchers，stdio 模式必加载），此前靠
+    # mcp SDK 传递依赖侥幸可用——与 prometheus_client 同款隐患（Issue #2 全量依赖审计补声明）
+    "httpx>=0.28.1",
+    # 东财 push2his 直连绕系统代理（akshare_fetchers 主源路径使用）；akshare 硬传递依赖显式化，
+    # 不依赖上游依赖树实现细节（同上，Issue #2 全量依赖审计补声明）
+    "curl_cffi>=0.17.0",
     "requests>=2.28.0",
     "stockstats>=0.6.0",
     # 中证官方估值 xls 读取（fetch_index_valuation，xlrd 2.x 仅支持 .xls 恰为本场景）
