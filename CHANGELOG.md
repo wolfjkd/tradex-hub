@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ---
 
+## 待发版（2026-11-14，fund_flow 主源修复）
+
+### Fixed
+- **fund_flow akshare 主源恢复命中**（此前恒降级 sina 备源）：`fetch_fund_flow` 是 v3.1.3 参数归一化的漏网者（v3.3.x 重构为 curl_cffi 直连时丢了 symbol 兼容）——`route(symbol=...)`（工具层传参方式）时 code 留空、secid="0."，东财对空 secid 返回 `{"data": null}`，而 `data.get("data", {}).get("klines")` 对「键存在但值为 null」不设防 → `NoneType` 模糊异常。修复：签名补 `symbol=`、归一与 secid 构造复用 sina_fetchers 同款 helper（同类型双源口径统一）、`data.get("data") or {}` 防御 null、空代码语义化 ValueError
+- 测试 TDD 先红后绿：4 新用例（symbol 兼容 / code 防回归 / 空 code 报错 / data:null 防御），`data_null` 用例红时实际异常与生产故障逐字一致；真机 `route(symbol=000001)` / `route(code=600519)` 双双命中 akshare 源出 20 天真实资金流
+
+---
+
 ## [3.9.4] - 2026-11-14（审计批次 D：环境护栏，无人值守施工）
 
 > 依据 [[审计-2026-11-10-v3.9.1代码审核与架构巡检]] 复盘节（#1 护栏缺失 / #2 导航缺失 / #3 发版流程缺口）。

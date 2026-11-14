@@ -142,7 +142,6 @@ class TestEltdxFetcherParamCompat:
 
 class TestAkshareFetcherParamCompat:
     """akshare_fetchers 参数归一化测试。"""
-
     def test_fetch_historical_kline_accepts_code(self):
         """关键回归：route('historical_kline', code=...) 必须能路由到 akshare。"""
         from tradex.data_sources import akshare_fetchers
@@ -279,3 +278,80 @@ class TestSmartRouterParamRouting:
         data, src = router.route("test_fb", code="600519")
         assert src == "compat"
         assert data["code"] == "600519"
+
+
+class TestAkshareFundFlowParamCompat:
+    """fund_flow 个股资金流参数兼容 + 东财 data:null 防御（2026-11-14）。
+
+    根因：fetch_fund_flow 是 v3.1.3 参数归一化的漏网者（v3.3.x 重构为
+    curl_cffi 直连时丢了 symbol 兼容）——route(symbol=...) 时 code 留空、
+    secid="0."，东财对空 secid 返回 {"data": null}，而
+    data.get("data", {}).get("klines") 对「键存在但值为 null」不设防
+    （.get 默认值只在键缺失时生效）→ 'NoneType' object has no attribute
+    'get' 模糊异常，靠 sina 备源兜底。
+    """
+
+    _KLINE_PAYLOAD = {
+        "data": {
+            "code": "000001",
+            "klines": [
+                "2026-11-13,213627904.0,-236957408.0,23329504.0,174213264.0,39414640.0",
+                "2026-11-12,27278175.0,6403968.0,-33682144.0,104770527.0,-77492352.0",
+            ],
+        }
+    }
+
+    def _fake_session(self, payload):
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.raise_for_status.return_value = None
+        fake_resp.json.return_value = payload
+        fake_session = MagicMock()
+        fake_session.get.return_value = fake_resp
+        return fake_session
+
+    def test_fetch_fund_flow_accepts_symbol(self):
+        """关键回归：route('fund_flow', symbol=...)（工具层传参方式）必须命中。"""
+        from tradex.data_sources import akshare_fetchers
+
+        with patch(
+            "curl_cffi.requests.Session",
+            return_value=self._fake_session(self._KLINE_PAYLOAD),
+        ):
+            result = akshare_fetchers.fetch_fund_flow(symbol="000001")
+        assert result["symbol"] == "000001"
+        assert result["history"][0]["date"] == "2026-11-13"
+        assert result["history"][0]["main_net"] == 213627904.0
+        assert result["signal"] == "bullish_inflow"
+
+    def test_fetch_fund_flow_accepts_code(self):
+        """原有 code= 调用方式保持兼容（防回归护栏）。"""
+        from tradex.data_sources import akshare_fetchers
+
+        with patch(
+            "curl_cffi.requests.Session",
+            return_value=self._fake_session(self._KLINE_PAYLOAD),
+        ):
+            result = akshare_fetchers.fetch_fund_flow(code="000001")
+        assert result["symbol"] == "000001"
+        assert len(result["history"]) == 2
+
+    def test_fetch_fund_flow_raises_on_empty_code(self):
+        """code/symbol 全空必须语义化报错（对齐 sina 源 _normalize_code 的
+        ValueError 约定），而不是拿空 secid="0." 去打接口再吞 NoneType。"""
+        from tradex.data_sources import akshare_fetchers
+
+        with pytest.raises(ValueError, match="stock code is required"):
+            akshare_fetchers.fetch_fund_flow()
+
+    def test_fetch_fund_flow_data_null_defense(self):
+        """东财返回 {"data": null}（键存在但值为 null）必须走「数据为空」
+        干净错误路径（SmartRouter 记账降级），不得泄漏 NoneType。"""
+        from tradex.data_sources import akshare_fetchers
+
+        with patch(
+            "curl_cffi.requests.Session",
+            return_value=self._fake_session({"data": None}),
+        ):
+            with pytest.raises(RuntimeError, match="资金流数据为空"):
+                akshare_fetchers.fetch_fund_flow(code="000001")

@@ -707,18 +707,27 @@ def fetch_macro_data(
 # fund_flow — 个股资金流向（akshare 备源）
 # ============================================================
 
-def fetch_fund_flow(code: str = "", curr_date: str = "", include_history: bool = True, **kwargs) -> dict:
+def fetch_fund_flow(code: str = "", curr_date: str = "", include_history: bool = True, symbol: str = "", **kwargs) -> dict:
     """个股资金流向（直连东财 push2his API，curl_cffi 绕过系统代理）。
 
     返回与 em_push2 源相同的 dict 结构（realtime/history/signal）。
     使用 curl_cffi 替代 requests，避免系统代理导致的 RemoteDisconnected。
+
+    参数归一化（v3.1.3 约定）：同时接受 symbol 和 code，全空语义化报错；
+    归一与 secid 构造复用 sina_fetchers 同款 helper（同数据类型双源口径一致）。
+    2026-11-14 修复：本函数是当年归一化的漏网者，route(symbol=...) 时
+    code 留空 → secid="0." → 东财对空 secid 返回 {"data": null} →
+    NoneType 模糊异常（此前靠 sina 备源兜底）。
     """
+    from .sina_fetchers import _em_secid, _normalize_code as _normalize_sym_code
     from curl_cffi import requests as _rq
+
+    sym = _normalize_sym_code(symbol, code)
 
     if not curr_date:
         curr_date = datetime.now().strftime("%Y-%m-%d")
     result: dict = {
-        "symbol": code,
+        "symbol": sym,
         "source": "AKShare stock_individual_fund_flow",
         "date": curr_date,
         "realtime": [],
@@ -735,7 +744,7 @@ def fetch_fund_flow(code: str = "", curr_date: str = "", include_history: bool =
         "Referer": "https://data.eastmoney.com/",
     })
 
-    secid = f"1.{code}" if code.startswith("6") else f"0.{code}"
+    secid = _em_secid(sym)
     url = "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get"
     params = {
         "secid": secid,
@@ -750,7 +759,9 @@ def fetch_fund_flow(code: str = "", curr_date: str = "", include_history: bool =
         resp = _session.get(url, params=params, timeout=10)
         resp.raise_for_status()
         data = resp.json()
-        klines = data.get("data", {}).get("klines", [])
+        # "data" 键存在但值为 null（空 secid/风控/停牌）时 .get 默认值不生效，
+        # 必须 or {} 防御，否则 None.get("klines") 泄漏 NoneType 模糊异常
+        klines = (data.get("data") or {}).get("klines", [])
         if not klines:
             raise RuntimeError("资金流数据为空")
         for line in klines:
