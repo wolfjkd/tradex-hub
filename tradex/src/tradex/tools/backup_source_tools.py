@@ -23,6 +23,7 @@ from mcp.server.fastmcp import FastMCP
 import pandas as pd
 from ..data_sources import get_router
 from ..utils.cache import TTL_DAILY, cache
+from ._mcp_serve import mcp_serve
 from ..utils.formatter import df_to_json, error_response
 
 logger = logging.getLogger(__name__)
@@ -30,123 +31,148 @@ logger = logging.getLogger(__name__)
 _router = get_router()
 
 
+# （QI-ARCH-02 全量上提，2026-11-19：4 个工具体模块级化 + mcp_serve 出口
+# 收拢（dump=False）；备源直取语义（source_name 显式指定）原样保留。）
+
+
+async def get_sina_research_reports(
+    symbol: str, page: int = 1, page_size: int = 20
+) -> str:
+    """
+    【备源直取】新浪财经研报列表。
+
+    显式调用新浪上游（与主源 tdx_mcp / 东财完全独立）。
+    不含评级和目标价，仅有标题、类型、机构、研究员、日期。
+    用于：主源失效 / 多源交叉验证 / 回测。
+
+    Args:
+        symbol: 6 位股票代码
+        page: 页码
+        page_size: 每页条数
+
+    Returns:
+        研报列表 (JSON)。
+    """
+    def _build() -> str:
+        df, src = _router.route(
+            "research_report",
+            source_name="sina_research",
+            symbol=symbol, page=page, page_size=page_size,
+        )
+        return df_to_json(df)
+
+    return mcp_serve(
+        "get_sina_research_reports",
+        _build,
+        f"获取新浪研报失败 ({symbol})",
+        dump=False,
+    )
+
+
+async def get_sina_fund_flow(symbol: str, days: int = 10) -> str:
+    """
+    【备源直取】新浪财经个股资金流向（日度）。
+
+    显式调用新浪上游，与东财 push2his / akshare 完全独立。
+    用于：东财资金流被封时的降级方案。
+
+    Args:
+        symbol: 6 位股票代码
+        days: 最近天数，默认 10
+
+    Returns:
+        日度资金流 (JSON)，含日期、主力/游资/散户净流入。
+    """
+    def _build() -> str:
+        df, src = _router.route(
+            "fund_flow",
+            source_name="sina_fund_flow",
+            symbol=symbol, days=days,
+        )
+        return df_to_json(df)
+
+    return mcp_serve(
+        "get_sina_fund_flow",
+        _build,
+        f"获取新浪资金流失败 ({symbol})",
+        dump=False,
+    )
+
+
+async def get_baidu_kline(
+    symbol: str, period: str = "day", count: int = 120
+) -> str:
+    """
+    【备源直取】百度股市通带 MA 的 K 线。
+
+    显式调用百度上游（第四备源），返回 OHLCV + MA5/MA10/MA20/MA30。
+    与 eltdx(TCP)/akshare(HTTP)/tdx_mcp(官方 MCP) 完全独立。
+
+    Args:
+        symbol: 6 位股票代码
+        period: K 线周期，day / week / month
+        count: K 线数量
+
+    Returns:
+        K 线数据 (JSON)，含日期、OHLC、成交量、MA 均线。
+    """
+    def _build() -> str:
+        df, src = _router.route(
+            "historical_kline",
+            source_name="baidu_http",
+            symbol=symbol, period=period, count=count,
+        )
+        return df_to_json(df)
+
+    return mcp_serve(
+        "get_baidu_kline",
+        _build,
+        f"获取百度 K 线失败 ({symbol})",
+        dump=False,
+    )
+
+
+async def get_baostock_valuation(
+    symbol: str, start_date: str = "", end_date: str = ""
+) -> str:
+    """
+    【备源直取】baostock 估值历史（TCP 协议，零鉴权）。
+
+    显式调用 baostock 独立 TCP 通道，与东财/akshare 上游完全独立。
+    注意：baostock 不支持北交所股票。
+
+    Args:
+        symbol: 6 位股票代码
+        start_date: 起始日期 YYYY-MM-DD
+        end_date: 截止日期 YYYY-MM-DD
+
+    Returns:
+        估值历史 (JSON)，含日期、PE(TTM)、PB、PS(TTM)。
+    """
+    def _build() -> str:
+        df, src = _router.route(
+            "valuation",
+            source_name="baostock_tcp",
+            symbol=symbol, start_date=start_date, end_date=end_date,
+        )
+        return df_to_json(df)
+
+    return mcp_serve(
+        "get_baostock_valuation",
+        _build,
+        f"获取 baostock 估值失败 ({symbol})",
+        dump=False,
+    )
+
+
 def register(mcp: FastMCP):
-    """Register explicit backup-source tools."""
+    """Register explicit backup-source tools.
 
-    @mcp.tool()
-    async def get_sina_research_reports(
-        symbol: str, page: int = 1, page_size: int = 20
-    ) -> str:
-        """
-        【备源直取】新浪财经研报列表。
-
-        显式调用新浪上游（与主源 tdx_mcp / 东财完全独立）。
-        不含评级和目标价，仅有标题、类型、机构、研究员、日期。
-        用于：主源失效 / 多源交叉验证 / 回测。
-
-        Args:
-            symbol: 6 位股票代码
-            page: 页码
-            page_size: 每页条数
-
-        Returns:
-            研报列表 (JSON)。
-        """
-        try:
-            df, src = _router.route(
-                "research_report",
-                source_name="sina_research",
-                symbol=symbol, page=page, page_size=page_size,
-            )
-            return df_to_json(df)
-        except Exception as e:
-            return error_response(
-                f"获取新浪研报失败 ({symbol}): {e}", "get_sina_research_reports"
-            )
-
-    @mcp.tool()
-    async def get_sina_fund_flow(symbol: str, days: int = 10) -> str:
-        """
-        【备源直取】新浪财经个股资金流向（日度）。
-
-        显式调用新浪上游，与东财 push2his / akshare 完全独立。
-        用于：东财资金流被封时的降级方案。
-
-        Args:
-            symbol: 6 位股票代码
-            days: 最近天数，默认 10
-
-        Returns:
-            日度资金流 (JSON)，含日期、主力/游资/散户净流入。
-        """
-        try:
-            df, src = _router.route(
-                "fund_flow",
-                source_name="sina_fund_flow",
-                symbol=symbol, days=days,
-            )
-            return df_to_json(df)
-        except Exception as e:
-            return error_response(
-                f"获取新浪资金流失败 ({symbol}): {e}", "get_sina_fund_flow"
-            )
-
-    @mcp.tool()
-    async def get_baidu_kline(
-        symbol: str, period: str = "day", count: int = 120
-    ) -> str:
-        """
-        【备源直取】百度股市通带 MA 的 K 线。
-
-        显式调用百度上游（第四备源），返回 OHLCV + MA5/MA10/MA20/MA30。
-        与 eltdx(TCP)/akshare(HTTP)/tdx_mcp(官方 MCP) 完全独立。
-
-        Args:
-            symbol: 6 位股票代码
-            period: K 线周期，day / week / month
-            count: K 线数量
-
-        Returns:
-            K 线数据 (JSON)，含日期、OHLC、成交量、MA 均线。
-        """
-        try:
-            df, src = _router.route(
-                "historical_kline",
-                source_name="baidu_http",
-                symbol=symbol, period=period, count=count,
-            )
-            return df_to_json(df)
-        except Exception as e:
-            return error_response(
-                f"获取百度 K 线失败 ({symbol}): {e}", "get_baidu_kline"
-            )
-
-    @mcp.tool()
-    async def get_baostock_valuation(
-        symbol: str, start_date: str = "", end_date: str = ""
-    ) -> str:
-        """
-        【备源直取】baostock 估值历史（TCP 协议，零鉴权）。
-
-        显式调用 baostock 独立 TCP 通道，与东财/akshare 上游完全独立。
-        注意：baostock 不支持北交所股票。
-
-        Args:
-            symbol: 6 位股票代码
-            start_date: 起始日期 YYYY-MM-DD
-            end_date: 截止日期 YYYY-MM-DD
-
-        Returns:
-            估值历史 (JSON)，含日期、PE(TTM)、PB、PS(TTM)。
-        """
-        try:
-            df, src = _router.route(
-                "valuation",
-                source_name="baostock_tcp",
-                symbol=symbol, start_date=start_date, end_date=end_date,
-            )
-            return df_to_json(df)
-        except Exception as e:
-            return error_response(
-                f"获取 baostock 估值失败 ({symbol}): {e}", "get_baostock_valuation"
-            )
+    QI-ARCH-02 全量上提（2026-11-19）：4 工具体模块级，引用注册。"""
+    for _fn in (
+        get_sina_research_reports,
+        get_sina_fund_flow,
+        get_baidu_kline,
+        get_baostock_valuation,
+    ):
+        mcp.tool()(_fn)
