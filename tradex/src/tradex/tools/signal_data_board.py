@@ -21,6 +21,7 @@ from mcp.server.fastmcp import FastMCP
 
 from ..data_sources import get_router
 from ..utils.cache import TTL_DAILY, TTL_REALTIME, cache
+from ._mcp_serve import mcp_serve
 from ..utils.formatter import error_response, dict_to_json
 
 _router = get_router()
@@ -49,116 +50,118 @@ def _try_push_limit_up_signal(board_type: str, count: int) -> None:
         pass  # 推送失败静默处理，不影响工具返回
 
 
+# （QI-ARCH-02 全量上提，2026-11-19：3 个工具体模块级化 + mcp_serve 出口收拢；
+# _try_push_limit_up_signal 辅助函数保持模块级原样。）
+
+
+async def get_limit_up_board(board_type: str = "zt", date: str = "") -> str:
+    """
+    获取涨停板数据（东财 akshare 四池）。
+
+    支持四种类型：涨停池/炸板池/跌停池/昨日涨停池。
+
+    Args:
+        board_type: 板类型，可选 zt(涨停)/zb(炸板)/dt(跌停)/prev_zt(昨日涨停)。
+        date: 交易日 YYYYMMDD，默认自动回退到最近有数据的交易日。
+
+    Returns:
+        板数据 (JSON)，含 date、count 与 data（股票列表）。
+    """
+    board_type = board_type.lower().strip()
+    if board_type not in ["zt", "zb", "dt", "prev_zt"]:
+        return error_response(
+            f"无效的板类型: {board_type}。可选: zt, zb, dt, prev_zt",
+            "get_limit_up_board",
+        )
+
+    cache_key = f"limit_up_board:{board_type}:{date or 'auto'}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    def _build() -> str:
+        # limit_up_board: board_type → get_limit_up_board_json(board_type)
+        result, _src = _router.route(
+            "limit_up_board", board_type=board_type, date=date, timeout=25
+        )
+        output = dict_to_json(result)
+        if result.get("data"):
+            cache.set(cache_key, output, TTL_REALTIME)
+            # 可选：检测到新涨停时通过 WsServer 推送（仅涨停池）
+            if board_type == "zt":
+                _try_push_limit_up_signal(board_type, len(result["data"]))
+        return output
+
+    return mcp_serve("get_limit_up_board", _build, "获取涨停板数据失败", dump=dict_to_json)
+
+
+async def get_board_sentiment(date: str = "") -> str:
+    """
+    获取打板情绪数据（炸板率/连板梯队/晋级率）。
+
+    由涨停四池现算：炸板率、连板梯队、昨日涨停晋级率、平均溢价、热门题材。
+
+    Args:
+        date: 交易日 YYYYMMDD，默认自动回退到最近有数据的交易日。
+
+    Returns:
+        打板情绪数据 (JSON)，含 date/涨停数/炸板数/跌停数/炸板率/
+        连板梯队/晋级率/平均溢价/热门题材。
+    """
+    cache_key = f"board_sentiment:{date or 'auto'}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    def _build() -> str:
+        # limit_up_board: board_type="sentiment" → fetch_board_sentiment()
+        # 四池并发取，单次尝试超时放宽到 30s（默认 12s 会被慢源顶穿）
+        result, _src = _router.route(
+            "limit_up_board", board_type="sentiment", date=date, timeout=30
+        )
+        output = dict_to_json(result)
+        if not result.get("error"):
+            cache.set(cache_key, output, TTL_REALTIME)
+        return output
+
+    return mcp_serve("get_board_sentiment", _build, "获取打板情绪数据失败", dump=dict_to_json)
+
+
+async def get_limit_up_insight(code: str = "") -> str:
+    """
+    获取涨停揭秘数据（同花顺）。
+
+    包含涨停原因题材、封板成功率、板型（一字/换手/T字）、封单额等。
+
+    Args:
+        code: 股票代码（可选，不传则返回当日全部涨停揭秘）。
+
+    Returns:
+        涨停揭秘数据 (JSON)，含题材原因/封板成功率/板型/封单额/换手率。
+    """
+    cache_key = f"limit_up_insight:{code or 'all'}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    def _build() -> str:
+        # hot_money: code 非空 → get_limit_up_insight(code)
+        result, _src = _router.route("hot_money", code=code)
+        output = dict_to_json(result)
+        if result.get("data"):
+            cache.set(cache_key, output, TTL_DAILY)
+        return output
+
+    return mcp_serve("get_limit_up_insight", _build, "获取涨停揭秘数据失败", dump=dict_to_json)
+
+
 def register(mcp: FastMCP):
-    """Register signal data limit-up board tools with the MCP server."""
+    """Register signal data limit-up board tools with the MCP server.
 
-    # ----------------------------------------------------------------
-    # V0.9: 打板层 — 涨停四池 + 情绪速算（a-stock-data 融合）
-    # ----------------------------------------------------------------
-
-    @mcp.tool()
-    async def get_limit_up_board(board_type: str = "zt", date: str = "") -> str:
-        """
-        获取涨停板数据（东财 akshare 四池）。
-
-        支持四种类型：涨停池/炸板池/跌停池/昨日涨停池。
-
-        Args:
-            board_type: 板类型，可选 zt(涨停)/zb(炸板)/dt(跌停)/prev_zt(昨日涨停)。
-            date: 交易日 YYYYMMDD，默认自动回退到最近有数据的交易日。
-
-        Returns:
-            板数据 (JSON)，含 date、count 与 data（股票列表）。
-        """
-        board_type = board_type.lower().strip()
-        if board_type not in ["zt", "zb", "dt", "prev_zt"]:
-            return error_response(
-                f"无效的板类型: {board_type}。可选: zt, zb, dt, prev_zt",
-                "get_limit_up_board",
-            )
-
-        cache_key = f"limit_up_board:{board_type}:{date or 'auto'}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
-        try:
-            # limit_up_board: board_type → get_limit_up_board_json(board_type)
-            result, _src = _router.route(
-                "limit_up_board", board_type=board_type, date=date, timeout=25
-            )
-            output = dict_to_json(result)
-            if result.get("data"):
-                cache.set(cache_key, output, TTL_REALTIME)
-                # 可选：检测到新涨停时通过 WsServer 推送（仅涨停池）
-                if board_type == "zt":
-                    _try_push_limit_up_signal(board_type, len(result["data"]))
-            return output
-        except Exception as e:
-            return error_response(
-                f"获取涨停板数据失败: {e}", "get_limit_up_board"
-            )
-
-    @mcp.tool()
-    async def get_board_sentiment(date: str = "") -> str:
-        """
-        获取打板情绪数据（炸板率/连板梯队/晋级率）。
-
-        由涨停四池现算：炸板率、连板梯队、昨日涨停晋级率、平均溢价、热门题材。
-
-        Args:
-            date: 交易日 YYYYMMDD，默认自动回退到最近有数据的交易日。
-
-        Returns:
-            打板情绪数据 (JSON)，含 date/涨停数/炸板数/跌停数/炸板率/
-            连板梯队/晋级率/平均溢价/热门题材。
-        """
-        cache_key = f"board_sentiment:{date or 'auto'}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
-        try:
-            # limit_up_board: board_type="sentiment" → fetch_board_sentiment()
-            # 四池并发取，单次尝试超时放宽到 30s（默认 12s 会被慢源顶穿）
-            result, _src = _router.route(
-                "limit_up_board", board_type="sentiment", date=date, timeout=30
-            )
-            output = dict_to_json(result)
-            if not result.get("error"):
-                cache.set(cache_key, output, TTL_REALTIME)
-            return output
-        except Exception as e:
-            return error_response(
-                f"获取打板情绪数据失败: {e}", "get_board_sentiment"
-            )
-
-    @mcp.tool()
-    async def get_limit_up_insight(code: str = "") -> str:
-        """
-        获取涨停揭秘数据（同花顺）。
-
-        包含涨停原因题材、封板成功率、板型（一字/换手/T字）、封单额等。
-
-        Args:
-            code: 股票代码（可选，不传则返回当日全部涨停揭秘）。
-
-        Returns:
-            涨停揭秘数据 (JSON)，含题材原因/封板成功率/板型/封单额/换手率。
-        """
-        cache_key = f"limit_up_insight:{code or 'all'}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
-        try:
-            # hot_money: code 非空 → get_limit_up_insight(code)
-            result, _src = _router.route("hot_money", code=code)
-            output = dict_to_json(result)
-            if result.get("data"):
-                cache.set(cache_key, output, TTL_DAILY)
-            return output
-        except Exception as e:
-            return error_response(
-                f"获取涨停揭秘数据失败: {e}", "get_limit_up_insight"
-            )
+    QI-ARCH-02 全量上提（2026-11-19）：3 工具体模块级，引用注册。"""
+    for _fn in (
+        get_limit_up_board,
+        get_board_sentiment,
+        get_limit_up_insight,
+    ):
+        mcp.tool()(_fn)
