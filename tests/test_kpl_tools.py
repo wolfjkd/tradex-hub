@@ -98,8 +98,9 @@ class TestKplRestEndpoints:
         from fastapi.testclient import TestClient
 
         client = TestClient(_build_app())
+        # QI-ARCH-05（2026-11-18）：route 调用收敛进 service 层，mock 目标随迁
         with patch(
-            "tradex.api.routes.kpl._router"
+            "tradex.service.kpl_service._router"
         ) as m_router:
             m_router.route.side_effect = RuntimeError("KPL 挂了")
             r = client.get("/api/v1/kpl/sentiment")
