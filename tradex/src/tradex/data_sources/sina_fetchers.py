@@ -560,8 +560,11 @@ def fetch_sina_world_index(code: str = "KOSPI", **kwargs) -> dict[str, Any]:
         znb_ 族**无成交额字段**（amount=0，前端隐藏成交额行——该空必须空）；
         **不含恒生科技**（HSTECH 走腾讯 hk 源）。
 
-    注意：代码大小写敏感（实测 znb_kospi 小写返回空，znb_KOSPI 正常）。
+    注意：代码大小写敏感（实测 znb_kospi 小写返回空，znb_KOSPI 正常）——
+    2026-11-18 起入口统一 upper() 归一（QI-STD-93 本批部分），调用方传
+    大小写变体行为一致，不再依赖调用侧自觉传大写。
     """
+    code = code.strip().upper()
     url = "https://hq.sinajs.cn/list=znb_" + code
     resp = curl_requests.get(
         url,

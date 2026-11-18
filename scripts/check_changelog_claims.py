@@ -26,6 +26,8 @@ CHANGELOG = ROOT / "CHANGELOG.md"
 
 ZERO_CODE_PAT = re.compile(r"零代码|本版无代码改动|无代码提交|零代码维护")
 CODE_COUNT_PAT = re.compile(r"实含\s*(\d+)\s*个代码提交")
+# 承载小节标题（### Fixed/Added/Changed/代码变更 等）——双向核验的「有承载」判据
+SECTION_HEADER_PAT = re.compile(r"^### ", re.M)
 # 代码文件后缀（.lock 单独出现不算代码——依赖元数据 chore，如 ec07154 移除 uv.lock）
 CODE_EXTS = {".py", ".toml", ".cfg", ".ini"}
 
@@ -61,6 +63,21 @@ def verify_section(claims: dict, code_commits: int) -> list[str]:
     return errors
 
 
+def verify_coverage(text: str, code_commits: int) -> list[str]:
+    """双向核验（QI-SPEC-03 盲区③）：区间实有代码提交但段内无任何承载小节
+    （### Fixed/Added/Changed/代码变更…）→「有史实无宣称」，FAIL。
+
+    QI-SPEC-01 即此形态（批次 A 九项修复 CHANGELOG 零承载）——单向核验
+    （只查宣称 vs 史实）对「漏记」永不报，双向补齐。粒度 = 段级整段零承载
+    （逐提交粒度会误伤批次内多 commit 合并叙述，不做）。
+    """
+    if code_commits > 0 and not SECTION_HEADER_PAT.search(text):
+        return [
+            f"区间实有 {code_commits} 个代码提交但段内无任何承载小节（有史实无宣称）"
+        ]
+    return []
+
+
 def git(*args: str) -> str:
     out = subprocess.run(
         ["git", *args], capture_output=True, text=True, encoding="utf-8",
@@ -80,8 +97,14 @@ def git_code_commits(rev_range: str) -> int:
     return count
 
 
-def parse_sections() -> list[tuple[str, str]]:
-    """CHANGELOG → [(版本号, 段文本)]。段 = ## [vX.Y.Z] 到下一个 ## 前的平线段"""
+def parse_sections() -> list[tuple[str | None, str]]:
+    """CHANGELOG → [(版本号或 None, 段文本)]。
+
+    版本段 = ## [vX.Y.Z] ...（核验区间 prev_tag..tag）；
+    「待发版」段 = ## 待发版 ...（无 tag，核验区间 = 最新 tag..HEAD——
+    QI-SPEC-03 盲区①：原版无 tag 段直接跳过，「待发版」期漏记永不报）；
+    其他无版本号段（如批次史实补记）不核验。
+    """
     text = CHANGELOG.read_text(encoding="utf-8")
     parts = re.split(r"\n## ", text)
     out = []
@@ -89,43 +112,72 @@ def parse_sections() -> list[tuple[str, str]]:
         m = re.match(r"\[?v?(\d+\.\d+\.\d+)\]?", part)
         if m:
             out.append((m.group(1), part))
+        elif part.startswith("待发版"):
+            out.append((None, part))
     return out
 
 
 def main() -> int:
     if "--selftest" in sys.argv:
-        # v3.9.1 失实样例（2026-11-10 审计实证）：宣称零代码、实含 6 个代码提交
+        # 样例 1（原 v3.9.1 失实，2026-11-10 审计实证）：宣称零代码、实含 6 个代码提交
         claims = {"zero_code": True, "claimed_code_commits": None}
         errors = verify_section(claims, code_commits=6)
-        if errors:
-            print("[SELFTEST-OK] 历史失实样例被正确报错:")
-            for e in errors:
-                print(f"  - {e}")
-            return 0
-        print("[SELFTEST-FAIL] 失实样例未被报错——核验逻辑失效")
-        return 1
+        if not errors:
+            print("[SELFTEST-FAIL] 零代码失实样例未被报错——核验逻辑失效")
+            return 1
+        print(f"[SELFTEST-OK] 零代码失实样例被正确报错: {errors[0]}")
+        # 样例 2（QI-SPEC-01 修前形态）：段无承载小节但区间实有代码提交
+        errors2 = verify_coverage("- 批次修复按原 commit message 一句带过\n", code_commits=9)
+        if not errors2:
+            print("[SELFTEST-FAIL] 有史实无宣称样例未被报错——双向核验失效")
+            return 1
+        print(f"[SELFTEST-OK] QI-SPEC-01 修前形态（整段零承载）被正确报错: {errors2[0]}")
+        # 样例 3（防误伤）：有承载小节不报
+        errors3 = verify_coverage("### Fixed\n- 某修复说明\n", code_commits=9)
+        if errors3:
+            print(f"[SELFTEST-FAIL] 有承载段被误报: {errors3}")
+            return 1
+        print("[SELFTEST-OK] 有承载段不误报")
+        return 0
 
     sections = parse_sections()
     tags = set(
         t.strip() for t in git("tag", "--list").splitlines() if t.strip()
     )
     tag_re = {re.sub(r"^v", "", t): t for t in tags if re.fullmatch(r"v?\d+\.\d+\.\d+", t)}
+    tags_sorted = sorted(
+        (tuple(int(x) for x in re.sub(r"^v", "", t).split(".")), t) for t in tag_re.values()
+    )
+    latest_tag = tags_sorted[-1][1] if tags_sorted else None
 
     failures: list[str] = []
     checked = 0
     for ver, text in sections:
+        if ver is None:
+            # 待发版段（QI-SPEC-03 盲区①）：区间 = 最新 tag..HEAD
+            if latest_tag is None:
+                continue
+            code_commits = git_code_commits(f"{latest_tag}..HEAD")
+            errors = verify_section(section_claims(text), code_commits) + verify_coverage(
+                text, code_commits
+            )
+            checked += 1
+            if errors:
+                failures.append(
+                    f"待发版 ({latest_tag}..HEAD, 代码提交 {code_commits}): " + "; ".join(errors)
+                )
+            continue
         tag = tag_re.get(ver)
         if tag is None:
-            continue  # 无 tag 的段（如 Unreleased）跳过
-        tags_sorted = sorted(
-            (tuple(int(x) for x in re.sub(r"^v", "", t).split(".")), t) for t in tag_re.values()
-        )
+            continue  # 无 tag 的其他段跳过
         idx = next(i for i, (_, t) in enumerate(tags_sorted) if t == tag)
         if idx == 0:
             continue  # 首个 tag 无前界
         prev_tag = tags_sorted[idx - 1][1]
         code_commits = git_code_commits(f"{prev_tag}..{tag}")
-        errors = verify_section(section_claims(text), code_commits)
+        errors = verify_section(section_claims(text), code_commits) + verify_coverage(
+            text, code_commits
+        )
         checked += 1
         if errors:
             failures.append(f"v{ver} ({prev_tag}..{tag}, 代码提交 {code_commits}): " + "; ".join(errors))
@@ -135,7 +187,7 @@ def main() -> int:
         for f in failures:
             print(f"  - {f}")
         return 1
-    print(f"[OK] CHANGELOG 措辞与 git log 史实一致（核验 {checked} 个带 tag 版本段）")
+    print(f"[OK] CHANGELOG 措辞与 git log 史实一致（核验 {checked} 段，含待发版）")
     return 0
 
 

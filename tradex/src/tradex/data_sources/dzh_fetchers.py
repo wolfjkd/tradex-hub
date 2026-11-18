@@ -131,6 +131,7 @@ def fetch_dzh_index_quote(obj: str, **kwargs) -> dict[str, Any]:
     now = time.time()
     if now < _fail_until:
         return {}  # 失败冷却期内不打本地 WS（DZH365 未运行场景）
+    obj = obj.strip()  # 防手滑空格；大小写不归一——dzh 协议 obj 敏感性未实测，不做未验证变换
     query = f"service=quote&type=dyna&where=obj={obj}&response_times=1&response_mode=0"
     for attempt in (1, 2):  # 一次重试：半开连接重建后再试
         try:

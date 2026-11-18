@@ -66,3 +66,23 @@ class TestZnbPayloadShape:
         with patch.object(sina_fetchers, "curl_requests") as mock_req:
             mock_req.get.return_value = _resp(truncated)
             assert sina_fetchers.fetch_sina_world_index("KOSPI") == {}
+
+    def test_code_case_normalized(self):
+        """大小写归一（QI-STD-93 本批部分）：kospi/KOSPI/kospi带空格 路由行为
+        一致——URL 统一 upper 形态，不再依赖调用侧自觉传大写。"""
+        from tradex.data_sources import sina_fetchers
+
+        captured = {}
+
+        def _fake_get(url, **kwargs):
+            captured["url"] = url
+            return _resp(_NORMAL_PAYLOAD)
+
+        with patch.object(sina_fetchers, "curl_requests") as mock_req:
+            mock_req.get.side_effect = _fake_get
+            r_lower = sina_fetchers.fetch_sina_world_index("kospi")
+        with patch.object(sina_fetchers, "curl_requests") as mock_req2:
+            mock_req2.get.side_effect = _fake_get
+            r_upper = sina_fetchers.fetch_sina_world_index(" KOSPI ")
+        assert captured["url"] == "https://hq.sinajs.cn/list=znb_KOSPI"
+        assert r_lower == r_upper

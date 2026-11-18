@@ -27,7 +27,11 @@ def isolated_data_dir(monkeypatch):
     yield 后强制关闭残留连接 + 清理 WAL/SHM 文件，避免 Windows 文件锁阻碍清理。
     """
     import gc
-    with tempfile.TemporaryDirectory() as tmp:
+    # QI-GATE-03（2026-11-18）：ignore_cleanup_errors——Windows 偶发 WinError 32
+    # （残留 sqlite 句柄在 gc 前未及释放）会让 TemporaryDirectory 清理阶段抛
+    # PermissionError 记 ERROR（测试体本身通过）。teardown 清理失败交 OS 回收
+    # 临时目录，不再计入测试结果；隔离性不受影响（monkeypatch 每测独立 tmp）。
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         tmp_path = Path(tmp)
         from tradex.service import write_service
         db_path = tmp_path / "written.db"
