@@ -25,6 +25,7 @@ from mcp.server.fastmcp import FastMCP
 from ..data_sources import get_router
 from ..data_sources._column_adapter import OHLCV_EN, rename_present
 from ..utils.cache import TTL_DAILY, cache
+from ._mcp_serve import mcp_serve
 from ..utils.formatter import dict_to_json, error_response
 from ..utils.symbol import normalize_symbol
 
@@ -732,61 +733,66 @@ def _load_ohlcv(code: str, look_back_days: int) -> pd.DataFrame:
 # ──────────────────────────────────────────────────────────────────
 
 
-def register(mcp: FastMCP) -> None:
-    """Register technical analysis engine tools with the MCP server."""
+# （QI-ARCH-02 全量上提，2026-11-19：工具体模块级化 + mcp_serve 出口收拢
+# （dump=dict_to_json）；显式参数校验与「数据为空」显式 return 保留原样。）
 
-    @mcp.tool()
-    async def analyze_technical(
-        symbol: str,
-        look_back_days: int = 30,
-    ) -> str:
-        """
-        5 维度技术分析引擎（均线/趋势/量价/筹码/形态）。
 
-        输入股票代码，自动获取 OHLCV 数据，输出 5 个维度的综合技术分析结果：
-        1. 均线系统 — MA5/10/20/60、多空排列、金叉/死叉
-        2. 趋势分析 — 上升/下降/震荡判断、趋势强度评分(0-100)
-        3. 量价关系 — 量价同步/背离、异常放量检测
-        4. 筹码分布 — 获利盘比例、筹码集中度、支撑压力位
-        5. 形态识别 — 双底/双顶、头肩顶/底等常见形态
+async def analyze_technical(
+    symbol: str,
+    look_back_days: int = 30,
+) -> str:
+    """
+    5 维度技术分析引擎（均线/趋势/量价/筹码/形态）。
 
-        Args:
-            symbol: 6 位股票代码，如 "600519"。
-            look_back_days: 回溯交易日数，默认 30。建议 >= 60 以支持 MA60 分析。
+    输入股票代码，自动获取 OHLCV 数据，输出 5 个维度的综合技术分析结果：
+    1. 均线系统 — MA5/10/20/60、多空排列、金叉/死叉
+    2. 趋势分析 — 上升/下降/震荡判断、趋势强度评分(0-100)
+    3. 量价关系 — 量价同步/背离、异常放量检测
+    4. 筹码分布 — 获利盘比例、筹码集中度、支撑压力位
+    5. 形态识别 — 双底/双顶、头肩顶/底等常见形态
 
-        Returns:
-            5 维度技术分析结果 (JSON)，含数据概况、各维度详情及汇总信号。
-        """
-        symbol = normalize_symbol(symbol)
+    Args:
+        symbol: 6 位股票代码，如 "600519"。
+        look_back_days: 回溯交易日数，默认 30。建议 >= 60 以支持 MA60 分析。
 
-        if look_back_days <= 0:
+    Returns:
+        5 维度技术分析结果 (JSON)，含数据概况、各维度详情及汇总信号。
+    """
+    symbol = normalize_symbol(symbol)
+
+    if look_back_days <= 0:
+        return error_response(
+            "参数错误: look_back_days 必须为正整数",
+            "analyze_technical",
+        )
+
+    cache_key = f"analyze_technical:{symbol}:{look_back_days}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    def _build() -> str:
+        df = _load_ohlcv(symbol, look_back_days)
+        if df is None or df.empty:
             return error_response(
-                "参数错误: look_back_days 必须为正整数",
+                f"无法获取 {symbol} 的 OHLCV 数据",
                 "analyze_technical",
             )
 
-        cache_key = f"analyze_technical:{symbol}:{look_back_days}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
+        engine = AnalysisEngine(df, symbol=symbol)
+        result = engine.analyze_all()
+        # df 含 +60 预热缓冲(供 MA60/筹码计算),对外 data_points 口径只报回溯窗口
+        if isinstance(result.get("data_points"), int):
+            result["data_points"] = min(result["data_points"], look_back_days)
+        output = dict_to_json(result)
+        cache.set(cache_key, output, TTL_DAILY)
+        return output
 
-        try:
-            df = _load_ohlcv(symbol, look_back_days)
-            if df is None or df.empty:
-                return error_response(
-                    f"无法获取 {symbol} 的 OHLCV 数据",
-                    "analyze_technical",
-                )
+    return mcp_serve("analyze_technical", _build, "技术分析失败", dump=dict_to_json)
 
-            engine = AnalysisEngine(df, symbol=symbol)
-            result = engine.analyze_all()
-            # df 含 +60 预热缓冲(供 MA60/筹码计算),对外 data_points 口径只报回溯窗口
-            if isinstance(result.get("data_points"), int):
-                result["data_points"] = min(result["data_points"], look_back_days)
-            output = dict_to_json(result)
-            cache.set(cache_key, output, TTL_DAILY)
-            return output
-        except Exception as e:
-            return error_response(
-                f"技术分析失败: {e}", "analyze_technical"
-            )
+
+def register(mcp: FastMCP) -> None:
+    """Register technical analysis engine tools with the MCP server.
+
+    QI-ARCH-02 全量上提（2026-11-19）：工具体模块级，引用注册。"""
+    mcp.tool()(analyze_technical)
