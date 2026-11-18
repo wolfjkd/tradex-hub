@@ -180,7 +180,7 @@ async def calculate_factor_score(
     if weights is not None and sum(weights.values()) <= 0:
         return error_response("参数错误: 权重总和必须大于0", "calculate_factor_score")
 
-    def _build() -> dict:
+    def _build(weights=weights):  # 默认值捕获外层——_build 内对 weights 赋值变局部合法
         # 计算每个因子的得分
         factor_scores: dict[str, dict[str, float]] = {}
         for factor_name, values in factor_data.items():

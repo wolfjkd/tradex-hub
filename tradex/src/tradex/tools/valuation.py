@@ -249,7 +249,7 @@ async def get_analyst_rating(
     if cached is not None:
         return cached
 
-    def _build() -> str:
+    def _build(symbol=symbol):  # 默认值捕获外层——filter 分支内 normalize 赋值变局部合法
         df, _src = _router.route("valuation", endpoint="rank_forecast")
         if df is None or df.empty:
             return error_response(

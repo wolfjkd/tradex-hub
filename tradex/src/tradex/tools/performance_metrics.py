@@ -277,7 +277,7 @@ async def calculate_performance(
             "calculate_performance",
         )
 
-    def _build() -> dict:
+    def _build(trades=trades):  # 默认值捕获外层——trades = trades or [] 变局部合法
         trades = trades or []
         max_dd, peak_idx, trough_idx = _max_drawdown(equity_curve)
 

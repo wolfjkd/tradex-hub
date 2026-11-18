@@ -211,7 +211,7 @@ async def get_margin_trading(symbol: str = "") -> str:
     if cached is not None:
         return cached
 
-    def _build() -> str:
+    def _build(symbol=symbol):  # 默认值捕获外层——normalize 赋值变局部合法
         import datetime
 
         df = None
@@ -287,7 +287,7 @@ async def get_insider_trading(symbol: str = "") -> str:
     if cached is not None:
         return cached
 
-    def _build() -> str:
+    def _build(symbol=symbol):  # 默认值捕获外层
         df, _src = _router.route("macro_data", endpoint="inner_trade")
         if symbol:
             symbol = normalize_symbol(symbol)
