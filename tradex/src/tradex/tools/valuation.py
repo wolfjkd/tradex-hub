@@ -20,6 +20,7 @@ from mcp.server.fastmcp import FastMCP
 import pandas as pd
 from ..data_sources import get_router
 from ..utils.cache import TTL_DAILY, TTL_FINANCIAL, cache
+from ._mcp_serve import mcp_serve
 from ..utils.formatter import df_to_json, error_response, slim_df
 from ..utils.symbol import normalize_symbol
 
@@ -55,212 +56,234 @@ def _pick_date_and_value(df: pd.DataFrame) -> tuple[str | None, str | None]:
     return date_col, value_cols[0]
 
 
-def register(mcp: FastMCP):
-    """Register valuation tools with the MCP server."""
+# （QI-ARCH-02 全量上提，2026-11-19：4 个工具体模块级化；3 工具走 mcp_serve
+# 出口收拢（dump=False），get_dividend_data 双源降级无统一兜底保持显式形态。）
 
-    @mcp.tool()
-    async def get_valuation_metrics(
-        symbol: str,
-        num_periods: int = 100,
-    ) -> str:
-        """
-        获取股票历史估值指标（PE、PB、市值等时间序列）。
 
-        可用于估值分析、历史百分位计算、可比公司估值对比等。
+async def get_valuation_metrics(
+    symbol: str,
+    num_periods: int = 100,
+) -> str:
+    """
+    获取股票历史估值指标（PE、PB、市值等时间序列）。
 
-        注意：数据源（百度股市通）不提供「市销率(PS)」，返回体中不会有该字段；
-        需要 PS 请改用财务报表工具自行计算。
+    可用于估值分析、历史百分位计算、可比公司估值对比等。
 
-        Args:
-            symbol: 6位股票代码，如 "600519"
-            num_periods: 返回最近几个交易日的数据，默认100
+    注意：数据源（百度股市通）不提供「市销率(PS)」，返回体中不会有该字段；
+    需要 PS 请改用财务报表工具自行计算。
 
-        Returns:
-            估值指标时间序列 (JSON)，包含日期、总市值、市盈率(TTM)、
-            市净率、市现率。
-        """
-        symbol = normalize_symbol(symbol)
-        cache_key = f"valuation:{symbol}:{num_periods}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
+    Args:
+        symbol: 6位股票代码，如 "600519"
+        num_periods: 返回最近几个交易日的数据，默认100
 
-        try:
-            frames: list[pd.DataFrame] = []
-            for ind in _BAIDU_INDICATORS:
-                try:
-                    df, _src = _router.route(
-                        "valuation", endpoint="baidu", symbol=symbol, indicator=ind
-                    )
-                except Exception as exc:
-                    logger.warning("valuation %s 获取失败(%s): %s", ind, symbol, exc)
-                    continue
-                if df is None or df.empty:
-                    continue
+    Returns:
+        估值指标时间序列 (JSON)，包含日期、总市值、市盈率(TTM)、
+        市净率、市现率。
+    """
+    symbol = normalize_symbol(symbol)
+    cache_key = f"valuation:{symbol}:{num_periods}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
 
-                date_col, value_col = _pick_date_and_value(df)
-                if date_col is None or value_col is None:
-                    logger.warning(
-                        "valuation %s 返回结构不符合预期(列=%s)，已跳过",
-                        ind,
-                        list(df.columns),
-                    )
-                    continue
-
-                part = df[[date_col, value_col]].rename(
-                    columns={date_col: "date", value_col: ind}
+    def _build() -> str:
+        frames: list[pd.DataFrame] = []
+        for ind in _BAIDU_INDICATORS:
+            try:
+                df, _src = _router.route(
+                    "valuation", endpoint="baidu", symbol=symbol, indicator=ind
                 )
-                part["date"] = pd.to_datetime(part["date"], errors="coerce")
-                part = part.dropna(subset=["date"])
-                if not part.empty:
-                    frames.append(part)
-
-            if not frames:
-                return error_response(
-                    f"估值指标数据为空 ({symbol})：所有指标均未取到有效数据",
-                    "get_valuation_metrics",
-                )
-
-            # 各指标日期已统一为 datetime64，合并不会再出现混类型列
-            result_df = frames[0]
-            for frame in frames[1:]:
-                result_df = pd.merge(result_df, frame, on="date", how="outer")
-
-            result_df = result_df.sort_values("date", ascending=False)
-            if num_periods > 0:
-                result_df = result_df.head(num_periods)
-            result_df["date"] = result_df["date"].dt.strftime("%Y-%m-%d")
-            result = df_to_json(result_df)
-            cache.set(cache_key, result, TTL_DAILY)
-            return result
-        except Exception as e:
-            return error_response(
-                f"获取估值指标失败 ({symbol}): {e}", "get_valuation_metrics"
-            )
-
-    @mcp.tool()
-    async def get_dividend_data(symbol: str) -> str:
-        """
-        获取股票历史分红派息详情。
-
-        Args:
-            symbol: 6位股票代码，如 "600519"
-
-        Returns:
-            分红历史 (JSON)，包含分红年度、每股派息、除权日、股权登记日等。
-        """
-        symbol = normalize_symbol(symbol)
-        cache_key = f"dividend:{symbol}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
-        # Primary: stock_history_dividend_detail
-        try:
-            df, _src = _router.route(
-                "valuation", endpoint="dividend_detail", symbol=symbol
-            )
-            if df is not None and not df.empty:
-                result = df_to_json(df)
-                cache.set(cache_key, result, TTL_FINANCIAL)
-                return result
-        except Exception:
-            pass
-
-        # Fallback: stock_dividend_cninfo (巨潮信息网)
-        try:
-            df, _src = _router.route(
-                "valuation", endpoint="dividend_cninfo", symbol=symbol
-            )
-            if df is not None and not df.empty:
-                result = df_to_json(df)
-                cache.set(cache_key, result, TTL_FINANCIAL)
-                return result
-        except Exception:
-            pass
-
-        return error_response(
-            f"获取分红数据失败 ({symbol}): 所有数据源均不可用",
-            "get_dividend_data",
-        )
-
-    @mcp.tool()
-    async def get_institutional_holdings(symbol: str) -> str:
-        """
-        获取机构持股/十大流通股东数据。
-
-        Args:
-            symbol: 6位股票代码，如 "600519"
-
-        Returns:
-            流通股东数据 (JSON)，包含股东名称、持股数量、持股比例、
-            变动情况等。
-        """
-        symbol = normalize_symbol(symbol)
-        cache_key = f"institutions:{symbol}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
-        try:
-            df, _src = _router.route(
-                "valuation", endpoint="circulate_holder", symbol=symbol
-            )
+            except Exception as exc:
+                logger.warning("valuation %s 获取失败(%s): %s", ind, symbol, exc)
+                continue
             if df is None or df.empty:
-                return error_response(
-                    f"机构持股数据为空 ({symbol})", "get_institutional_holdings"
+                continue
+
+            date_col, value_col = _pick_date_and_value(df)
+            if date_col is None or value_col is None:
+                logger.warning(
+                    "valuation %s 返回结构不符合预期(列=%s)，已跳过",
+                    ind,
+                    list(df.columns),
                 )
-            df = slim_df(df)
+                continue
+
+            part = df[[date_col, value_col]].rename(
+                columns={date_col: "date", value_col: ind}
+            )
+            part["date"] = pd.to_datetime(part["date"], errors="coerce")
+            part = part.dropna(subset=["date"])
+            if not part.empty:
+                frames.append(part)
+
+        if not frames:
+            return error_response(
+                f"估值指标数据为空 ({symbol})：所有指标均未取到有效数据",
+                "get_valuation_metrics",
+            )
+
+        # 各指标日期已统一为 datetime64，合并不会再出现混类型列
+        result_df = frames[0]
+        for frame in frames[1:]:
+            result_df = pd.merge(result_df, frame, on="date", how="outer")
+
+        result_df = result_df.sort_values("date", ascending=False)
+        if num_periods > 0:
+            result_df = result_df.head(num_periods)
+        result_df["date"] = result_df["date"].dt.strftime("%Y-%m-%d")
+        result = df_to_json(result_df)
+        cache.set(cache_key, result, TTL_DAILY)
+        return result
+
+    return mcp_serve(
+        "get_valuation_metrics",
+        _build,
+        f"获取估值指标失败 ({symbol})",
+        dump=False,
+    )
+
+
+async def get_dividend_data(symbol: str) -> str:
+    """
+    获取股票历史分红派息详情。
+
+    Args:
+        symbol: 6位股票代码，如 "600519"
+
+    Returns:
+        分红历史 (JSON)，包含分红年度、每股派息、除权日、股权登记日等。
+    """
+    symbol = normalize_symbol(symbol)
+    cache_key = f"dividend:{symbol}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    # Primary: stock_history_dividend_detail
+    try:
+        df, _src = _router.route(
+            "valuation", endpoint="dividend_detail", symbol=symbol
+        )
+        if df is not None and not df.empty:
             result = df_to_json(df)
             cache.set(cache_key, result, TTL_FINANCIAL)
             return result
-        except Exception as e:
-            return error_response(
-                f"获取机构持股失败 ({symbol}): {e}", "get_institutional_holdings"
-            )
+    except Exception:
+        pass
 
-    @mcp.tool()
-    async def get_analyst_rating(
-        symbol: str = "",
-        num_results: int = 20,
-    ) -> str:
-        """
-        获取分析师评级和盈利预测数据。
-
-        可查询特定股票的分析师评级，或获取全市场最新评级列表。
-
-        Args:
-            symbol: 6位股票代码，如 "600519"。为空则返回全市场最新评级。
-            num_results: 最大返回条数，默认20
-
-        Returns:
-            分析师评级数据 (JSON)，包含评级机构、目标价、评级、
-            预测EPS等。
-        """
-        cache_key = f"analyst:{symbol}:{num_results}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
-        try:
-            df, _src = _router.route("valuation", endpoint="rank_forecast")
-            if df is None or df.empty:
-                return error_response(
-                    f"分析师评级数据为空 ({symbol or '全部'})", "get_analyst_rating"
-                )
-            if symbol:
-                symbol = normalize_symbol(symbol)
-                # Filter for the specific stock
-                code_cols = [c for c in df.columns if "代码" in c or "code" in c.lower()]
-                if code_cols:
-                    df = df[df[code_cols[0]].astype(str).str.contains(symbol)]
-
-            df = df.head(num_results)
-            df = slim_df(df)
+    # Fallback: stock_dividend_cninfo (巨潮信息网)
+    try:
+        df, _src = _router.route(
+            "valuation", endpoint="dividend_cninfo", symbol=symbol
+        )
+        if df is not None and not df.empty:
             result = df_to_json(df)
-            cache.set(cache_key, result, TTL_DAILY)
+            cache.set(cache_key, result, TTL_FINANCIAL)
             return result
-        except Exception as e:
+    except Exception:
+        pass
+
+    return error_response(
+        f"获取分红数据失败 ({symbol}): 所有数据源均不可用",
+        "get_dividend_data",
+    )
+
+
+async def get_institutional_holdings(symbol: str) -> str:
+    """
+    获取机构持股/十大流通股东数据。
+
+    Args:
+        symbol: 6位股票代码，如 "600519"
+
+    Returns:
+        流通股东数据 (JSON)，包含股东名称、持股数量、持股比例、
+        变动情况等。
+    """
+    symbol = normalize_symbol(symbol)
+    cache_key = f"institutions:{symbol}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    def _build() -> str:
+        df, _src = _router.route(
+            "valuation", endpoint="circulate_holder", symbol=symbol
+        )
+        if df is None or df.empty:
             return error_response(
-                f"获取分析师评级失败 ({symbol}): {e}", "get_analyst_rating"
+                f"机构持股数据为空 ({symbol})", "get_institutional_holdings"
             )
+        df = slim_df(df)
+        result = df_to_json(df)
+        cache.set(cache_key, result, TTL_FINANCIAL)
+        return result
+
+    return mcp_serve(
+        "get_institutional_holdings",
+        _build,
+        f"获取机构持股失败 ({symbol})",
+        dump=False,
+    )
+
+
+async def get_analyst_rating(
+    symbol: str = "",
+    num_results: int = 20,
+) -> str:
+    """
+    获取分析师评级和盈利预测数据。
+
+    可查询特定股票的分析师评级，或获取全市场最新评级列表。
+
+    Args:
+        symbol: 6位股票代码，如 "600519"。为空则返回全市场最新评级。
+        num_results: 最大返回条数，默认20
+
+    Returns:
+        分析师评级数据 (JSON)，包含评级机构、目标价、评级、
+        预测EPS等。
+    """
+    cache_key = f"analyst:{symbol}:{num_results}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    def _build() -> str:
+        df, _src = _router.route("valuation", endpoint="rank_forecast")
+        if df is None or df.empty:
+            return error_response(
+                f"分析师评级数据为空 ({symbol or '全部'})", "get_analyst_rating"
+            )
+        if symbol:
+            symbol = normalize_symbol(symbol)
+            # Filter for the specific stock
+            code_cols = [c for c in df.columns if "代码" in c or "code" in c.lower()]
+            if code_cols:
+                df = df[df[code_cols[0]].astype(str).str.contains(symbol)]
+
+        df = df.head(num_results)
+        df = slim_df(df)
+        result = df_to_json(df)
+        cache.set(cache_key, result, TTL_DAILY)
+        return result
+
+    return mcp_serve(
+        "get_analyst_rating",
+        _build,
+        f"获取分析师评级失败 ({symbol})",
+        dump=False,
+    )
+
+
+def register(mcp: FastMCP):
+    """Register valuation tools with the MCP server.
+
+    QI-ARCH-02 全量上提（2026-11-19）：4 工具体模块级，引用注册。"""
+    for _fn in (
+        get_valuation_metrics,
+        get_dividend_data,
+        get_institutional_holdings,
+        get_analyst_rating,
+    ):
+        mcp.tool()(_fn)
