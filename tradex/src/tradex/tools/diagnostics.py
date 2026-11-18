@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
 
+from ._mcp_serve import mcp_serve
 from ..utils.formatter import dict_to_json, error_response
 from ..utils.cache import cache
 from .registry import ToolRegistry
@@ -125,33 +126,157 @@ def build_dashboard_data(tool_count: int = 0) -> dict:
     }
 
 
-def register(mcp: FastMCP):
-    """向 MCP server 注册诊断工具。"""
+# （QI-ARCH-02 全量上提，2026-11-19：5 个工具体模块级化；list_all_tools/
+# get_data_source_dashboard 原用闭包 mcp——上提后改模块级 _MCP_REF（register
+# 赋值）；health_check 内部多段 try 收集 issues（诊断语义，无统一异常出口）
+# 上提不套 mcp_serve；其余 3 工具走 mcp_serve（dump=dict_to_json）。）
 
-    @mcp.tool()
-    async def get_data_source_health() -> str:
-        """
-        返回各数据源的健康状态。
+_MCP_REF = None  # register 时赋值（list_all_tools / dashboard 从实例读工具清单）
 
-        通过 SmartRouter 获取每个数据源的健康评分、成功率、平均延迟、
-        连续失败次数、最近失败时间与是否健康标记。SmartRouter 不可用时返回基础信息。
 
-        Returns:
-            数据源健康状态 (JSON)，包含 status、count 与 data_sources 列表，
-            每个数据源含 name、score、success_rate、avg_latency_ms、
-            consecutive_fails、last_fail_time、is_healthy。
-        """
-        try:
-            router = _get_router()
-            if router is None:
-                return dict_to_json(
-                    {
-                        "status": "unavailable",
-                        "message": "SmartRouter 未安装或不可用，无法获取数据源健康状态",
-                        "count": 0,
-                        "data_sources": [],
-                    }
-                )
+async def get_data_source_health() -> str:
+    """
+    返回各数据源的健康状态。
+
+    通过 SmartRouter 获取每个数据源的健康评分、成功率、平均延迟、
+    连续失败次数、最近失败时间与是否健康标记。SmartRouter 不可用时返回基础信息。
+
+    Returns:
+        数据源健康状态 (JSON)，包含 status、count 与 data_sources 列表，
+        每个数据源含 name、score、success_rate、avg_latency_ms、
+        consecutive_fails、last_fail_time、is_healthy。
+    """
+    def _build() -> dict:
+        router = _get_router()
+        if router is None:
+            return {
+                "status": "unavailable",
+                "message": "SmartRouter 未安装或不可用，无法获取数据源健康状态",
+                "count": 0,
+                "data_sources": [],
+            }
+        report = router.get_health_report()
+        sources = [
+            {
+                "name": item.get("source"),
+                "score": item.get("score"),
+                "success_rate": item.get("success_rate"),
+                "avg_latency_ms": item.get("avg_latency_ms"),
+                "total_calls": item.get("total_calls"),
+                "fail_count": item.get("fail_count"),
+                "consecutive_fails": item.get("consecutive_fails"),
+                "last_fail_time": _ts_to_iso(item.get("last_fail_ts")),
+                "last_success_time": _ts_to_iso(item.get("last_success_ts")),
+                "is_healthy": item.get("is_healthy"),
+            }
+            for item in report
+        ]
+        return {
+            "status": "ok",
+            "count": len(sources),
+            "data_sources": sources,
+        }
+
+    return mcp_serve("get_data_source_health", _build, "获取数据源健康状态失败", dump=dict_to_json)
+
+
+async def list_all_tools() -> str:
+    """
+    返回所有已注册工具的清单。
+
+    从 FastMCP 实例读取所有通过 register(mcp) 注册的工具，返回工具名列表与总数。
+    v3.1.4 起：改为从 mcp 实例获取（替代原装饰器注册机制，避免返回空清单）。
+
+    Returns:
+        工具清单 (JSON)，包含 status、total、tools（工具名列表）。
+    """
+    # list_tools 是协程且工具体本身 async——直接处理不经 mcp_serve 的同步 build
+    # （出口形态 dict_to_json 与 error_response 保留手写原样——等价于 mcp_serve
+    #  的同步 build 约束不适配 async 的已知例外，记交接。）
+    try:
+        tools = await _MCP_REF.list_tools()
+        tool_names = sorted([t.name for t in tools])
+        return dict_to_json(
+            {
+                "status": "ok",
+                "total": len(tool_names),
+                "tools": tool_names,
+            }
+        )
+    except Exception as e:
+        return error_response(f"获取工具清单失败: {e}", "list_all_tools")
+
+
+async def get_cache_stats() -> str:
+    """
+    返回两级缓存（内存 + 文件）的统计信息。
+
+    Returns:
+        缓存统计 (JSON)，包含 size、max_size、hits、misses、hit_rate、
+        file_size、file_enabled。
+    """
+    def _build() -> dict:
+        stats = cache.stats
+        return {
+            "size": stats.get("size", 0),
+            "max_size": stats.get("max_size", 0),
+            "hits": stats.get("hits", 0),
+            "misses": stats.get("misses", 0),
+            "hit_rate": stats.get("hit_rate", 0.0),
+            "file_size": stats.get("file_size", 0),
+            "file_enabled": stats.get("file_enabled", False),
+        }
+
+    return mcp_serve("get_cache_stats", _build, "获取缓存统计失败", dump=dict_to_json)
+
+
+async def health_check() -> str:
+    """
+    系统健康检查。
+
+    组合数据源健康、工具清单、缓存统计三项，并增加 akshare 连通性测试，
+    返回整体状态（healthy / degraded / unhealthy）：
+      - unhealthy: akshare 不可用（核心数据源缺失）
+      - degraded:  akshare 可用但存在其他异常（SmartRouter 不可用、
+                   缓存/工具获取失败或存在不健康数据源）
+      - healthy:   全部正常
+
+    Returns:
+        系统健康检查结果 (JSON)，包含 status、issues、akshare、
+        data_sources、tools、cache。
+    """
+    result: dict = {
+        "status": "healthy",
+        "issues": [],
+        "akshare": {},
+        "data_sources": {},
+        "tools": {},
+        "cache": {},
+    }
+    issues: list[str] = []
+
+    # akshare 连通性测试（核心依赖，不可用即为 unhealthy）
+    try:
+        import akshare
+
+        result["akshare"] = {
+            "available": True,
+            "version": getattr(akshare, "__version__", "unknown"),
+        }
+    except Exception as e:
+        result["akshare"] = {"available": False, "error": str(e)}
+        issues.append("akshare 不可用")
+
+    # 数据源健康
+    try:
+        router = _get_router()
+        if router is None:
+            result["data_sources"] = {
+                "available": False,
+                "message": "SmartRouter 未安装或不可用",
+            }
+            issues.append("SmartRouter 不可用")
+        else:
             report = router.get_health_report()
             sources = [
                 {
@@ -159,209 +284,102 @@ def register(mcp: FastMCP):
                     "score": item.get("score"),
                     "success_rate": item.get("success_rate"),
                     "avg_latency_ms": item.get("avg_latency_ms"),
-                    "total_calls": item.get("total_calls"),
-                    "fail_count": item.get("fail_count"),
                     "consecutive_fails": item.get("consecutive_fails"),
-                    "last_fail_time": _ts_to_iso(item.get("last_fail_ts")),
-                    "last_success_time": _ts_to_iso(item.get("last_success_ts")),
                     "is_healthy": item.get("is_healthy"),
                 }
                 for item in report
             ]
-            return dict_to_json(
-                {
-                    "status": "ok",
-                    "count": len(sources),
-                    "data_sources": sources,
-                }
-            )
-        except Exception as e:
-            return error_response(
-                f"获取数据源健康状态失败: {e}", "get_data_source_health"
-            )
+            unhealthy = [s for s in sources if not s.get("is_healthy")]
+            result["data_sources"] = {
+                "available": True,
+                "count": len(sources),
+                "unhealthy_count": len(unhealthy),
+            }
+            if unhealthy:
+                issues.append(f"{len(unhealthy)} 个数据源不健康")
+    except Exception as e:
+        result["data_sources"] = {"available": False, "error": str(e)}
+        issues.append("数据源健康检查失败")
 
-    @mcp.tool()
-    async def list_all_tools() -> str:
-        """
-        返回所有已注册工具的清单。
+    # 工具清单（v3.1.4 起：从 mcp 实例获取，替代装饰器注册机制）
+    try:
+        tools = await _MCP_REF.list_tools()
+        result["tools"] = {"available": True, "total": len(tools)}
+    except Exception as e:
+        result["tools"] = {"available": False, "error": str(e)}
+        issues.append("工具清单获取失败")
 
-        从 FastMCP 实例读取所有通过 register(mcp) 注册的工具，返回工具名列表与总数。
-        v3.1.4 起：改为从 mcp 实例获取（替代原装饰器注册机制，避免返回空清单）。
-
-        Returns:
-            工具清单 (JSON)，包含 status、total、tools（工具名列表）。
-        """
-        try:
-            tools = await mcp.list_tools()
-            tool_names = sorted([t.name for t in tools])
-            return dict_to_json(
-                {
-                    "status": "ok",
-                    "total": len(tool_names),
-                    "tools": tool_names,
-                }
-            )
-        except Exception as e:
-            return error_response(f"获取工具清单失败: {e}", "list_all_tools")
-
-    @mcp.tool()
-    async def get_cache_stats() -> str:
-        """
-        返回两级缓存（内存 + 文件）的统计信息。
-
-        Returns:
-            缓存统计 (JSON)，包含 size、max_size、hits、misses、hit_rate、
-            file_size、file_enabled。
-        """
-        try:
-            stats = cache.stats
-            return dict_to_json(
-                {
-                    "size": stats.get("size", 0),
-                    "max_size": stats.get("max_size", 0),
-                    "hits": stats.get("hits", 0),
-                    "misses": stats.get("misses", 0),
-                    "hit_rate": stats.get("hit_rate", 0.0),
-                    "file_size": stats.get("file_size", 0),
-                    "file_enabled": stats.get("file_enabled", False),
-                }
-            )
-        except Exception as e:
-            return error_response(f"获取缓存统计失败: {e}", "get_cache_stats")
-
-    @mcp.tool()
-    async def health_check() -> str:
-        """
-        系统健康检查。
-
-        组合数据源健康、工具清单、缓存统计三项，并增加 akshare 连通性测试，
-        返回整体状态（healthy / degraded / unhealthy）：
-          - unhealthy: akshare 不可用（核心数据源缺失）
-          - degraded:  akshare 可用但存在其他异常（SmartRouter 不可用、
-                       缓存/工具获取失败或存在不健康数据源）
-          - healthy:   全部正常
-
-        Returns:
-            系统健康检查结果 (JSON)，包含 status、issues、akshare、
-            data_sources、tools、cache。
-        """
-        result: dict = {
-            "status": "healthy",
-            "issues": [],
-            "akshare": {},
-            "data_sources": {},
-            "tools": {},
-            "cache": {},
+    # 缓存统计
+    try:
+        stats = cache.stats
+        result["cache"] = {
+            "available": True,
+            "size": stats.get("size", 0),
+            "max_size": stats.get("max_size", 0),
+            "hits": stats.get("hits", 0),
+            "misses": stats.get("misses", 0),
+            "hit_rate": stats.get("hit_rate", 0.0),
+            "file_size": stats.get("file_size", 0),
+            "file_enabled": stats.get("file_enabled", False),
         }
-        issues: list[str] = []
+    except Exception as e:
+        result["cache"] = {"available": False, "error": str(e)}
+        issues.append("缓存统计获取失败")
 
-        # akshare 连通性测试（核心依赖，不可用即为 unhealthy）
-        try:
-            import akshare
+    # 整体状态判定
+    if not result["akshare"].get("available"):
+        result["status"] = "unhealthy"
+    elif issues:
+        result["status"] = "degraded"
+    else:
+        result["status"] = "healthy"
 
-            result["akshare"] = {
-                "available": True,
-                "version": getattr(akshare, "__version__", "unknown"),
-            }
-        except Exception as e:
-            result["akshare"] = {"available": False, "error": str(e)}
-            issues.append("akshare 不可用")
+    result["issues"] = issues
+    return dict_to_json(result)
 
-        # 数据源健康
-        try:
-            router = _get_router()
-            if router is None:
-                result["data_sources"] = {
-                    "available": False,
-                    "message": "SmartRouter 未安装或不可用",
-                }
-                issues.append("SmartRouter 不可用")
-            else:
-                report = router.get_health_report()
-                sources = [
-                    {
-                        "name": item.get("source"),
-                        "score": item.get("score"),
-                        "success_rate": item.get("success_rate"),
-                        "avg_latency_ms": item.get("avg_latency_ms"),
-                        "consecutive_fails": item.get("consecutive_fails"),
-                        "is_healthy": item.get("is_healthy"),
-                    }
-                    for item in report
-                ]
-                unhealthy = [s for s in sources if not s.get("is_healthy")]
-                result["data_sources"] = {
-                    "available": True,
-                    "count": len(sources),
-                    "unhealthy_count": len(unhealthy),
-                }
-                if unhealthy:
-                    issues.append(f"{len(unhealthy)} 个数据源不健康")
-        except Exception as e:
-            result["data_sources"] = {"available": False, "error": str(e)}
-            issues.append("数据源健康检查失败")
 
-        # 工具清单（v3.1.4 起：从 mcp 实例获取，替代装饰器注册机制）
-        try:
-            tools = await mcp.list_tools()
-            result["tools"] = {"available": True, "total": len(tools)}
-        except Exception as e:
-            result["tools"] = {"available": False, "error": str(e)}
-            issues.append("工具清单获取失败")
+async def get_data_source_dashboard() -> str:
+    """
+    获取数据源看板数据（JSON）。
 
-        # 缓存统计
-        try:
-            stats = cache.stats
-            result["cache"] = {
-                "available": True,
-                "size": stats.get("size", 0),
-                "max_size": stats.get("max_size", 0),
-                "hits": stats.get("hits", 0),
-                "misses": stats.get("misses", 0),
-                "hit_rate": stats.get("hit_rate", 0.0),
-                "file_size": stats.get("file_size", 0),
-                "file_enabled": stats.get("file_enabled", False),
-            }
-        except Exception as e:
-            result["cache"] = {"available": False, "error": str(e)}
-            issues.append("缓存统计获取失败")
+    返回数据源健康/版本/统计信息，包含：
+    - 数据源列表（25 类型 34 源）
+    - 每个源的健康评分/延迟/成功率/独占标记
+    - eltdx/akshare 版本检查结果
+    - 系统概览（总工具数、注册数据类型数、健康源比例）
 
-        # 整体状态判定
-        if not result["akshare"].get("available"):
-            result["status"] = "unhealthy"
-        elif issues:
-            result["status"] = "degraded"
-        else:
-            result["status"] = "healthy"
+    Returns:
+        看板数据 (JSON)，包含 timestamp、summary、sources、health、versions。
+        summary 含 total_tools / data_types / sources / healthy_sources /
+        unhealthy_sources；sources 为 SmartRouter 注册表；health 为健康报告；
+        versions 为 eltdx/akshare 版本检查结果列表。
+    """
+    # 异步上下文中获取工具总数（_MCP_REF 由 register 赋值）
+    try:
+        tools = await _MCP_REF.list_tools()
+        tool_count = len(tools)
+    except Exception:
+        tool_count = 0
 
-        result["issues"] = issues
-        return dict_to_json(result)
+    def _build() -> dict:
+        data = build_dashboard_data(tool_count=tool_count)
+        return data
 
-    @mcp.tool()
-    async def get_data_source_dashboard() -> str:
-        """
-        获取数据源看板数据（JSON）。
+    return mcp_serve("get_data_source_dashboard", _build, "获取数据源看板失败", dump=dict_to_json)
 
-        返回数据源健康/版本/统计信息，包含：
-        - 数据源列表（25 类型 34 源）
-        - 每个源的健康评分/延迟/成功率/独占标记
-        - eltdx/akshare 版本检查结果
-        - 系统概览（总工具数、注册数据类型数、健康源比例）
 
-        Returns:
-            看板数据 (JSON)，包含 timestamp、summary、sources、health、versions。
-            summary 含 total_tools / data_types / sources / healthy_sources /
-            unhealthy_sources；sources 为 SmartRouter 注册表；health 为健康报告；
-            versions 为 eltdx/akshare 版本检查结果列表。
-        """
-        try:
-            # 异步上下文中获取工具总数（mcp 由闭包捕获）
-            try:
-                tools = await mcp.list_tools()
-                tool_count = len(tools)
-            except Exception:
-                tool_count = 0
-            data = build_dashboard_data(tool_count=tool_count)
-            return dict_to_json(data)
-        except Exception as e:
-            return error_response(f"获取数据源看板失败: {e}", "get_data_source_dashboard")
+def register(mcp: FastMCP):
+    """向 MCP server 注册诊断工具。
+
+    QI-ARCH-02 全量上提（2026-11-19）：5 工具体模块级，引用注册；
+    _MCP_REF 赋值供 list_all_tools/dashboard 读取工具清单。"""
+    global _MCP_REF
+    _MCP_REF = mcp
+    for _fn in (
+        get_data_source_health,
+        list_all_tools,
+        get_cache_stats,
+        health_check,
+        get_data_source_dashboard,
+    ):
+        mcp.tool()(_fn)
