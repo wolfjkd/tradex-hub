@@ -84,3 +84,37 @@ class TestTradeDatesCacheDailyRefresh:
         with patch.object(akf, "_ak", return_value=fake):
             result = akf._trade_dates_recent()
         assert result == [f"{today.year}0601"]
+
+
+class TestPrevTradingDayConsolidated:
+    """QI-STD-98（2026-11-18 收拢）：shortline_service._prev_trading_day 原与
+    akshare_fetchers._trade_dates_recent 两套并行日历缓存——收拢单点改调
+    _trade_dates_recent（get_or_set 统一边界），双消费路径共用同一份实现。"""
+
+    def test_prev_trading_day_uses_consolidated_cache(self, monkeypatch):
+        import tradex.data_sources.akshare_fetchers as akf
+
+        from tradex.service.shortline_service import _prev_trading_day
+
+        called = []
+
+        def fake_recent():
+            called.append(1)
+            return ["20261102", "20261103", "20261104"]
+
+        monkeypatch.setattr(akf, "_trade_dates_recent", fake_recent)
+        assert _prev_trading_day("2026-11-04") == "20261103"
+        assert called, "必须走收拢单点 _trade_dates_recent，不再自建缓存"
+
+    def test_prev_trading_day_no_prior_raises(self, monkeypatch):
+        import tradex.data_sources.akshare_fetchers as akf
+
+        from tradex.service.shortline_service import _prev_trading_day
+
+        monkeypatch.setattr(
+            akf, "_trade_dates_recent", lambda: ["20261102", "20261103"]
+        )
+        import pytest as _pytest
+
+        with _pytest.raises(ValueError, match="交易日历无 20200101 之前的记录"):
+            _prev_trading_day("20200101")

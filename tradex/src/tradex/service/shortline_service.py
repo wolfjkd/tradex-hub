@@ -162,19 +162,16 @@ def ensure_prev_zt_seal_times(snapshot: PoolSnapshot) -> None:
 
 
 def _prev_trading_day(date_str: str) -> str:
-    """前一交易日（YYYYMMDD）。sina 全表日历带 TTL 缓存，跨月安全。"""
-    import pandas as pd
-    from ..data_sources.akshare_fetchers import _ak
+    """前一交易日（YYYYMMDD）。
 
-    cache_key = f"trade_dates_all:{pd.Timestamp.now().strftime('%Y%m')}"
-    cached = cache.get(cache_key)
-    if cached is None:
-        df = _ak().tool_trade_date_hist_sina()
-        if df is None or df.empty or "trade_date" not in df.columns:
-            raise ValueError("sina 交易日清单返回空或结构变化")
-        cached = pd.to_datetime(df["trade_date"], errors="coerce").dropna().dt.strftime("%Y%m%d").tolist()
-        cache.set(cache_key, cached, TTL_DAILY)
-    days = sorted(cached)
+    QI-STD-98（2026-11-18 收拢）：日历缓存原与 akshare_fetchers._trade_dates_recent
+    两套并行（本函数手工 get/set 月键版 vs 那边 get_or_set 统一边界日键版）——
+    收拢单点：改调 _trade_dates_recent（rule 7 get_or_set 正确形态，TTL 到当日
+    午夜，键含获取日跨天/跨年自然重拉），本函数只保留「找 target 前一日」语义。
+    """
+    from ..data_sources.akshare_fetchers import _trade_dates_recent
+
+    days = _trade_dates_recent()
     target = str(date_str).replace("-", "")
     prior = [d for d in days if d < target]
     if not prior:

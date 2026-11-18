@@ -174,3 +174,50 @@ class TestIndexConstituentsService:
         assert out["count"] == 2
         assert out["source"] == "csindex_official"
         assert out["constituents"][0]["成分券代码"] == "000001"
+
+
+class TestHeaderLocationAndNanCleaning:
+    """QI-STD-96（2026-11-18 质检整改）：表头定位失败显式可读异常
+    （不再裸 StopIteration）+ NaN 清洗（不产出 "nan" 字符串）。"""
+
+    def test_header_loc_fail_raises_runtime_error(self):
+        """双语关键词均未命中（上游改版形态）→ RuntimeError 带实际列名。"""
+        from tradex.data_sources.macro_official_fetchers import (
+            fetch_index_constituents,
+        )
+
+        buf = io.BytesIO()
+        pd.DataFrame({"日期Date": [20261110], "无关列": [1]}).to_excel(
+            buf, index=False, engine="openpyxl"
+        )
+        with patch(
+            "tradex.data_sources.macro_official_fetchers._csi_session.get",
+            return_value=_mock_resp(buf.getvalue()),
+        ):
+            with pytest.raises(RuntimeError, match="表头定位失败.*实际列名"):
+                fetch_index_constituents()
+
+    def test_nan_name_cleaned_to_empty(self):
+        """名称/交易所列 NaN → 空串（既有空值口径），不得出现 "nan" 字符串。"""
+        from tradex.data_sources.macro_official_fetchers import (
+            fetch_index_constituents,
+        )
+
+        buf = io.BytesIO()
+        pd.DataFrame(
+            {
+                "日期Date": [20261110, 20261110],
+                "成份券代码Constituent Code": [1, 2],
+                "成份券名称Constituent Name": ["平安银行", None],
+                "交易所Exchange": ["深圳证券交易所", None],
+            }
+        ).to_excel(buf, index=False, engine="openpyxl")
+        with patch(
+            "tradex.data_sources.macro_official_fetchers._csi_session.get",
+            return_value=_mock_resp(buf.getvalue()),
+        ):
+            df = fetch_index_constituents()
+        row = df[df["成分券代码"] == "000002"].iloc[0]
+        assert row["成分券名称"] == ""
+        assert row["交易所"] == ""
+        assert not df["成分券名称"].astype(str).str.lower().isin(["nan"]).any()

@@ -582,7 +582,14 @@ def fetch_sina_world_index(code: str = "KOSPI", **kwargs) -> dict[str, Any]:
     fields = text.split('"')[1].split(",")
     if len(fields) < 12:
         return {}
-    return _parse_znb_fields(fields)
+    result = _parse_znb_fields(fields)
+    if result:
+        # 三源 schema 对齐（QI-STD-97）：dzh 有 time、东财有最新行情时间列，
+        # 新浪 znb 族无行情时间字段——补**抓取时刻**并显式标注（非行情时间，
+        # 不得当行情时间展示）。
+        result["time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        result["time_semantics"] = "fetch_time"
+    return result
 
 
 def _parse_znb_fields(fields: list[str]) -> dict[str, Any]:

@@ -354,16 +354,24 @@ def fetch_index_constituents(index_code: str = "000300", **kwargs) -> pd.DataFra
 
         # 坑③：双语表头按关键子串定位，防中证改英文列名/列序
         # （照 fetch_index_valuation 双语定位模式；成份/成分两种写法都认）。
-        col_date = next(c for c in df.columns if "日期" in str(c))
-        col_code = next(
-            c for c in df.columns if "成份券代码" in str(c) or "成分券代码" in str(c)
-        )
-        col_name = next(
-            c for c in df.columns if "成份券名称" in str(c) or "成分券名称" in str(c)
-        )
-        col_exch = next(
-            c for c in df.columns if "交易所" in str(c) and "英文" not in str(c)
-        )
+        # QI-STD-96：定位失败裸 StopIteration 对调用方不可读 → 显式 RuntimeError
+        # 带实际列名（改版可诊断），异常链保留真因。
+        try:
+            col_date = next(c for c in df.columns if "日期" in str(c))
+            col_code = next(
+                c for c in df.columns if "成份券代码" in str(c) or "成分券代码" in str(c)
+            )
+            col_name = next(
+                c for c in df.columns if "成份券名称" in str(c) or "成分券名称" in str(c)
+            )
+            col_exch = next(
+                c for c in df.columns if "交易所" in str(c) and "英文" not in str(c)
+            )
+        except StopIteration as exc:
+            raise RuntimeError(
+                "中证成分股文件表头定位失败（双语关键词均未命中，疑似上游改版）——"
+                f"实际列名：{list(df.columns)[:20]}"
+            ) from exc
 
         out = df[[col_date, col_code, col_name, col_exch]].copy()
         out.columns = ["日期", "成分券代码", "成分券名称", "交易所"]
@@ -377,7 +385,10 @@ def fetch_index_constituents(index_code: str = "000300", **kwargs) -> pd.DataFra
             .str.zfill(6)
         )
         for c in ("成分券名称", "交易所"):
-            out[c] = out[c].astype(str).str.strip()
+            # QI-STD-96 NaN 清洗：NaN astype(str) 会变 "nan" 字符串交下游展示——
+            # 先 fillna 空串（既有空值口径），残余 "nan"/"none" 字样一并清空
+            out[c] = out[c].fillna("").astype(str).str.strip()
+            out.loc[out[c].str.lower().isin(("nan", "none", "null")), c] = ""
         out = out.dropna(subset=["日期", "成分券代码"]).sort_values("成分券代码").reset_index(drop=True)
         if out.empty:
             raise ValueError(f"中证成分股文件解析后无有效行：{url}")

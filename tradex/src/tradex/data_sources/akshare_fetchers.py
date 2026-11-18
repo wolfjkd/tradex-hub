@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import calendar
 import logging
+import time
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -2577,6 +2578,12 @@ def fetch_bond_yield_cn_backup(curve: str = "国债", **kwargs) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+# QI-STD-95：fetch_global_index_spot 频控契约代码化（原仅 docstring「调用方必须
+# 做 ≥60s 级缓存」）——push2 clist 对高频有 IP 风控，模块级最小间隔兜底
+_GLOBAL_INDEX_MIN_INTERVAL = 60.0
+_last_global_index_call = 0.0
+
+
 def fetch_global_index_spot(**kwargs) -> pd.DataFrame:
     """东财全球指数实时快照（ak.index_global_spot_em）。
 
@@ -2586,8 +2593,17 @@ def fetch_global_index_spot(**kwargs) -> pd.DataFrame:
 
     用途：TradeX 指数关注池海外指数行情（gi 前缀代码，如 giKS11 韩国KOSPI）。
 
-    频控铁律：底层为 push2 clist 端点，一次取全表即可覆盖全部全球指数，
-    调用方必须做 ≥60s 级缓存，勿做秒级轮询（push2 对高频有 IP 风控）。
+    频控（QI-STD-95 契约代码化）：底层为 push2 clist 端点，一次取全表即可覆盖
+    全部全球指数——模块级最小间隔 60s 节流（间隔不足自动补眠），调用方仍建议
+    叠加 ≥60s 级缓存；勿做秒级轮询（push2 对高频有 IP 风控）。
     """
+    global _last_global_index_call
+    now = time.monotonic()
+    wait = _GLOBAL_INDEX_MIN_INTERVAL - (now - _last_global_index_call)
+    if wait > 0:
+        time.sleep(wait)
+    _last_global_index_call = time.monotonic()
     df = _ak().index_global_spot_em()
+    # 空态：None → 空 DataFrame（诚实空态，AGENTS.md rule 5 书面豁免口径——
+    # 本 fetcher 未注册 SmartRouter、TradeX 直连消费；注册前必须过空态语义检查）
     return df if df is not None else pd.DataFrame()

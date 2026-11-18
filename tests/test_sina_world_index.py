@@ -86,3 +86,62 @@ class TestZnbPayloadShape:
             r_upper = sina_fetchers.fetch_sina_world_index(" KOSPI ")
         assert captured["url"] == "https://hq.sinajs.cn/list=znb_KOSPI"
         assert r_lower == r_upper
+
+
+class TestZnbTimeSemantics:
+    """D④/QI-STD-97（2026-11-18）：三源 schema 对齐——新浪 znb 无行情时间
+    字段，补抓取时刻并在返回体显式标注（time_semantics=fetch_time）。"""
+
+    def test_time_field_is_fetch_time(self):
+        from datetime import datetime as _dt
+
+        from tradex.data_sources import sina_fetchers
+
+        with patch.object(sina_fetchers, "curl_requests") as mock_req:
+            mock_req.get.return_value = _resp(_NORMAL_PAYLOAD)
+            result = sina_fetchers.fetch_sina_world_index("KOSPI")
+        assert "time" in result, "三源 schema 对齐：time 字段必须存在"
+        assert result["time_semantics"] == "fetch_time"
+        _dt.strptime(result["time"], "%Y-%m-%d %H:%M:%S")  # 可解析
+
+    def test_empty_result_has_no_time(self):
+        """空态 {} 不补 time（不编造）。"""
+        from tradex.data_sources import sina_fetchers
+
+        with patch.object(sina_fetchers, "curl_requests") as mock_req:
+            mock_req.get.return_value = _resp('var hq_str_znb_KOSPI="";')
+            assert sina_fetchers.fetch_sina_world_index("KOSPI") == {}
+
+
+class TestThreeSourceSchemaConsistency:
+    """D④ 验收：三源（东财 spot / dzh / 新浪 znb）返回 schema 的
+    time 字段存在性一致（dzh 协议帧带 time；东财带最新行情时间列；
+    znb 补抓取时刻——D④ 修复前 znb 缺失，三源口径不齐）。"""
+
+    def test_all_three_sources_expose_time(self):
+        import pandas as pd
+
+        from tradex.data_sources import akshare_fetchers, dzh_fetchers, sina_fetchers
+
+        # znb：time = 抓取时刻
+        with patch.object(sina_fetchers, "curl_requests") as mock_req:
+            mock_req.get.return_value = _resp(_NORMAL_PAYLOAD)
+            znb = sina_fetchers.fetch_sina_world_index("KOSPI")
+        assert "time" in znb
+
+        # dzh：IXKS11 实测帧协议自带 time（head.index('time')）
+        dz_head = ["obj", "time", "lastclose", "new"]
+        dz_row = ["IXKS11.index", "1794580340", "5342.73", "5290.53"]
+        dz = dzh_fetchers._parse_dyna(dz_head, dz_row)
+        assert "time" in dz, "dzh 源 time 字段存在"
+
+        # 东财 spot：index_global_spot_em 带最新行情时间列
+        em_df = pd.DataFrame(
+            {"名称": ["KOSPI"], "最新价": [5290.53], "最新行情时间": ["2026-11-18 15:00:00"]}
+        )
+        with patch.object(akshare_fetchers, "_ak") as mock_ak, patch.object(
+            akshare_fetchers.time, "monotonic", side_effect=[3000.0, 3000.0]
+        ):
+            mock_ak.return_value.index_global_spot_em.return_value = em_df
+            em = akshare_fetchers.fetch_global_index_spot()
+        assert "最新行情时间" in em.columns, "东财源行情时间列存在"
