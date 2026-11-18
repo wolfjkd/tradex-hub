@@ -9,6 +9,7 @@
 - **全量回归**（两层，`tests` + `tradex/tests` 各自 conftest）：
   `./tradex/.venv/Scripts/python.exe -m pytest tests tradex/tests -m "not network" -q`
   基线 **1235 passed / 5 skipped / 36 deselected**（2026-11-14，+test_undeclared_imports 挂载 + fund_flow 参数兼容四用例）。
+  ⚠️ 基线溯源：对应 commit `32070ff`（v3.9.4 后、qc-20261117 整改前）｜ 基线测试机 **HOME-WOLFJKD**——多机以本机实跑为准（2026-11-18 注记）。
   ⚠️ 偶发「测试全绿但 pytest 进程不退出（CPU 0 挂住）」——某测试泄漏阻塞退出资源（flaky，
   非 tests 内容失败）；总结行以日志为准，超 3 分钟无输出先查日志再判卡死。
   只认「退出码 + 总结行」；跑前确认无遗留 python/pytest 进程（并发 pytest 互污染 `.pytest_cache`）。
@@ -28,6 +29,12 @@
    录制 fixture / monkeypatch 优先（参照 `tests/test_index_valuation.py`）。
 5. **akshare 调用必须过 `_ak()`**（超时防御统一入口），fetcher 失败必须
    **抛出**由 SmartRouter 记账降级——吞成空表 = 降级链失效（v3.3.15 起约定）。
+   **书面豁免（QI-STD-01，2026-11-18 老板拍板①）**：三新全球指数 fetcher
+   （`dzh_fetchers` 大智慧365 / `fetch_sina_world_index` 新浪 znb /
+   `fetch_global_index_spot` 东财 spot）**未注册进 SmartRouter**（registry 无
+   global_index 类型）、TradeX 直连消费——断源时返回诚实空态 `{}` 不抛，
+   属设计内例外；一旦注册进 SmartRouter，本豁免即失效，必须改抛出语义
+   （见 11 注册门槛）。
 6. **哨兵用自定义异常**，禁止消息字符串匹配做控制流（`"空壳" in str(e)` 反例已清）；
    异常链禁止裸 `raise`（要 `raise ... from exc` 保留真因）。
 7. **缓存序列化边界**：对象缓存一律走 `cache.get_or_set(key, factory, ttl)`
@@ -42,6 +49,9 @@
     统一信封出（含 compliance/cache 段）；`shortline.history` 例外无此两段（纯落库读）。
 11. **数据源注册**：改 `registry.py` 的 `_SOURCE_TABLE` 五元组表（历史裁决注释随行内联），
     不要在 `_do_register` 加散装 register；死源/复活裁决记 Obsidian 交接。
+    **注册门槛（2026-11-18 拍板②）**：新 fetcher 注册进 SmartRouter 前**必须过
+    空态语义检查**——把断源/错码/无数据一律折叠为静默 `{}`/空表的形态先统一为
+    抛出语义（或明确豁免并书面化，见 rule 5），防止降级链静默失效。
 
 ## 工具与文档指针
 

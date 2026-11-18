@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ---
 
-## 待发版（2026-11-14，fund_flow 主源修复）
+## 待发版（2026-11-14，fund_flow 主源修复；2026-11-18 补记三新源 feat——QI-SPEC-02）
+
+### Added
+- **东财全球指数实时快照 `fetch_global_index_spot`**（df754aa）：全球指数表实时快照，韩国KOSPI 等海外指数直连东财
+- **大智慧365 本地 WS 源 `dzh_fetchers`**（3a4ea3b）：127.0.0.1 回环行情直连（协议破译源自 dzh-queue 项目），韩国KOSPI 等 IX*.index 全球指数——东财 push2 限流的备份源
+- **新浪全球指数 znb 族实时 fetcher `fetch_sina_world_index`**（32070ff）：`hq.sinajs.cn/list=znb_<代码>` 直连（**大写敏感**，znb_kospi 小写返回空）；znb_ 族无成交额字段（amount=0 前端隐藏行）；不含恒生科技（HSTECH 走腾讯 hk 源）；字段位次 2026-11-14 实测并与东财全球指数表/大智慧365 本地源三方交叉验证一致（KOSPI 5290.53/-0.98%）——TradeX 指数关注池海外指数在东财 push2 限流冷却期内的独立直连备源（hq.sinajs.cn 与 push2 不同限流桶）
 
 ### Fixed
 - **fund_flow akshare 主源恢复命中**（此前恒降级 sina 备源）：`fetch_fund_flow` 是 v3.1.3 参数归一化的漏网者（v3.3.x 重构为 curl_cffi 直连时丢了 symbol 兼容）——`route(symbol=...)`（工具层传参方式）时 code 留空、secid="0."，东财对空 secid 返回 `{"data": null}`，而 `data.get("data", {}).get("klines")` 对「键存在但值为 null」不设防 → `NoneType` 模糊异常。修复：签名补 `symbol=`、归一与 secid 构造复用 sina_fetchers 同款 helper（同类型双源口径统一）、`data.get("data") or {}` 防御 null、空代码语义化 ValueError
@@ -23,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 - 仓内新增 `AGENTS.md` 一页：环境口径（venv / 回归命令 / uv）+ 11 条硬约定（依赖双处同步、计数断言护栏、跨仓消费仓 grep、network 标、`_ak()` 防御、哨兵异常、缓存边界、visibility_catalog、REST 样板、信封契约、注册表数据化）+ 文档指针（承载 TradeX 复盘项⑥）
 - 确定性检查脚本三件 + 断言一件（本仓无 CI，此即 CI 替代）：
   - `scripts/check_dep_sync.py`：pyproject↔requirements 包名集合对比——**实抓并修复 `fastapi` 漏声明**（http 组其余三件都在、唯独它缺，硬违规#1 同形态真发现）
-  - `scripts/check_readme_counts.py`：README 计数 vs 实跑（MCP 191 / REST 82 / 类型 115 / 注册 160）——实抓并修复 L34「114 类型/159 注册」被批次 B 甩下 + 图内 78/102 陈旧计数
+  - `scripts/check_readme_counts.py`：README 计数 vs 实跑（快照口径 MCP 191 / REST 82——脚本创建时实跑值，非长期现状；同段裁决①后即升 192/83 / 类型 115 / 注册 160）——实抓并修复 L34「114 类型/159 注册」被批次 B 甩下 + 图内 78/102 陈旧计数
   - `tests/test_rest_count.py`：REST 端点数纳入计数断言家族（OpenAPI /api/v1 路径数 == 82）
   - `scripts/check_changelog_claims.py`：版本段措辞 vs git log 史实（勘误语境识别、lockfile-only 不算代码提交），`--selftest` 内置 v3.9.1 失实样例实证报错
 
@@ -48,7 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 > C1→C2→C3→C4→C5 严格串行（防冲突按 14 号排产内容序）。纯重构行为不变，全量回归不破为验收硬标准。
 
 ### 代码变更
-- **C1** shortline 信封五抄收拢：`_serve`/`get_cycle`/`_themes_envelope`/`get_theme_rotation`/`get_history` 共 5 份 25 行信封 dict 收拢为 `_build_envelope` 单点（shortline.history 无 compliance/cache 段原状保留）
+- **C1** shortline 信封五抄收拢：`_serve`/`get_cycle`/`_themes_envelope`/`get_theme_rotation`/`get_history` 5 个函数共 6 份信封 dict 收拢为 `_build_envelope` 单点（shortline.history 无 compliance/cache 段原状保留；2026-11-18 勘误——原文「5 份」计数口径不准）
 - **C2** registry 注册表数据化：160 条逐条 `router.register` 转模块级 `_SOURCE_TABLE` 五元组声明表，顶部手抄矩阵 docstring 删除（双份知识合一），160 条历史裁决注释随行内联；改前/改后 `_sources` 快照逐条一致（160 注册/115 类型）
 - **C3** 东财 RPT_LIFT_STAGE 字段映射收敛单点 `_lockup_row`：JSON/文本版四处取值合一——顺带修复批次 A 漏改面（文本版仍读旧字段名=假 0 空壳，红回路 2 测试锁死）
 - **C4（Top 候选）** 缓存序列化边界吞进 `TwoLevelCache.get_or_set`：9 个 service 文件 35 处「get→isinstance 判型 loads→compute→set」收敛（降级出口语义保留）；批次 A 的 `_TRADE_DATES_CACHE` 手工日戳并入统一边界（键含获取日期跨天/跨年自然重拉 + TTL 到午夜）；tools 层 df_to_json 字符串缓存契约不走本接口
