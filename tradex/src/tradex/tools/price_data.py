@@ -243,6 +243,20 @@ async def get_stock_list(
     return mcp_serve("get_stock_list", _build, "获取股票列表失败", dump=False)
 
 
+def register(mcp: FastMCP):
+    """Register price data tools with the MCP server.
+
+    v3.4.0：三个核心工具改为 service 薄包装；QI-ARCH-02 全量上提
+    （2026-11-19）：5 工具体模块级，引用注册。"""
+    for _fn in (
+        get_realtime_quote,
+        get_historical_price,
+        get_intraday_data,
+        get_market_capitalization,
+        get_stock_list,
+    ):
+        mcp.tool()(_fn)
+
 
 # 副本函数已收敛 service 真身（QI-ARCH-03/A⑤，2026-11-18：原 v3.4.0 两对
 # 「完全一致」隔缝结对副本——改 import 单点，判型行为零变化）。
