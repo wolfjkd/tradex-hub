@@ -15,7 +15,7 @@
   <img src="https://img.shields.io/badge/Tools-192-orange.svg" alt="MCP Tools"/>
   <img src="https://img.shields.io/badge/Endpoints-83-blue.svg" alt="REST Endpoints"/>
   <img src="https://img.shields.io/badge/License-Apache--2.0-yellow.svg" alt="License"/>
-  <img src="https://img.shields.io/badge/Version-3.9.4-blue.svg" alt="Version"/>
+  <img src="https://img.shields.io/badge/Version-3.9.5-blue.svg" alt="Version"/>
 </p>
 
 ---

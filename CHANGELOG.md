@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ---
 
+## [3.9.5] - 2026-11-19（质检整改 qc-20261117 全量处置，无人值守施工）
+
+> 依据 [[质检报告-20261117]]（32 条全量处置，老板 2026-11-18 五拍板）+ [[无人值守施工单-tradex-hub]] v1.1。施工机 wolfjkd-9950X，基线 32070ff → 本批 16 commits。批次收尾门：**1283 passed / 0 failed / 5 skipped / 36 deselected（80.6s）**（基线 2F+1237P 全清 + 净增 46 测试）。台账 32 条逐条回写 [[质检台账-20261117]]。
+
+### Fixed（P1 清障 + 数据正确性，Phase 1/3）
+- **北交所 920 段 secid 回归修复**（QI-STD-91）：`_em_secid` 补 920→market 0 分支（首位 9 曾误判 B 股规则出 1.920xxx → 东财 data:null → fund_flow 双源全败）；回归先红后绿（60a32a0）
+- **znb 载荷形状校验**（QI-STD-92）：`fetch_sina_world_index` 补 `var hq_str_znb_` 前缀 + ≥12 字段双校验，非规范响应（风控 HTML）走诚实空态不再出伪造行情值（67f419d）
+- **依赖声明补齐**（QI-GATE-01）：requirements.txt 补 websocket-client + check_undeclared_imports 补 IMPORT_ALIASES 显式别名（websocket-client↔websocket 包名≠import 名映射缺口）；guard 双测试复绿（69114d7）
+- **环境同步**（QI-GATE-02）：`uv sync --all-extras` 装齐声明依赖（G② 拍板 3 授权）；AGENTS.md 基线行补基线溯源注记（commit + 测试机）
+- **数据正确性加固 D 组五项**（QI-STD-94~98，688ac37）：dzh 请求-响应关联按分支二「超时+断连重建」行为锁定闭合（四场景回归）；fetch_global_index_spot 频控契约代码化（模块级 60s 最小间隔节流）；中证成分股表头定位显式 RuntimeError + NaN 清洗；znb 补 time=抓取时刻 + time_semantics 标注（三源 schema 一致性测试）；交易日历两套并行缓存收拢 `_trade_dates_recent` 单点
+
+### 护栏（确定性检查，Phase 2/3）
+- **README 计数 + guard 盲区**（QI-STD-02）：六处 191→192/82→83 + check_readme_counts 补七 pattern（夹词句式/清单标题/Prometheus 注记/冒烟示例/全量口径——扩捕实测修前 9 处漂移 exit=1，85064da）
+- **CHANGELOG 核验扩双向**（QI-SPEC-03）：待发版段纳入核验（区间=最新 tag..HEAD）+ verify_coverage 整段零承载→FAIL「有史实无宣称」（QI-SPEC-01 修前形态样例 selftest 实证，e26987a）
+- **teardown flake 加固**（QI-GATE-03）：test_write_rest 改 `TemporaryDirectory(ignore_cleanup_errors=True)`（e26987a）
+- **AGENTS.md 三处注记**（QI-STD-01 处置，8459652）：rule 5 书面豁免条款（三新 fetcher 未注册期诚实空态，拍板①）+ rule 11 注册门槛（新 fetcher 注册进 SmartRouter 前必须过空态语义检查，拍板②）+ 基线溯源注记
+- **三新源 code 归一**（QI-STD-93 部分，e26987a）：sina znb 入口 strip().upper() + 大小写变体路由一致性测试；dzh obj 仅 strip（协议大小写敏感性未实测不做未验证变换）；空态语义统一挂账注册前批次
+
+### 文档（Phase 2）
+- **CHANGELOG 批次 A 史实段**（QI-SPEC-01）：补「批次 A·未发版」段（九项修复 + get_history -53 行误删-恢复事件含 TradeX CI run 实录，f3c4306）
+- **待发版段补三 feat**（QI-SPEC-02）：东财全球指数 spot / 大智慧 dzh / 新浪 znb（8459652）
+- **CHANGELOG 勘误**（QI-SPEC-04/05）：v3.9.4 段快照口径标注（消 191/82 vs 192/83 自相矛盾）+ C1「5 份」→「5 函数 6 份 dict」（8459652）
+
+### Refactor（P3 味道收口，Phase 4，04392f3）
+- **symbol 校验收拢**（QI-STD-03）：company/news/price/fund 9 处内联校验 → validate_symbol 单点
+- **手写异常收拢**（QI-STD-04）：`_helpers` 新增 `serve_envelope_async`（唯一语义与 sync 一致）+ industry_news/diagnostic 三路由收拢
+- **裸 cache.set 收拢**（QI-STD-05）：`get_or_set` 扩 store 回调 + out 标志；shortline 抽 `_serve_cached` 单点，四处信封样板收敛、裸 get/set grep 清零
+- **docstring/import 清理**（QI-STD-06）：_parse_dyna 硬位次矛盾修正
+
+### Refactor（架构深化 A 组，Phase 5——本批 6/9）
+- **A①+A② MCP 出口收拢试点**（QI-ARCH-01/02，a095ade）：接口草案 `tools/_mcp_serve.py`（mcp_serve 出口接缝）+ event_driven 6 工具体上提模块级；兼容硬闸背书 = 契约快照 test_mcp_serve_compat.py 收拢前写入 12 用例（FastMCP.call_tool 真实注册路径逐字节）收拢后不改仍绿 + 行为测试 import 打桩；**AST 账本退役**（A⑥ 同步）：test_tools_total_count / check_readme_counts 计数改注册过程衍生（profile 无关全量）
+- **A③ service 接缝**（QI-ARCH-05，53c57fc）：新增 service/kpl_service + industry_news_service（路由越层回硬约定#9）；kpl 400 头 ERR_INTERNAL→ERR_BAD_REQUEST 归一；语义一致性测试 6 用例（配套 4154604 mock 随迁）
+- **A④ 源列名翻译下沉**（QI-ARCH-04，71cb50d）：新增 `data_sources/_column_adapter.py` 单点 + 四消费点改引（分时/OHLCV/技术指标/sina 板块）
+- **A⑤ 副本收敛**（QI-ARCH-03 部分，5ccfda0）：tools/price_data 两对「完全一致」副本函数删改 import service 真身；composite route 收敛落待裁决（引入 TTL_REALTIME 缓存改变组合分析时效——保守默认保持现状）
+- **A⑦/A⑧/A⑨ 落断点续跑**：conftest 基座（11 份副本逐份 diff）/ 短线 17 端点收拢（依赖 A①A② 全量）/ akshare_fetchers 六上游拆分（A④ 出口已就绪）——如实落「本批完成 6/9」
+
+### 验证
+- Phase 门 1/2/3/4/5 逐段全绿（1246→1261→1283 递进）；批次收尾门（模板 v1.8）复跑 **1283 passed / 0 failed**——红门禁提交纪律两轮实抓：kpl 502 韧性测试 mock 随迁（4154604）+ seal_times 日历用例缓存隔离（收尾配套），均当轮修复重跑全绿
+
+---
+
 ## 待发版（2026-11-14，fund_flow 主源修复；2026-11-18 补记三新源 feat——QI-SPEC-02）
 
 ### Added
