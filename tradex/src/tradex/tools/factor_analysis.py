@@ -21,6 +21,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from ._mcp_serve import mcp_serve
 from ..utils.formatter import dict_to_json, error_response
 
 
@@ -121,152 +122,164 @@ def _calculate_single_factor(
 # MCP 工具注册
 # ──────────────────────────────────────────────────────────────────
 
+# （QI-ARCH-02 全量上提，2026-11-19：2 个工具体模块级化 + mcp_serve 出口
+# 收拢（dump=dict_to_json）；密集参数校验显式 return error_response 保留原样。）
+
+
+async def calculate_factor_score(
+    stock_codes: list[str],
+    factor_data: dict[str, list[float]],
+    weights: dict[str, float] | None = None,
+) -> str:
+    """
+    多因子综合评分。
+
+    输入多只股票的多个因子值，标准化处理后按权重加权得到综合评分。
+    支持5类20+因子，可自定义权重。
+
+    Args:
+        stock_codes: 股票代码数组，如 ["000001", "600519", ...]
+        factor_data: 因子数据字典
+        {
+            "pe": [10.5, 30.2, 15.8, ...],          # 与stock_codes一一对应
+            "pb": [1.2, 8.5, 2.3, ...],
+            "revenue_growth": [0.15, 0.20, 0.08, ...]
+        }
+        weights: 因子权重（可选），如 {"pe": 0.3, "pb": 0.2, "revenue_growth": 0.5}
+                未指定时所有因子等权
+
+    Returns:
+        多因子评分结果 (JSON):
+        - scores: 综合评分列表（按分数降序）
+          [{code, total_score, factor_scores: {...}}, ...]
+        - summary: 统计摘要
+        - weights_used: 实际使用的权重
+    """
+    if not stock_codes:
+        return error_response("参数错误: stock_codes 不能为空", "calculate_factor_score")
+    if not factor_data:
+        return error_response("参数错误: factor_data 不能为空", "calculate_factor_score")
+
+    n = len(stock_codes)
+    for factor_name, values in factor_data.items():
+        if len(values) != n:
+            return error_response(
+                f"参数错误: 因子 {factor_name} 的数据长度({len(values)})与股票数量({n})不一致",
+                "calculate_factor_score",
+            )
+
+    # 验证因子是否在目录中
+    catalog_names = {f["name"] for f in FACTOR_CATALOG}
+    invalid_factors = set(factor_data.keys()) - catalog_names
+    if invalid_factors:
+        return error_response(
+            f"参数错误: 不支持的因子 {invalid_factors}，调用 get_factor_catalog 查看支持的因子",
+            "calculate_factor_score",
+        )
+    # 权重预校验（build 外显式 return——文案不含 fail_detail 拼接，逐字节等价）
+    if weights is not None and sum(weights.values()) <= 0:
+        return error_response("参数错误: 权重总和必须大于0", "calculate_factor_score")
+
+    def _build() -> dict:
+        # 计算每个因子的得分
+        factor_scores: dict[str, dict[str, float]] = {}
+        for factor_name, values in factor_data.items():
+            factor_meta = next(f for f in FACTOR_CATALOG if f["name"] == factor_name)
+            factor_scores[factor_name] = _calculate_single_factor(
+                stock_codes, values, factor_meta["direction"]
+            )
+
+        # 权重处理（权重总和 >0 已在工具体预校验）
+        if weights is None:
+            weights = {name: 1.0 / len(factor_data) for name in factor_data.keys()}
+        else:
+            total_w = sum(weights.values())
+            weights = {k: v / total_w for k, v in weights.items()}
+            # 未指定权重的因子用0
+            for name in factor_data.keys():
+                if name not in weights:
+                    weights[name] = 0.0
+
+        # 综合评分
+        results: list[dict] = []
+        for i, code in enumerate(stock_codes):
+            total_score = 0.0
+            detail: dict[str, float] = {}
+            for factor_name in factor_data.keys():
+                score = factor_scores[factor_name][code]
+                weighted = score * weights[factor_name]
+                total_score += weighted
+                detail[factor_name] = score
+            results.append({
+                "code": code,
+                "total_score": round(total_score, 4),
+                "factor_scores": detail,
+            })
+
+        # 按综合得分降序
+        results.sort(key=lambda x: x["total_score"], reverse=True)
+
+        # 统计摘要
+        all_scores = [r["total_score"] for r in results]
+        summary = {
+            "total_stocks": len(results),
+            "mean_score": round(sum(all_scores) / len(all_scores), 4) if all_scores else 0,
+            "max_score": round(max(all_scores), 4) if all_scores else 0,
+            "min_score": round(min(all_scores), 4) if all_scores else 0,
+            "top_10_pct_threshold": round(
+                sorted(all_scores, reverse=True)[max(1, len(all_scores) // 10) - 1], 4
+            ) if len(all_scores) >= 10 else None,
+        }
+
+        return {
+            "success": True,
+            "scores": results,
+            "summary": summary,
+            "weights_used": weights,
+        }
+
+    return mcp_serve("calculate_factor_score", _build, "因子评分计算失败", dump=dict_to_json)
+
+
+async def get_factor_catalog() -> str:
+    """
+    获取因子库清单。
+
+    返回所有支持的因子列表，包含因子名称、所属类别、方向（正向/负向/中性）、单位。
+    可用于让 AI Agent 了解 calculate_factor_score 工具支持的因子。
+
+    Returns:
+        因子库清单 (JSON):
+        - categories: 因子类别
+        - factors: 因子详情列表
+        - total_count: 因子总数
+    """
+    def _build() -> dict:
+        return {
+            "success": True,
+            "categories": FACTOR_CATEGORIES,
+            "factors": FACTOR_CATALOG,
+            "total_count": len(FACTOR_CATALOG),
+            "direction_explanation": {
+                "positive": "数值越大越好（如营收增长率）",
+                "negative": "数值越小越好（如PE）",
+                "neutral": "中性因子（如RSI、Beta）",
+            },
+            "usage": (
+                "调用 calculate_factor_score 工具，传入 stock_codes 和 factor_data 即可获得综合评分。"
+                "factor_data 的 key 必须是本清单中的因子 name，value 是与 stock_codes 一一对应的数值数组。"
+            ),
+        }
+
+    return mcp_serve("get_factor_catalog", _build, "获取因子清单失败", dump=dict_to_json)
+
+
 def register(mcp: FastMCP):
-    """Register factor analysis tools with the MCP server."""
+    """Register factor analysis tools with the MCP server.
 
-    @mcp.tool()
-    async def calculate_factor_score(
-        stock_codes: list[str],
-        factor_data: dict[str, list[float]],
-        weights: dict[str, float] | None = None,
-    ) -> str:
-        """
-        多因子综合评分。
-
-        输入多只股票的多个因子值，标准化处理后按权重加权得到综合评分。
-        支持5类20+因子，可自定义权重。
-
-        Args:
-            stock_codes: 股票代码数组，如 ["000001", "600519", ...]
-            factor_data: 因子数据字典
-            {
-                "pe": [10.5, 30.2, 15.8, ...],          # 与stock_codes一一对应
-                "pb": [1.2, 8.5, 2.3, ...],
-                "revenue_growth": [0.15, 0.20, 0.08, ...]
-            }
-            weights: 因子权重（可选），如 {"pe": 0.3, "pb": 0.2, "revenue_growth": 0.5}
-                    未指定时所有因子等权
-
-        Returns:
-            多因子评分结果 (JSON):
-            - scores: 综合评分列表（按分数降序）
-              [{code, total_score, factor_scores: {...}}, ...]
-            - summary: 统计摘要
-            - weights_used: 实际使用的权重
-        """
-        try:
-            if not stock_codes:
-                return error_response("参数错误: stock_codes 不能为空", "calculate_factor_score")
-            if not factor_data:
-                return error_response("参数错误: factor_data 不能为空", "calculate_factor_score")
-
-            n = len(stock_codes)
-            for factor_name, values in factor_data.items():
-                if len(values) != n:
-                    return error_response(
-                        f"参数错误: 因子 {factor_name} 的数据长度({len(values)})与股票数量({n})不一致",
-                        "calculate_factor_score",
-                    )
-
-            # 验证因子是否在目录中
-            catalog_names = {f["name"] for f in FACTOR_CATALOG}
-            invalid_factors = set(factor_data.keys()) - catalog_names
-            if invalid_factors:
-                return error_response(
-                    f"参数错误: 不支持的因子 {invalid_factors}，调用 get_factor_catalog 查看支持的因子",
-                    "calculate_factor_score",
-                )
-
-            # 计算每个因子的得分
-            factor_scores: dict[str, dict[str, float]] = {}
-            for factor_name, values in factor_data.items():
-                factor_meta = next(f for f in FACTOR_CATALOG if f["name"] == factor_name)
-                factor_scores[factor_name] = _calculate_single_factor(
-                    stock_codes, values, factor_meta["direction"]
-                )
-
-            # 权重处理
-            if weights is None:
-                weights = {name: 1.0 / len(factor_data) for name in factor_data.keys()}
-            else:
-                total_w = sum(weights.values())
-                if total_w <= 0:
-                    return error_response("参数错误: 权重总和必须大于0", "calculate_factor_score")
-                weights = {k: v / total_w for k, v in weights.items()}
-                # 未指定权重的因子用0
-                for name in factor_data.keys():
-                    if name not in weights:
-                        weights[name] = 0.0
-
-            # 综合评分
-            results: list[dict] = []
-            for i, code in enumerate(stock_codes):
-                total_score = 0.0
-                detail: dict[str, float] = {}
-                for factor_name in factor_data.keys():
-                    score = factor_scores[factor_name][code]
-                    weighted = score * weights[factor_name]
-                    total_score += weighted
-                    detail[factor_name] = score
-                results.append({
-                    "code": code,
-                    "total_score": round(total_score, 4),
-                    "factor_scores": detail,
-                })
-
-            # 按综合得分降序
-            results.sort(key=lambda x: x["total_score"], reverse=True)
-
-            # 统计摘要
-            all_scores = [r["total_score"] for r in results]
-            summary = {
-                "total_stocks": len(results),
-                "mean_score": round(sum(all_scores) / len(all_scores), 4) if all_scores else 0,
-                "max_score": round(max(all_scores), 4) if all_scores else 0,
-                "min_score": round(min(all_scores), 4) if all_scores else 0,
-                "top_10_pct_threshold": round(
-                    sorted(all_scores, reverse=True)[max(1, len(all_scores) // 10) - 1], 4
-                ) if len(all_scores) >= 10 else None,
-            }
-
-            return dict_to_json({
-                "success": True,
-                "scores": results,
-                "summary": summary,
-                "weights_used": weights,
-            })
-        except Exception as e:
-            return error_response(f"因子评分计算失败: {e}", "calculate_factor_score")
-
-    @mcp.tool()
-    async def get_factor_catalog() -> str:
-        """
-        获取因子库清单。
-
-        返回所有支持的因子列表，包含因子名称、所属类别、方向（正向/负向/中性）、单位。
-        可用于让 AI Agent 了解 calculate_factor_score 工具支持的因子。
-
-        Returns:
-            因子库清单 (JSON):
-            - categories: 因子类别
-            - factors: 因子详情列表
-            - total_count: 因子总数
-        """
-        try:
-            return dict_to_json({
-                "success": True,
-                "categories": FACTOR_CATEGORIES,
-                "factors": FACTOR_CATALOG,
-                "total_count": len(FACTOR_CATALOG),
-                "direction_explanation": {
-                    "positive": "数值越大越好（如营收增长率）",
-                    "negative": "数值越小越好（如PE）",
-                    "neutral": "中性因子（如RSI、Beta）",
-                },
-                "usage": (
-                    "调用 calculate_factor_score 工具，传入 stock_codes 和 factor_data 即可获得综合评分。"
-                    "factor_data 的 key 必须是本清单中的因子 name，value 是与 stock_codes 一一对应的数值数组。"
-                ),
-            })
-        except Exception as e:
-            return error_response(f"获取因子清单失败: {e}", "get_factor_catalog")
+    QI-ARCH-02 全量上提（2026-11-19）：2 工具体模块级，引用注册。"""
+    for _fn in (
+        calculate_factor_score,
+        get_factor_catalog,
+    ):
+        mcp.tool()(_fn)
