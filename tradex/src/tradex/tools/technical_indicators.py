@@ -34,6 +34,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from ._mcp_serve import mcp_serve
 from ..utils.formatter import dict_to_json, error_response
 
 
@@ -242,326 +243,341 @@ def _atr_values(
 # MCP 工具注册
 # ──────────────────────────────────────────────────────────────────
 
+# （QI-ARCH-02 全量上提，2026-11-19：6 个工具体全部模块级化——行为测试可直接
+# import 打桩；异常兜底 + dict_to_json 出口收进 mcp_serve 单点（dump=Callable
+# 形态）；工具内参数/数据校验为显式 return error_response，保留原样。）
+
+
+async def calculate_ma_ema(
+    closes: list[float],
+    period: int = 20,
+    type: str = "both",
+) -> str:
+    """
+    计算 MA(简单移动平均) / EMA(指数移动平均) 均线。
+
+    与 Excel/通达信计算结果一致。MA 前 period-1 个数据点返回 null；
+    EMA 按通达信口径自首根（X[0] 种子）起算，全数组有效。
+
+    Args:
+        closes: 收盘价数组，如 [10.5, 10.8, 11.2, ...]
+        period: 计算周期，默认20
+        type: 计算类型 - "sma" | "ema" | "both"(默认，同时返回SMA和EMA)
+
+    Returns:
+        均线计算结果 (JSON):
+        - ma: SMA 数组（type 为 sma 或 both 时返回）
+        - ema: EMA 数组（type 为 ema 或 both 时返回）
+        - period: 周期
+        - data_points: 输入数据点数
+        - valid_points: 有效计算点数（非 null）
+    """
+    if not closes or period <= 0:
+        return error_response(
+            "参数错误: closes 不能为空，period 必须为正整数",
+            "calculate_ma_ema",
+        )
+    if type not in ("sma", "ema", "both"):
+        return error_response(
+            f"参数错误: type 必须为 sma/ema/both，当前为 {type}",
+            "calculate_ma_ema",
+        )
+
+    def _build() -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "success": True,
+            "period": period,
+            "data_points": len(closes),
+            "type": type,
+        }
+        if type in ("sma", "both"):
+            ma_arr = _sma(closes, period)
+            result["ma"] = ma_arr
+            result["ma_valid_points"] = sum(1 for x in ma_arr if x is not None)
+        if type in ("ema", "both"):
+            ema_arr = _ema(closes, period)
+            result["ema"] = ema_arr
+            result["ema_valid_points"] = len(ema_arr)
+        return result
+
+    return mcp_serve("calculate_ma_ema", _build, "MA/EMA 计算失败", dump=dict_to_json)
+
+
+async def calculate_macd(
+    closes: list[float],
+    fast_period: int = 12,
+    slow_period: int = 26,
+    signal_period: int = 9,
+) -> str:
+    """
+    计算 MACD 指标（DIF、DEA、MACD柱）。
+
+    算法（通达信口径，EMA 首值 X[0] 种子）：
+    - DIF = EMA(close, fast) - EMA(close, slow)
+    - DEA = EMA(DIF, signal)
+    - MACD柱 = 2 * (DIF - DEA)
+
+    与通达信 MACD 计算结果一致，DIF/DEA/MACD 自首根起算、三数组等长。
+
+    Args:
+        closes: 收盘价数组
+        fast_period: 快线周期，默认12
+        slow_period: 慢线周期，默认26
+        signal_period: 信号线周期，默认9
+
+    Returns:
+        MACD 计算结果 (JSON):
+        - dif: DIF 线数组
+        - dea: DEA 信号线数组
+        - macd: MACD 柱状图数组
+        - fast_period / slow_period / signal_period: 周期参数
+    """
+    if not closes or len(closes) < slow_period:
+        return error_response(
+            f"数据不足: 需要至少 {slow_period} 个数据点，当前 {len(closes)}",
+            "calculate_macd",
+        )
+
+    def _build() -> dict:
+        vals = _macd_values(closes, fast_period, slow_period, signal_period)
+        return {
+            "success": True,
+            "dif": vals["dif"],
+            "dea": vals["dea"],
+            "macd": vals["macd"],
+            "fast_period": fast_period,
+            "slow_period": slow_period,
+            "signal_period": signal_period,
+            "data_points": len(closes),
+        }
+
+    return mcp_serve("calculate_macd", _build, "MACD 计算失败", dump=dict_to_json)
+
+
+async def calculate_kdj(
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+    period: int = 9,
+    k_period: int = 3,
+    d_period: int = 3,
+) -> str:
+    """
+    计算 KDJ 随机指标（K、D、J 值）。
+
+    算法：
+    - RSV = (close - lowest_low) / (highest_high - lowest_low) * 100
+    - 初始 K = 50, 初始 D = 50
+    - K = (2/3) * 前K + (1/3) * RSV
+    - D = (2/3) * 前D + (1/3) * K
+    - J = 3 * K - 2 * D
+
+    与通达信 KDJ 计算结果一致。
+
+    Args:
+        highs: 最高价数组
+        lows: 最低价数组
+        closes: 收盘价数组
+        period: RSV 周期，默认9
+        k_period: K 平滑周期，默认3
+        d_period: D 平滑周期，默认3
+
+    Returns:
+        KDJ 计算结果 (JSON):
+        - k: K 值数组
+        - d: D 值数组
+        - j: J 值数组
+        - period / k_period / d_period: 周期参数
+    """
+    if not (len(highs) == len(lows) == len(closes)):
+        return error_response(
+            "参数错误: highs / lows / closes 长度必须相同",
+            "calculate_kdj",
+        )
+    if len(closes) < period:
+        return error_response(
+            f"数据不足: 需要至少 {period} 个数据点，当前 {len(closes)}",
+            "calculate_kdj",
+        )
+
+    def _build() -> dict:
+        vals = _kdj_values(highs, lows, closes, period, k_period, d_period)
+        return {
+            "success": True,
+            "k": vals["k"],
+            "d": vals["d"],
+            "j": vals["j"],
+            "period": period,
+            "k_period": k_period,
+            "d_period": d_period,
+            "data_points": len(closes),
+        }
+
+    return mcp_serve("calculate_kdj", _build, "KDJ 计算失败", dump=dict_to_json)
+
+
+async def calculate_rsi(
+    closes: list[float],
+    period: int = 14,
+) -> str:
+    """
+    计算 RSI 相对强弱指数（Wilder 平滑法）。
+
+    算法：
+    - 计算每日涨跌幅
+    - 分离上涨幅度和下跌幅度
+    - Wilder 平滑平均：avg = (prev_avg * (period-1) + current) / period
+    - RSI = 100 - 100 / (1 + avg_gain / avg_loss)
+
+    与通达信 RSI 计算结果一致。前 period 个为 null。
+
+    Args:
+        closes: 收盘价数组
+        period: 计算周期，默认14
+
+    Returns:
+        RSI 计算结果 (JSON):
+        - rsi: RSI 值数组（前 period 个为 null）
+        - period: 周期
+        - data_points: 数据点数
+    """
+    if len(closes) < period + 1:
+        return error_response(
+            f"数据不足: 需要至少 {period + 1} 个数据点，当前 {len(closes)}",
+            "calculate_rsi",
+        )
+
+    def _build() -> dict:
+        rsi_arr = _rsi_values(closes, period)
+        return {
+            "success": True,
+            "rsi": rsi_arr,
+            "period": period,
+            "data_points": len(closes),
+            "valid_points": sum(1 for x in rsi_arr if x is not None),
+        }
+
+    return mcp_serve("calculate_rsi", _build, "RSI 计算失败", dump=dict_to_json)
+
+
+async def calculate_boll(
+    closes: list[float],
+    period: int = 20,
+    k: float = 2.0,
+) -> str:
+    """
+    计算布林带（BOLL）上轨、中轨、下轨。
+
+    算法：
+    - 中轨 = SMA(close, period)
+    - 上轨 = 中轨 + k * 标准差
+    - 下轨 = 中轨 - k * 标准差
+    - 带宽 = (上轨 - 下轨) / 中轨
+    - %B = (收盘价 - 下轨) / (上轨 - 下轨)
+
+    与通达信 BOLL 计算结果一致。前 period-1 个为 null。
+
+    Args:
+        closes: 收盘价数组
+        period: 计算周期，默认20
+        k: 标准差倍数，默认2.0
+
+    Returns:
+        BOLL 计算结果 (JSON):
+        - upper: 上轨数组
+        - middle: 中轨数组
+        - lower: 下轨数组
+        - bandwidth: 带宽数组
+        - percent_b: %B 数组
+        - period / k: 参数
+    """
+    if len(closes) < period:
+        return error_response(
+            f"数据不足: 需要至少 {period} 个数据点，当前 {len(closes)}",
+            "calculate_boll",
+        )
+
+    def _build() -> dict:
+        vals = _boll_values(closes, period, k)
+        return {
+            "success": True,
+            "upper": vals["upper"],
+            "middle": vals["middle"],
+            "lower": vals["lower"],
+            "bandwidth": vals["bandwidth"],
+            "percent_b": vals["percent_b"],
+            "period": period,
+            "k": k,
+            "data_points": len(closes),
+        }
+
+    return mcp_serve("calculate_boll", _build, "BOLL 计算失败", dump=dict_to_json)
+
+
+async def calculate_atr(
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+    period: int = 14,
+) -> str:
+    """
+    计算 ATR 平均真实波幅。
+
+    算法：
+    - TR = max(high-low, |high-pre_close|, |low-pre_close|)
+    - ATR = EMA(TR, period)
+
+    与通达信 ATR 计算结果一致。首根 TR 为 null（无前收盘），
+    ATR 自第二根起有效（EMA 首值 = 首根 TR，通达信口径）。
+
+    Args:
+        highs: 最高价数组
+        lows: 最低价数组
+        closes: 收盘价数组
+        period: 计算周期，默认14
+
+    Returns:
+        ATR 计算结果 (JSON):
+        - atr: ATR 值数组
+        - tr: TR 真实波幅数组（首个为 null）
+        - period: 周期
+        - data_points: 数据点数
+    """
+    if not (len(highs) == len(lows) == len(closes)):
+        return error_response(
+            "参数错误: highs / lows / closes 长度必须相同",
+            "calculate_atr",
+        )
+    if len(closes) < period + 1:
+        return error_response(
+            f"数据不足: 需要至少 {period + 1} 个数据点，当前 {len(closes)}",
+            "calculate_atr",
+        )
+
+    def _build() -> dict:
+        vals = _atr_values(highs, lows, closes, period)
+        return {
+            "success": True,
+            "atr": vals["atr"],
+            "tr": vals["tr"],
+            "period": period,
+            "data_points": len(closes),
+            "valid_points": sum(1 for x in vals["atr"] if x is not None),
+        }
+
+    return mcp_serve("calculate_atr", _build, "ATR 计算失败", dump=dict_to_json)
+
+
 def register(mcp: FastMCP):
-    """Register technical indicator calculation tools with the MCP server."""
+    """Register technical indicator calculation tools with the MCP server.
 
-    @mcp.tool()
-    async def calculate_ma_ema(
-        closes: list[float],
-        period: int = 20,
-        type: str = "both",
-    ) -> str:
-        """
-        计算 MA(简单移动平均) / EMA(指数移动平均) 均线。
-
-        与 Excel/通达信计算结果一致。MA 前 period-1 个数据点返回 null；
-        EMA 按通达信口径自首根（X[0] 种子）起算，全数组有效。
-
-        Args:
-            closes: 收盘价数组，如 [10.5, 10.8, 11.2, ...]
-            period: 计算周期，默认20
-            type: 计算类型 - "sma" | "ema" | "both"(默认，同时返回SMA和EMA)
-
-        Returns:
-            均线计算结果 (JSON):
-            - ma: SMA 数组（type 为 sma 或 both 时返回）
-            - ema: EMA 数组（type 为 ema 或 both 时返回）
-            - period: 周期
-            - data_points: 输入数据点数
-            - valid_points: 有效计算点数（非 null）
-        """
-        try:
-            if not closes or period <= 0:
-                return error_response(
-                    "参数错误: closes 不能为空，period 必须为正整数",
-                    "calculate_ma_ema",
-                )
-            if type not in ("sma", "ema", "both"):
-                return error_response(
-                    f"参数错误: type 必须为 sma/ema/both，当前为 {type}",
-                    "calculate_ma_ema",
-                )
-
-            result: dict[str, Any] = {
-                "success": True,
-                "period": period,
-                "data_points": len(closes),
-                "type": type,
-            }
-            if type in ("sma", "both"):
-                ma_arr = _sma(closes, period)
-                result["ma"] = ma_arr
-                result["ma_valid_points"] = sum(1 for x in ma_arr if x is not None)
-            if type in ("ema", "both"):
-                ema_arr = _ema(closes, period)
-                result["ema"] = ema_arr
-                result["ema_valid_points"] = len(ema_arr)
-
-            return dict_to_json(result)
-        except Exception as e:
-            return error_response(f"MA/EMA 计算失败: {e}", "calculate_ma_ema")
-
-    @mcp.tool()
-    async def calculate_macd(
-        closes: list[float],
-        fast_period: int = 12,
-        slow_period: int = 26,
-        signal_period: int = 9,
-    ) -> str:
-        """
-        计算 MACD 指标（DIF、DEA、MACD柱）。
-
-        算法（通达信口径，EMA 首值 X[0] 种子）：
-        - DIF = EMA(close, fast) - EMA(close, slow)
-        - DEA = EMA(DIF, signal)
-        - MACD柱 = 2 * (DIF - DEA)
-
-        与通达信 MACD 计算结果一致，DIF/DEA/MACD 自首根起算、三数组等长。
-
-        Args:
-            closes: 收盘价数组
-            fast_period: 快线周期，默认12
-            slow_period: 慢线周期，默认26
-            signal_period: 信号线周期，默认9
-
-        Returns:
-            MACD 计算结果 (JSON):
-            - dif: DIF 线数组
-            - dea: DEA 信号线数组
-            - macd: MACD 柱状图数组
-            - fast_period / slow_period / signal_period: 周期参数
-        """
-        try:
-            if not closes or len(closes) < slow_period:
-                return error_response(
-                    f"数据不足: 需要至少 {slow_period} 个数据点，当前 {len(closes)}",
-                    "calculate_macd",
-                )
-
-            vals = _macd_values(closes, fast_period, slow_period, signal_period)
-            return dict_to_json({
-                "success": True,
-                "dif": vals["dif"],
-                "dea": vals["dea"],
-                "macd": vals["macd"],
-                "fast_period": fast_period,
-                "slow_period": slow_period,
-                "signal_period": signal_period,
-                "data_points": len(closes),
-            })
-        except Exception as e:
-            return error_response(f"MACD 计算失败: {e}", "calculate_macd")
-
-    @mcp.tool()
-    async def calculate_kdj(
-        highs: list[float],
-        lows: list[float],
-        closes: list[float],
-        period: int = 9,
-        k_period: int = 3,
-        d_period: int = 3,
-    ) -> str:
-        """
-        计算 KDJ 随机指标（K、D、J 值）。
-
-        算法：
-        - RSV = (close - lowest_low) / (highest_high - lowest_low) * 100
-        - 初始 K = 50, 初始 D = 50
-        - K = (2/3) * 前K + (1/3) * RSV
-        - D = (2/3) * 前D + (1/3) * K
-        - J = 3 * K - 2 * D
-
-        与通达信 KDJ 计算结果一致。
-
-        Args:
-            highs: 最高价数组
-            lows: 最低价数组
-            closes: 收盘价数组
-            period: RSV 周期，默认9
-            k_period: K 平滑周期，默认3
-            d_period: D 平滑周期，默认3
-
-        Returns:
-            KDJ 计算结果 (JSON):
-            - k: K 值数组
-            - d: D 值数组
-            - j: J 值数组
-            - period / k_period / d_period: 周期参数
-        """
-        try:
-            if not (len(highs) == len(lows) == len(closes)):
-                return error_response(
-                    "参数错误: highs / lows / closes 长度必须相同",
-                    "calculate_kdj",
-                )
-            if len(closes) < period:
-                return error_response(
-                    f"数据不足: 需要至少 {period} 个数据点，当前 {len(closes)}",
-                    "calculate_kdj",
-                )
-
-            vals = _kdj_values(highs, lows, closes, period, k_period, d_period)
-            return dict_to_json({
-                "success": True,
-                "k": vals["k"],
-                "d": vals["d"],
-                "j": vals["j"],
-                "period": period,
-                "k_period": k_period,
-                "d_period": d_period,
-                "data_points": len(closes),
-            })
-        except Exception as e:
-            return error_response(f"KDJ 计算失败: {e}", "calculate_kdj")
-
-    @mcp.tool()
-    async def calculate_rsi(
-        closes: list[float],
-        period: int = 14,
-    ) -> str:
-        """
-        计算 RSI 相对强弱指数（Wilder 平滑法）。
-
-        算法：
-        - 计算每日涨跌幅
-        - 分离上涨幅度和下跌幅度
-        - Wilder 平滑平均：avg = (prev_avg * (period-1) + current) / period
-        - RSI = 100 - 100 / (1 + avg_gain / avg_loss)
-
-        与通达信 RSI 计算结果一致。前 period 个为 null。
-
-        Args:
-            closes: 收盘价数组
-            period: 计算周期，默认14
-
-        Returns:
-            RSI 计算结果 (JSON):
-            - rsi: RSI 值数组（前 period 个为 null）
-            - period: 周期
-            - data_points: 数据点数
-        """
-        try:
-            if len(closes) < period + 1:
-                return error_response(
-                    f"数据不足: 需要至少 {period + 1} 个数据点，当前 {len(closes)}",
-                    "calculate_rsi",
-                )
-
-            rsi_arr = _rsi_values(closes, period)
-            return dict_to_json({
-                "success": True,
-                "rsi": rsi_arr,
-                "period": period,
-                "data_points": len(closes),
-                "valid_points": sum(1 for x in rsi_arr if x is not None),
-            })
-        except Exception as e:
-            return error_response(f"RSI 计算失败: {e}", "calculate_rsi")
-
-    @mcp.tool()
-    async def calculate_boll(
-        closes: list[float],
-        period: int = 20,
-        k: float = 2.0,
-    ) -> str:
-        """
-        计算布林带（BOLL）上轨、中轨、下轨。
-
-        算法：
-        - 中轨 = SMA(close, period)
-        - 上轨 = 中轨 + k * 标准差
-        - 下轨 = 中轨 - k * 标准差
-        - 带宽 = (上轨 - 下轨) / 中轨
-        - %B = (收盘价 - 下轨) / (上轨 - 下轨)
-
-        与通达信 BOLL 计算结果一致。前 period-1 个为 null。
-
-        Args:
-            closes: 收盘价数组
-            period: 计算周期，默认20
-            k: 标准差倍数，默认2.0
-
-        Returns:
-            BOLL 计算结果 (JSON):
-            - upper: 上轨数组
-            - middle: 中轨数组
-            - lower: 下轨数组
-            - bandwidth: 带宽数组
-            - percent_b: %B 数组
-            - period / k: 参数
-        """
-        try:
-            if len(closes) < period:
-                return error_response(
-                    f"数据不足: 需要至少 {period} 个数据点，当前 {len(closes)}",
-                    "calculate_boll",
-                )
-
-            vals = _boll_values(closes, period, k)
-            return dict_to_json({
-                "success": True,
-                "upper": vals["upper"],
-                "middle": vals["middle"],
-                "lower": vals["lower"],
-                "bandwidth": vals["bandwidth"],
-                "percent_b": vals["percent_b"],
-                "period": period,
-                "k": k,
-                "data_points": len(closes),
-            })
-        except Exception as e:
-            return error_response(f"BOLL 计算失败: {e}", "calculate_boll")
-
-    @mcp.tool()
-    async def calculate_atr(
-        highs: list[float],
-        lows: list[float],
-        closes: list[float],
-        period: int = 14,
-    ) -> str:
-        """
-        计算 ATR 平均真实波幅。
-
-        算法：
-        - TR = max(high-low, |high-pre_close|, |low-pre_close|)
-        - ATR = EMA(TR, period)
-
-        与通达信 ATR 计算结果一致。首根 TR 为 null（无前收盘），
-        ATR 自第二根起有效（EMA 首值 = 首根 TR，通达信口径）。
-
-        Args:
-            highs: 最高价数组
-            lows: 最低价数组
-            closes: 收盘价数组
-            period: 计算周期，默认14
-
-        Returns:
-            ATR 计算结果 (JSON):
-            - atr: ATR 值数组
-            - tr: TR 真实波幅数组（首个为 null）
-            - period: 周期
-            - data_points: 数据点数
-        """
-        try:
-            if not (len(highs) == len(lows) == len(closes)):
-                return error_response(
-                    "参数错误: highs / lows / closes 长度必须相同",
-                    "calculate_atr",
-                )
-            if len(closes) < period + 1:
-                return error_response(
-                    f"数据不足: 需要至少 {period + 1} 个数据点，当前 {len(closes)}",
-                    "calculate_atr",
-                )
-
-            vals = _atr_values(highs, lows, closes, period)
-            return dict_to_json({
-                "success": True,
-                "atr": vals["atr"],
-                "tr": vals["tr"],
-                "period": period,
-                "data_points": len(closes),
-                "valid_points": sum(1 for x in vals["atr"] if x is not None),
-            })
-        except Exception as e:
-            return error_response(f"ATR 计算失败: {e}", "calculate_atr")
+    QI-ARCH-02 全量上提（2026-11-19）：6 工具体模块级，引用注册。"""
+    for _fn in (
+        calculate_ma_ema,
+        calculate_macd,
+        calculate_kdj,
+        calculate_rsi,
+        calculate_boll,
+        calculate_atr,
+    ):
+        mcp.tool()(_fn)
