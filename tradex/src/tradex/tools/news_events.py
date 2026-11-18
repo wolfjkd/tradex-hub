@@ -42,6 +42,7 @@ from mcp.server.fastmcp import FastMCP
 import pandas as pd
 from ..data_sources import get_router
 from ..utils.cache import TTL_DAILY, TTL_REALTIME, cache
+from ._mcp_serve import mcp_serve
 from ..utils.formatter import df_to_json, error_response, slim_df
 from ..utils.symbol import normalize_symbol
 from ..service import news_service
@@ -56,480 +57,474 @@ _router = get_router()
 _FUND_HOLD_ROUTE_TIMEOUT = 40.0
 
 
-def register(mcp: FastMCP):
-    """Register news and event tools with the MCP server."""
+# （QI-ARCH-02 全量上提，2026-11-19：14 个工具体模块级化 + mcp_serve 出口
+# 收拢；混合形态——service 调用 json.dumps / route+df_to_json 字符串缓存
+# （rule 7 例外契约保留）/ financial_calendar 多源聚合逻辑原样保留。）
+# 「空数据 → df_to_json(pd.DataFrame())」的显式 return 保留在 _build 内
+# （dump=False 原样输出，文案/形状逐字节等价）。
 
-    @mcp.tool()
-    async def get_stock_news(symbol: str) -> str:
-        """
-        获取个股相关新闻资讯。v3.2.0 起直连东财 search-api-web，更稳定。
 
-        Args:
-            symbol: 6位股票代码，如 "600519"
+async def get_stock_news(symbol: str) -> str:
+    """
+    获取个股相关新闻资讯。v3.2.0 起直连东财 search-api-web，更稳定。
 
-        Returns:
-            新闻列表 (JSON)，每条固定 5 字段：标题、时间、来源、链接、摘要。
-        """
+    Args:
+        symbol: 6位股票代码，如 "600519"
+
+    Returns:
+        新闻列表 (JSON)，每条固定 5 字段：标题、时间、来源、链接、摘要。
+    """
+    return mcp_serve(
+        "get_stock_news",
+        lambda: news_service.get_stock_news(symbol=symbol),
+        f"获取股票新闻失败 ({symbol})",
+    )
+
+
+async def get_financial_calendar(date: str = "") -> str:
+    """
+    获取上市公司财报披露时间表和经济数据日历。v3.3.0 新增百度经济数据日历补充源。
+
+    Args:
+        date: 查询日期，格式 "YYYYMMDD"。默认为空获取最新一期。
+
+    Returns:
+        财报披露时间表和经济数据日历 (JSON)，包含股票代码、名称、预计披露日期、
+        实际披露日期、报告类型、经济数据等。
+    """
+    cache_key = f"fin_calendar:{date}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    def _build() -> str:
+        all_dfs = []
+        # Source 1: 财报披露时间（akshare 不传 period，避免格式错误）
         try:
-            result = news_service.get_stock_news(symbol=symbol)
-            return json.dumps(result, ensure_ascii=False)
-        except Exception as e:
-            return error_response(
-                f"获取股票新闻失败 ({symbol}): {e}", "get_stock_news"
-            )
-
-    @mcp.tool()
-    async def get_financial_calendar(date: str = "") -> str:
-        """
-        获取上市公司财报披露时间表和经济数据日历。v3.3.0 新增百度经济数据日历补充源。
-
-        Args:
-            date: 查询日期，格式 "YYYYMMDD"。默认为空获取最新一期。
-
-        Returns:
-            财报披露时间表和经济数据日历 (JSON)，包含股票代码、名称、预计披露日期、
-            实际披露日期、报告类型、经济数据等。
-        """
-        cache_key = f"fin_calendar:{date}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
+            df1, _src1 = _router.route("news_data", endpoint="stock_report_disclosure")
+            if df1 is not None and not df1.empty:
+                all_dfs.append(df1)
+        except Exception as exc:
+            # em_news_direct 无 symbol 时会失败，自动降级到 akshare
+            logger.debug("财报披露源失败: %s", exc)
+        # Source 2: 百度经济数据日历（v3.3.0 新增）
         try:
-            all_dfs = []
-            # Source 1: 财报披露时间（akshare 不传 period，避免格式错误）
-            try:
-                df1, _src1 = _router.route("news_data", endpoint="stock_report_disclosure")
-                if df1 is not None and not df1.empty:
-                    all_dfs.append(df1)
-            except Exception as exc:
-                # em_news_direct 无 symbol 时会失败，自动降级到 akshare
-                logger.debug("财报披露源失败: %s", exc)
-            # Source 2: 百度经济数据日历（v3.3.0 新增）
-            try:
-                df2, _src2 = _router.route("baidu_economic_calendar", date=date)
-                if df2 is not None and not df2.empty:
-                    all_dfs.append(df2)
-            except Exception as exc:
-                logger.debug("百度经济日历源失败: %s", exc)
+            df2, _src2 = _router.route("baidu_economic_calendar", date=date)
+            if df2 is not None and not df2.empty:
+                all_dfs.append(df2)
+        except Exception as exc:
+            logger.debug("百度经济日历源失败: %s", exc)
 
-            if not all_dfs:
-                return df_to_json(pd.DataFrame())
+        if not all_dfs:
+            return df_to_json(pd.DataFrame())
 
-            # 日期后过滤：各源独立过滤后合并（避免2022年旧数据拖垮百度经济日历）
-            if date:
-                date_fmt = f"{date[:4]}-{date[4:6]}-{date[6:8]}"
-                filtered_dfs = []
-                for df in all_dfs:
-                    date_cols = [c for c in df.columns if any(k in c for k in ["日期", "date", "Date", "时间", "披露", "预约", "变更", "首次", "实际"])]
-                    matched = False
-                    for col in date_cols:
+        # 日期后过滤：各源独立过滤后合并（避免2022年旧数据拖垮百度经济日历）
+        if date:
+            date_fmt = f"{date[:4]}-{date[4:6]}-{date[6:8]}"
+            filtered_dfs = []
+            for df in all_dfs:
+                date_cols = [c for c in df.columns if any(k in c for k in ["日期", "date", "Date", "时间", "披露", "预约", "变更", "首次", "实际"])]
+                matched = False
+                for col in date_cols:
+                    try:
+                        mask = df[col].astype(str).str.contains(date_fmt, na=False)
+                        if not mask.any():
+                            mask = df[col].astype(str).str.contains(date, na=False)
+                        if mask.any():
+                            filtered_dfs.append(df[mask])
+                            matched = True
+                            break
+                    except Exception:
+                        continue
+                # 如果该源没有匹配数据的列，全量保留（如百度经济日历的日期列不在 date_cols 里）
+                if not matched:
+                    # 尝试正则匹配所有列
+                    for col in df.columns:
                         try:
                             mask = df[col].astype(str).str.contains(date_fmt, na=False)
-                            if not mask.any():
-                                mask = df[col].astype(str).str.contains(date, na=False)
                             if mask.any():
                                 filtered_dfs.append(df[mask])
                                 matched = True
                                 break
                         except Exception:
                             continue
-                    # 如果该源没有匹配数据的列，全量保留（如百度经济日历的日期列不在 date_cols 里）
                     if not matched:
-                        # 尝试正则匹配所有列
-                        for col in df.columns:
-                            try:
-                                mask = df[col].astype(str).str.contains(date_fmt, na=False)
-                                if mask.any():
-                                    filtered_dfs.append(df[mask])
-                                    matched = True
-                                    break
-                            except Exception:
-                                continue
-                        if not matched:
-                            pass  # 无匹配，丢弃该源
-                combined = pd.concat(filtered_dfs, ignore_index=True) if filtered_dfs else pd.DataFrame()
-            else:
-                combined = pd.concat(all_dfs, ignore_index=True)
-                combined = slim_df(combined)
+                        pass  # 无匹配，丢弃该源
+            combined = pd.concat(filtered_dfs, ignore_index=True) if filtered_dfs else pd.DataFrame()
+        else:
+            combined = pd.concat(all_dfs, ignore_index=True)
+            combined = slim_df(combined)
 
-            result = df_to_json(combined, max_rows=50)
-            cache.set(cache_key, result, TTL_DAILY)
-            return result
-        except Exception as e:
-            return error_response(
-                f"获取财报披露日历失败: {e}", "get_financial_calendar"
-            )
+        result = df_to_json(combined, max_rows=50)
+        cache.set(cache_key, result, TTL_DAILY)
+        return result
 
-    @mcp.tool()
-    async def get_company_announcements(
-        symbol: str = "",
-        num_results: int = 30,
-    ) -> str:
-        """
-        获取上市公司公告。v3.2.0 起直连巨潮 cninfo.com.cn，信息更全更及时。
+    return mcp_serve("get_financial_calendar", _build, "获取财报披露日历失败", dump=False)
 
-        Args:
-            symbol: 6位股票代码，如 "600519"。为空则获取全市场最新公告。
-            num_results: 最大返回条数，默认30
 
-        Returns:
-            公告列表 (JSON)，包含公告标题、发布日期、公告类型、PDF链接等。
-        """
-        try:
-            result = news_service.get_company_announcements(
-                symbol=symbol, num_results=num_results
-            )
-            return json.dumps(result, ensure_ascii=False)
-        except Exception as e:
-            return error_response(
-                f"获取公司公告失败 ({symbol}): {e}", "get_company_announcements"
-            )
+async def get_company_announcements(
+    symbol: str = "",
+    num_results: int = 30,
+) -> str:
+    """
+    获取上市公司公告。v3.2.0 起直连巨潮 cninfo.com.cn，信息更全更及时。
 
-    @mcp.tool()
-    async def get_telegraph_news(num_results: int = 20) -> str:
-        """
-        获取全市场实时财经快讯（财联社7×24小时电报）。v3.2.0 新增。
+    Args:
+        symbol: 6位股票代码，如 "600519"。为空则获取全市场最新公告。
+        num_results: 最大返回条数，默认30
 
-        Args:
-            num_results: 最大返回条数，默认20，最大50
+    Returns:
+        公告列表 (JSON)，包含公告标题、发布日期、公告类型、PDF链接等。
+    """
+    return mcp_serve(
+        "get_company_announcements",
+        lambda: news_service.get_company_announcements(symbol=symbol, num_results=num_results),
+        f"获取公司公告失败 ({symbol})",
+    )
 
-        Returns:
-            快讯列表 (JSON)，包含时间戳、内容、类别、链接等。
-        """
-        cache_key = f"telegraph:{num_results}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
 
-        try:
-            df, _src = _router.route("telegraph_news", num_results=num_results)
-            if df is None or df.empty:
-                return df_to_json(pd.DataFrame())
-            result = df_to_json(df)
-            cache.set(cache_key, result, TTL_REALTIME)
-            return result
-        except Exception as e:
-            return error_response(
-                f"获取实时快讯失败: {e}", "get_telegraph_news"
-            )
+async def get_telegraph_news(num_results: int = 20) -> str:
+    """
+    获取全市场实时财经快讯（财联社7×24小时电报）。v3.2.0 新增。
 
-    @mcp.tool()
-    async def search_news(
-        keyword: str,
-        symbol: str = "",
-        num_results: int = 20,
-    ) -> str:
-        """
-        按关键词搜索财经新闻资讯。
+    Args:
+        num_results: 最大返回条数，默认20，最大50
 
-        纯新闻搜索，不包含公司公告。数据源：财联社快讯 + 新浪财经 + 百度交易提醒 + 期货新闻 + 百度热搜。
+    Returns:
+        快讯列表 (JSON)，包含时间戳、内容、类别、链接等。
+    """
+    cache_key = f"telegraph:{num_results}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
 
-        如果提供了股票代码，则在该股票的新闻中搜索关键词；
-        否则在全市场新闻中搜索。
+    def _build() -> str:
+        df, _src = _router.route("telegraph_news", num_results=num_results)
+        if df is None or df.empty:
+            return df_to_json(pd.DataFrame())
+        result = df_to_json(df)
+        cache.set(cache_key, result, TTL_REALTIME)
+        return result
 
-        Args:
-            keyword: 搜索关键词，如 "业绩预增"、"回购"、"增持"
-            symbol: 可选的6位股票代码，用于限定搜索范围
-            num_results: 最大返回条数，默认20
+    return mcp_serve("get_telegraph_news", _build, "获取实时快讯失败", dump=False)
 
-        Returns:
-            匹配的新闻列表 (JSON)，每条固定 5 字段：标题、时间、来源、链接、摘要。
-        """
-        try:
-            result = news_service.search_news(
-                keyword=keyword, symbol=symbol, num_results=num_results
-            )
-            return json.dumps(result, ensure_ascii=False)
-        except Exception as e:
-            return error_response(
-                f"搜索新闻失败 ({keyword}): {e}", "search_news"
-            )
 
-    @mcp.tool()
-    async def get_market_sentiment() -> str:
-        """
-        获取指数新闻情绪数据，反映市场整体情绪倾向。v3.3.0 新增。
+async def search_news(
+    keyword: str,
+    symbol: str = "",
+    num_results: int = 20,
+) -> str:
+    """
+    按关键词搜索财经新闻资讯。
 
-        Returns:
-            指数新闻情绪数据 (JSON)，包含指数代码、情感得分、相关新闻数量等。
-        """
-        cache_key = "market_sentiment"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
+    纯新闻搜索，不包含公司公告。数据源：财联社快讯 + 新浪财经 + 百度交易提醒 + 期货新闻 + 百度热搜。
 
-        try:
-            df, _src = _router.route("index_news_sentiment")
-            if df is None or df.empty:
-                return df_to_json(pd.DataFrame())
-            result = df_to_json(df)
-            cache.set(cache_key, result, TTL_REALTIME)
-            return result
-        except Exception as e:
-            return error_response(
-                f"获取市场情绪数据失败: {e}", "get_market_sentiment"
-            )
+    如果提供了股票代码，则在该股票的新闻中搜索关键词；
+    否则在全市场新闻中搜索。
 
-    @mcp.tool()
-    async def get_futures_news(symbol: str = "全部") -> str:
-        """
-        获取期货/大宗商品相关新闻。v3.3.0 新增。
+    Args:
+        keyword: 搜索关键词，如 "业绩预增"、"回购"、"增持"
+        symbol: 可选的6位股票代码，用于限定搜索范围
+        num_results: 最大返回条数，默认20
 
-        Args:
-            symbol: 品种，默认 "全部" 获取所有品种新闻
+    Returns:
+        匹配的新闻列表 (JSON)，每条固定 5 字段：标题、时间、来源、链接、摘要。
+    """
+    return mcp_serve(
+        "search_news",
+        lambda: news_service.search_news(keyword=keyword, symbol=symbol, num_results=num_results),
+        f"搜索新闻失败 ({keyword})",
+    )
 
-        Returns:
-            期货新闻列表 (JSON)，包含标题、发布时间、内容等。
-        """
-        cache_key = f"futures_news:{symbol}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
 
-        try:
-            df, _src = _router.route("futures_news", symbol=symbol)
-            if df is None or df.empty:
-                return df_to_json(pd.DataFrame())
-            result = df_to_json(df)
-            cache.set(cache_key, result, TTL_REALTIME)
-            return result
-        except Exception as e:
-            return error_response(
-                f"获取期货新闻失败: {e}", "get_futures_news"
-            )
+async def get_market_sentiment() -> str:
+    """
+    获取指数新闻情绪数据，反映市场整体情绪倾向。v3.3.0 新增。
 
-    @mcp.tool()
-    async def get_hot_rank(endpoint: str = "rank", symbol: str = "") -> str:
-        """
-        获取东方财富个股人气榜数据。v3.3.0 新增。
+    Returns:
+        指数新闻情绪数据 (JSON)，包含指数代码、情感得分、相关新闻数量等。
+    """
+    cache_key = "market_sentiment"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
 
-        Args:
-            endpoint: 榜单类型。可选值：
-                - "rank": 全市场人气榜（默认）
-                - "up": 飙升榜
-                - "detail": 个股历史趋势及粉丝特征（需 symbol）
-                - "realtime": 个股实时变动（需 symbol）
-                - "latest": 个股最新排名（需 symbol）
-                - "relate": 相关股票（需 symbol）
-            symbol: 带市场表示的证券代码，如 "SZ000665"。部分 endpoint 必填
+    def _build() -> str:
+        df, _src = _router.route("index_news_sentiment")
+        if df is None or df.empty:
+            return df_to_json(pd.DataFrame())
+        result = df_to_json(df)
+        cache.set(cache_key, result, TTL_REALTIME)
+        return result
 
-        Returns:
-            人气榜数据 (JSON)。
-        """
-        cache_key = f"hot_rank:{endpoint}:{symbol}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
+    return mcp_serve("get_market_sentiment", _build, "获取市场情绪数据失败", dump=False)
 
-        try:
-            kw = {"endpoint": endpoint}
-            if symbol:
-                kw["symbol"] = symbol
-            df, _src = _router.route("hot_rank", **kw)
-            if df is None or df.empty:
-                return df_to_json(pd.DataFrame())
-            result = df_to_json(df)
-            cache.set(cache_key, result, TTL_REALTIME)
-            return result
-        except Exception as e:
-            return error_response(
-                f"获取人气榜数据失败: {e}", "get_hot_rank"
-            )
 
-    @mcp.tool()
-    async def get_hot_keywords(symbol: str = "SZ000665") -> str:
-        """
-        获取指定股票的东方财富热门关联关键词。v3.3.0 新增。
+async def get_futures_news(symbol: str = "全部") -> str:
+    """
+    获取期货/大宗商品相关新闻。v3.3.0 新增。
 
-        Args:
-            symbol: 带市场表示的证券代码，如 "SZ000665"
+    Args:
+        symbol: 品种，默认 "全部" 获取所有品种新闻
 
-        Returns:
-            热门关键词列表 (JSON)。
-        """
-        cache_key = f"hot_keywords:{symbol}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
+    Returns:
+        期货新闻列表 (JSON)，包含标题、发布时间、内容等。
+    """
+    cache_key = f"futures_news:{symbol}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
 
-        try:
-            df, _src = _router.route("hot_rank", endpoint="keyword", symbol=symbol)
-            if df is None or df.empty:
-                return df_to_json(pd.DataFrame())
-            result = df_to_json(df)
-            cache.set(cache_key, result, TTL_REALTIME)
-            return result
-        except Exception as e:
-            return error_response(
-                f"获取热门关键词失败: {e}", "get_hot_keywords"
-            )
+    def _build() -> str:
+        df, _src = _router.route("futures_news", symbol=symbol)
+        if df is None or df.empty:
+            return df_to_json(pd.DataFrame())
+        result = df_to_json(df)
+        cache.set(cache_key, result, TTL_REALTIME)
+        return result
 
-    @mcp.tool()
-    async def get_xueqiu_hot(endpoint: str = "follow", symbol: str = "最热门") -> str:
-        """
-        获取雪球沪深股市热度排行榜数据。v3.3.0 新增。
+    return mcp_serve("get_futures_news", _build, "获取期货新闻失败", dump=False)
 
-        Args:
-            endpoint: 排行榜类型。可选值：
-                - "follow": 关注排行榜（默认）
-                - "tweet": 讨论排行榜
-                - "deal": 交易排行榜
-            symbol: {"最热门", "沪深股市", "创业板", "科创板"}
 
-        Returns:
-            雪球热度数据 (JSON)。
-        """
-        cache_key = f"xueqiu_hot:{endpoint}:{symbol}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
+async def get_hot_rank(endpoint: str = "rank", symbol: str = "") -> str:
+    """
+    获取东方财富个股人气榜数据。v3.3.0 新增。
 
-        try:
-            df, _src = _router.route("xueqiu_hot", endpoint=endpoint, symbol=symbol)
-            if df is None or df.empty:
-                return df_to_json(pd.DataFrame())
-            result = df_to_json(df)
-            cache.set(cache_key, result, TTL_REALTIME)
-            return result
-        except Exception as e:
-            return error_response(
-                f"获取雪球热度数据失败: {e}", "get_xueqiu_hot"
-            )
+    Args:
+        endpoint: 榜单类型。可选值：
+            - "rank": 全市场人气榜（默认）
+            - "up": 飙升榜
+            - "detail": 个股历史趋势及粉丝特征（需 symbol）
+            - "realtime": 个股实时变动（需 symbol）
+            - "latest": 个股最新排名（需 symbol）
+            - "relate": 相关股票（需 symbol）
+        symbol: 带市场表示的证券代码，如 "SZ000665"。部分 endpoint 必填
 
-    @mcp.tool()
-    async def get_fund_hold(endpoint: str = "hold", symbol: str = "基金持仓", date: str = "") -> str:
-        """
-        获取机构持仓数据（基金/QFII/社保/券商/保险/信托）。v3.3.0 新增。
+    Returns:
+        人气榜数据 (JSON)。
+    """
+    cache_key = f"hot_rank:{endpoint}:{symbol}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
 
-        Args:
-            endpoint: 数据类型。可选值：
-                - "hold": 机构持仓汇总（默认），symbol 可选 {"基金持仓", "QFII持仓", "社保持仓", "券商持仓", "保险持仓", "信托持仓"}
-                - "detail": 单只基金持仓明细，symbol 为基金代码
-            symbol: 机构类型或基金代码
-            date: 财报日期，格式 "YYYYMMDD"。默认上一季度末
+    def _build() -> str:
+        kw = {"endpoint": endpoint}
+        if symbol:
+            kw["symbol"] = symbol
+        df, _src = _router.route("hot_rank", **kw)
+        if df is None or df.empty:
+            return df_to_json(pd.DataFrame())
+        result = df_to_json(df)
+        cache.set(cache_key, result, TTL_REALTIME)
+        return result
 
-        Returns:
-            机构持仓数据 (JSON)。
-        """
-        cache_key = f"fund_hold:{endpoint}:{symbol}:{date}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
+    return mcp_serve("get_hot_rank", _build, "获取人气榜数据失败", dump=False)
 
-        try:
-            kw = {"endpoint": endpoint, "symbol": symbol}
-            if date:
-                kw["date"] = date
-            df, _src = _router.route(
-                "fund_hold", timeout=_FUND_HOLD_ROUTE_TIMEOUT, **kw
-            )
-            if df is None or df.empty:
-                return df_to_json(pd.DataFrame())
-            result = df_to_json(df)
-            cache.set(cache_key, result, TTL_DAILY)
-            return result
-        except Exception as e:
-            return error_response(
-                f"获取基金持仓数据失败: {e}", "get_fund_hold"
-            )
 
-    @mcp.tool()
-    async def get_hot_search(symbol: str = "A股", date: str = "", time: str = "今日") -> str:
-        """
-        获取百度股市通热搜股票排行。v3.3.0 新增。
+async def get_hot_keywords(symbol: str = "SZ000665") -> str:
+    """
+    获取指定股票的东方财富热门关联关键词。v3.3.0 新增。
 
-        Args:
-            symbol: 市场范围。可选值：{"全部", "A股", "港股", "美股"}
-            date: 日期，格式 "YYYYMMDD"。默认为当日
-            time: 时间范围。可选值：{"今日", "1小时"}
+    Args:
+        symbol: 带市场表示的证券代码，如 "SZ000665"
 
-        Returns:
-            百度热搜股票排行 (JSON)。
-        """
-        cache_key = f"hot_search:{symbol}:{date}:{time}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
+    Returns:
+        热门关键词列表 (JSON)。
+    """
+    cache_key = f"hot_keywords:{symbol}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
 
-        try:
-            kw = {"symbol": symbol, "time": time}
-            if date:
-                kw["date"] = date
-            df, _src = _router.route("hot_search", **kw)
-            if df is None or df.empty:
-                return df_to_json(pd.DataFrame())
-            result = df_to_json(df)
-            cache.set(cache_key, result, TTL_REALTIME)
-            return result
-        except Exception as e:
-            return error_response(
-                f"获取百度热搜失败: {e}", "get_hot_search"
-            )
+    def _build() -> str:
+        df, _src = _router.route("hot_rank", endpoint="keyword", symbol=symbol)
+        if df is None or df.empty:
+            return df_to_json(pd.DataFrame())
+        result = df_to_json(df)
+        cache.set(cache_key, result, TTL_REALTIME)
+        return result
 
-    @mcp.tool()
-    async def get_wencai_query(query: str, query_type: str = "stock", loop: bool = False) -> str:
-        """
-        同花顺问财自然语言查询（需安装 pywencai 和 Node.js）。v3.3.0 新增。
-        
-        通过自然语言描述筛选条件，获取符合条件的股票/基金/指数列表。
-        例如："市值大于100亿，市盈率小于30，连续3年ROE大于15%"
-        
-        Args:
-            query: 自然语言查询语句，如 "市值大于100亿 市盈率小于30"
-            query_type: 查询类型，可选 {"stock", "fund", "index"}，默认 "stock"
-            loop: 是否获取所有分页数据，默认 False
-        
-        Returns:
-            查询结果 (JSON)，包含符合条件的标的信息。
-            需要安装 pywencai: pip install pywencai
-        """
-        cache_key = f"wencai_query:{query}:{query_type}:{loop}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
+    return mcp_serve("get_hot_keywords", _build, "获取热门关键词失败", dump=False)
 
-        try:
-            df, _src = _router.route("wencai_query", query=query, query_type=query_type, loop=loop)
-            if df is None or df.empty:
-                return df_to_json(pd.DataFrame())
-            result = df_to_json(df, max_rows=50)
-            cache.set(cache_key, result, TTL_REALTIME)
-            return result
-        except Exception as e:
-            return error_response(
-                f"问财查询失败: {e}", "get_wencai_query"
-            )
 
-    @mcp.tool()
-    async def get_wencai_news(keyword: str, channel: str = "news", limit: int = 20) -> str:
-        """
-        同花顺问财新闻/公告/研报搜索（需设置 IWENCAI_API_KEY 环境变量）。v3.3.0 新增。
-        
-        通过 iwencai OpenAPI 搜索财经新闻、公司公告或研究报告。
-        
-        Args:
-            keyword: 搜索关键词，如 "新能源汽车"、"贵州茅台"
-            channel: 搜索频道，可选 {"news": 财经新闻, "announcement": 公司公告, "report": 研究报告}，默认 "news"
-            limit: 返回条数，默认 20，最大 50
-        
-        Returns:
-            搜索结果 (JSON)，包含标题、发布时间、来源、摘要、链接。
-            需要设置环境变量 IWENCAI_API_KEY
-        """
-        cache_key = f"wencai_news:{keyword}:{channel}:{limit}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
+async def get_xueqiu_hot(endpoint: str = "follow", symbol: str = "最热门") -> str:
+    """
+    获取雪球沪深股市热度排行榜数据。v3.3.0 新增。
 
-        try:
-            df, _src = _router.route("wencai_news", keyword=keyword, channel=channel, limit=limit)
-            if df is None or df.empty:
-                return df_to_json(pd.DataFrame())
-            result = df_to_json(df)
-            cache.set(cache_key, result, TTL_REALTIME)
-            return result
-        except Exception as e:
-            return error_response(
-                f"问财搜索失败: {e}", "get_wencai_news"
-            )
+    Args:
+        endpoint: 排行榜类型。可选值：
+            - "follow": 关注排行榜（默认）
+            - "tweet": 讨论排行榜
+            - "deal": 交易排行榜
+        symbol: {"最热门", "沪深股市", "创业板", "科创板"}
+
+    Returns:
+        雪球热度数据 (JSON)。
+    """
+    cache_key = f"xueqiu_hot:{endpoint}:{symbol}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    def _build() -> str:
+        df, _src = _router.route("xueqiu_hot", endpoint=endpoint, symbol=symbol)
+        if df is None or df.empty:
+            return df_to_json(pd.DataFrame())
+        result = df_to_json(df)
+        cache.set(cache_key, result, TTL_REALTIME)
+        return result
+
+    return mcp_serve("get_xueqiu_hot", _build, "获取雪球热度数据失败", dump=False)
+
+
+async def get_fund_hold(endpoint: str = "hold", symbol: str = "基金持仓", date: str = "") -> str:
+    """
+    获取机构持仓数据（基金/QFII/社保/券商/保险/信托）。v3.3.0 新增。
+
+    Args:
+        endpoint: 数据类型。可选值：
+            - "hold": 机构持仓汇总（默认），symbol 可选 {"基金持仓", "QFII持仓", "社保持仓", "券商持仓", "保险持仓", "信托持仓"}
+            - "detail": 单只基金持仓明细，symbol 为基金代码
+        symbol: 机构类型或基金代码
+        date: 财报日期，格式 "YYYYMMDD"。默认上一季度末
+
+    Returns:
+        机构持仓数据 (JSON)。
+    """
+    cache_key = f"fund_hold:{endpoint}:{symbol}:{date}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    def _build() -> str:
+        kw = {"endpoint": endpoint, "symbol": symbol}
+        if date:
+            kw["date"] = date
+        df, _src = _router.route(
+            "fund_hold", timeout=_FUND_HOLD_ROUTE_TIMEOUT, **kw
+        )
+        if df is None or df.empty:
+            return df_to_json(pd.DataFrame())
+        result = df_to_json(df)
+        cache.set(cache_key, result, TTL_DAILY)
+        return result
+
+    return mcp_serve("get_fund_hold", _build, "获取基金持仓数据失败", dump=False)
+
+
+async def get_hot_search(symbol: str = "A股", date: str = "", time: str = "今日") -> str:
+    """
+    获取百度股市通热搜股票排行。v3.3.0 新增。
+
+    Args:
+        symbol: 市场范围。可选值：{"全部", "A股", "港股", "美股"}
+        date: 日期，格式 "YYYYMMDD"。默认为当日
+        time: 时间范围。可选值：{"今日", "1小时"}
+
+    Returns:
+        百度热搜股票排行 (JSON)。
+    """
+    cache_key = f"hot_search:{symbol}:{date}:{time}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    def _build() -> str:
+        kw = {"symbol": symbol, "time": time}
+        if date:
+            kw["date"] = date
+        df, _src = _router.route("hot_search", **kw)
+        if df is None or df.empty:
+            return df_to_json(pd.DataFrame())
+        result = df_to_json(df)
+        cache.set(cache_key, result, TTL_REALTIME)
+        return result
+
+    return mcp_serve("get_hot_search", _build, "获取百度热搜失败", dump=False)
+
+
+async def get_wencai_query(query: str, query_type: str = "stock", loop: bool = False) -> str:
+    """
+    同花顺问财自然语言查询（需安装 pywencai 和 Node.js）。v3.3.0 新增。
+
+    通过自然语言描述筛选条件，获取符合条件的股票/基金/指数列表。
+    例如："市值大于100亿，市盈率小于30，连续3年ROE大于15%"
+
+    Args:
+        query: 自然语言查询语句，如 "市值大于100亿 市盈率小于30"
+        query_type: 查询类型，可选 {"stock", "fund", "index"}，默认 "stock"
+        loop: 是否获取所有分页数据，默认 False
+
+    Returns:
+        查询结果 (JSON)，包含符合条件的标的信息。
+        需要安装 pywencai: pip install pywencai
+    """
+    cache_key = f"wencai_query:{query}:{query_type}:{loop}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    def _build() -> str:
+        df, _src = _router.route("wencai_query", query=query, query_type=query_type, loop=loop)
+        if df is None or df.empty:
+            return df_to_json(pd.DataFrame())
+        result = df_to_json(df, max_rows=50)
+        cache.set(cache_key, result, TTL_REALTIME)
+        return result
+
+    return mcp_serve("get_wencai_query", _build, "问财查询失败", dump=False)
+
+
+async def get_wencai_news(keyword: str, channel: str = "news", limit: int = 20) -> str:
+    """
+    同花顺问财新闻/公告/研报搜索（需设置 IWENCAI_API_KEY 环境变量）。v3.3.0 新增。
+
+    通过 iwencai OpenAPI 搜索财经新闻、公司公告或研究报告。
+
+    Args:
+        keyword: 搜索关键词，如 "新能源汽车"、"贵州茅台"
+        channel: 搜索频道，可选 {"news": 财经新闻, "announcement": 公司公告, "report": 研究报告}，默认 "news"
+        limit: 返回条数，默认 20，最大 50
+
+    Returns:
+        搜索结果 (JSON)，包含标题、发布时间、来源、摘要、链接。
+        需要设置环境变量 IWENCAI_API_KEY
+    """
+    cache_key = f"wencai_news:{keyword}:{channel}:{limit}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    def _build() -> str:
+        df, _src = _router.route("wencai_news", keyword=keyword, channel=channel, limit=limit)
+        if df is None or df.empty:
+            return df_to_json(pd.DataFrame())
+        result = df_to_json(df)
+        cache.set(cache_key, result, TTL_REALTIME)
+        return result
+
+    return mcp_serve("get_wencai_news", _build, "问财搜索失败", dump=False)
+
+
+def register(mcp: FastMCP):
+    """Register news and event tools with the MCP server.
+
+    QI-ARCH-02 全量上提（2026-11-19）：14 工具体模块级，引用注册。"""
+    for _fn in (
+        get_stock_news,
+        get_financial_calendar,
+        get_company_announcements,
+        get_telegraph_news,
+        search_news,
+        get_market_sentiment,
+        get_futures_news,
+        get_hot_rank,
+        get_hot_keywords,
+        get_xueqiu_hot,
+        get_fund_hold,
+        get_hot_search,
+        get_wencai_query,
+        get_wencai_news,
+    ):
+        mcp.tool()(_fn)
