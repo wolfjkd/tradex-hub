@@ -24,19 +24,35 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "tradex" / "src"
 
 
+def _register_all_tools_full(mcp) -> dict:
+    """发现并注册全部工具（跳过 signal_data_* 兼容子模块防重复），不做
+    profile 可见性过滤（本机 config/mcp_tool_profile.json=lean 会隐藏 75 个，
+    计数须与 profile 无关）。返回 {工具名: tool}。"""
+    import importlib
+    import pkgutil
+
+    import tradex.tools as tools_pkg
+
+    for _, mod_name, _ in pkgutil.iter_modules(tools_pkg.__path__):
+        if mod_name.startswith("signal_data_"):
+            continue  # 由 signal_data 兼容入口统一注册，避免重复
+        mod = importlib.import_module(f"{tools_pkg.__name__}.{mod_name}")
+        if hasattr(mod, "register"):
+            mod.register(mcp)
+    return mcp._tool_manager._tools
+
+
 def count_mcp_tools() -> int:
-    """AST 计数 tools/ 下 @mcp.tool(...) 装饰的函数总数。"""
-    tools_dir = SRC / "tradex" / "tools"
-    total = 0
-    for path in sorted(tools_dir.glob("*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                for dec in node.decorator_list:
-                    func = dec.func if isinstance(dec, ast.Call) else dec
-                    if isinstance(func, ast.Attribute) and func.attr == "tool":
-                        total += 1
-    return total
+    """MCP 工具数：注册过程衍生计数（QI-ARCH-02/06，2026-11-18）。
+
+    原 AST 数 @mcp.tool() 装饰器——工具体上提模块级后装饰器消失
+    （event_driven 试点实证掉数 192→187），改注册衍生（profile 无关全量）。
+    """
+    sys.path.insert(0, str(SRC))
+    from mcp.server.fastmcp import FastMCP
+
+    mcp = FastMCP("guard-count")
+    return len(_register_all_tools_full(mcp))
 
 
 def count_rest_endpoints() -> int:

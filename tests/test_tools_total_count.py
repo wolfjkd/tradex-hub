@@ -1,23 +1,22 @@
 """
 工具总数回归断言（T5，v0.1.0-DEV，SP-2026-09-21-001）。
 
-锁行为：
-  - 全 tools/ 目录的 @mcp.tool(...) 装饰器总数 = 166（2026-09-28 审计基线 176，
-    死源剥离再移除 10 个工具：期权 2 + 指数 3 + 互动 2 + 宏观 3）。
-  - tdx_mcp.py 恰好贡献 3 个装饰器（natural_lang_screener / research_report / query_macro_indicator）。
+QI-ARCH-02/06（2026-11-18 质检整改）：总账本由「AST 数 @mcp.tool() 文本」
+改「**注册过程衍生**」——工具体上提模块级后无装饰器可数（AST 数文本账本
+退役；试点 event_driven 6 工具上提实证：AST 账本掉数 192→187）；实例化
+FastMCP + ToolRegistry.discover_and_register 走真实注册路径，数
+_tool_manager._tools 实际注册数（与 tradex/tests/test_server.py 同口径，
+清单数据源单点）。
 
-说明：沿用仓库既有惯例（源码计数而非 import server），避免 import 触发数据源
-注册的副作用；计数改用 AST（正则版会把 docstring/注释里的 "@mcp.tool()" 字样
-误计 3 处，与真实注册数 176 对不上）。tools/registry.py 会为每个含 register()
-的模块调用其 register(mcp)，装饰器数与真实注册一一对应（signal_data_* 子模块
-由 signal_data.py 兼容入口统一注册，装饰器只计一次）。
+tdx_mcp/tdx_tq 两文件的「恰好贡献 N 个」断言保留 AST 口径（该两文件
+工具体尚未上提，AST 数与注册数一一对应；全量上提时一并退役）。
 """
 
 import ast
-import glob
 import os
 
 import pytest
+from mcp.server.fastmcp import FastMCP
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _TOOLS_DIR = os.path.join(_ROOT, "tradex", "src", "tradex", "tools")
@@ -37,6 +36,30 @@ def _count_decorators(path: str) -> int:
     return count
 
 
+def _register_all_tools_full(mcp) -> dict:
+    """发现并注册全部工具（跳过 signal_data_* 兼容子模块防重复），不做
+    profile 可见性过滤（本机 config/mcp_tool_profile.json=lean 会隐藏 75 个，
+    计数须与 profile 无关）。返回 {工具名: tool}。"""
+    import importlib
+    import pkgutil
+
+    import tradex.tools as tools_pkg
+
+    for _, mod_name, _ in pkgutil.iter_modules(tools_pkg.__path__):
+        if mod_name.startswith("signal_data_"):
+            continue  # 由 signal_data 兼容入口统一注册，避免重复
+        mod = importlib.import_module(f"{tools_pkg.__name__}.{mod_name}")
+        if hasattr(mod, "register"):
+            mod.register(mcp)
+    return mcp._tool_manager._tools
+
+
+def _registered_tools() -> dict:
+    """注册过程衍生计数（A⑥ 账本引用化，profile 无关全量）。"""
+    mcp = FastMCP("count-derived")
+    return _register_all_tools_full(mcp)
+
+
 class TestTdxMcpToolCount:
     def test_tdx_mcp_contributes_exactly_three(self):
         p = os.path.join(_TOOLS_DIR, "tdx_mcp.py")
@@ -48,11 +71,22 @@ class TestTdxMcpToolCount:
         assert os.path.exists(p), f"tdx_tq.py 不存在: {p}"
         assert _count_decorators(p) == 2
 
+
+class TestTotalToolCount:
     def test_total_tool_count_is_192(self):
-        """全量工具数 = 192（2026-11-11 裁决① index_constituents 暴露 +1：191→192）。"""
-        total = 0
-        for py in glob.glob(os.path.join(_TOOLS_DIR, "*.py")):
-            if py.endswith("__init__.py") or py.endswith("registry.py"):
-                continue
-            total += _count_decorators(py)
-        assert total == 192, f"期望工具总数 192，实得 {total}"
+        """全量工具数 = 192（注册过程衍生，2026-11-11 裁决① +1 后基线）。"""
+        tools = _registered_tools()
+        assert len(tools) == 192, f"期望工具总数 192，实得 {len(tools)}"
+
+    def test_event_driven_six_tools_registered(self):
+        """A② 试点背书：上提 6 工具经 register 引用注册真实在册。"""
+        tools = _registered_tools()
+        for name in (
+            "get_earnings_forecast",
+            "get_institution_survey",
+            "get_holder_trades",
+            "get_share_buyback",
+            "get_equity_pledge",
+            "get_ipo_calendar",
+        ):
+            assert name in tools, f"{name} 未注册（上提后引用注册失效）"
