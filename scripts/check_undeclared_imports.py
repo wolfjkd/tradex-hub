@@ -18,7 +18,8 @@ httpx/curl_cffi 2026-11-14 由 Issue #2 用户反馈触发全量审计暴露）�
              精判用，except ImportError 走类型名兜底
 
 比对口径：PyPI 名 PEP 503 归一（-_. 统一、小写）+ 剥 python- 前缀双候选
-（python-dotenv↔dotenv、python-calamine↔calamine）；同仓包 tradex/astock_signals
+（python-dotenv↔dotenv、python-calamine↔calamine）+ IMPORT_ALIASES 显式别名
+（websocket-client↔websocket，包名≠import 名形态）；同仓包 tradex/astock_signals
 （与 hatch wheel packages 对齐）及相对 import 跳过。已知边界：类体内 import 按
 「新漏网」FAIL（类体在模块加载时执行，仅标签不如顶层裸 import 精确，不放过）。
 
@@ -42,6 +43,13 @@ WHITELIST = {"baostock", "mootdx", "pyarrow"}
 
 # 同仓包（与 [tool.hatch.build.targets.wheel] packages 对齐），import 自身非第三方
 SELF_PACKAGES = {"tradex", "astock_signals"}
+
+# PyPI 包名 ≠ import 名的显式映射（键为 PEP 503 归一名）：websocket-client 的
+# import 名是 websocket（包历史命名）。显式列举不做模糊猜测——2026-11-18
+# QI-GATE-01 补声明后护栏仍误报，属映射缺口非真漏网。
+IMPORT_ALIASES = {
+    "websocket-client": {"websocket"},
+}
 
 
 def _norm(name: str) -> str:
@@ -88,13 +96,16 @@ def _collect_imports(path: Path) -> list[ImportSpot]:
 
 
 def _declared_candidates(pyproject: dict) -> set[str]:
-    """声明集 → import 名候选（PyPI 归一 + 剥 python- 前缀）。"""
+    """声明集 → import 名候选（PyPI 归一 + 剥 python- 前缀 + 显式别名映射）。"""
     project = pyproject.get("project", {})
     reqs = list(project.get("dependencies", []))
     for group in (project.get("optional-dependencies", {}) or {}).values():
         reqs.extend(group)
     names = {_norm(re.split(r"[<>=!~;\[]", r.strip(), maxsplit=1)[0]) for r in reqs}
-    return names | {n.removeprefix("python-") for n in names}
+    aliases = set()
+    for n in names:
+        aliases |= IMPORT_ALIASES.get(n, set())
+    return names | {n.removeprefix("python-") for n in names} | aliases
 
 
 def find_violations(

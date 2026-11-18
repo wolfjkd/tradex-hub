@@ -15,6 +15,12 @@ prometheus_client>=0.20.0
 httpx>=0.28.1
 # 东财 push2his 直连绕代理（akshare_fetchers 主源路径）；akshare 硬传递依赖显式化（Issue #2 审计补）
 curl_cffi>=0.17.0
+# 大智慧365 本地 WS 源 dzh_fetchers（import websocket；127.0.0.1 回环行情，协议破译源自
+# dzh-queue 项目——2026-11-14 3a4ea3b 只走 uv add 漏补 requirements，QI-GATE-01 补）
+websocket-client>=1.6.0
+# 口径声明：optional extra「ws」（websockets，astock_signals/ws_server.py 惰性 import）
+# 仅声明于 pyproject [project.optional-dependencies].ws，设计内不进 requirements（非核心链路，
+# 不在 check_dep_sync 比对范围）
 python-dotenv>=1.0.0
 # HTTP/SSE mode (optional)
 uvicorn>=0.29.0
