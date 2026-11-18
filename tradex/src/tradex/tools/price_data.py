@@ -249,24 +249,6 @@ def register(mcp: FastMCP):
             return error_response(f"获取股票列表失败: {e}", "get_stock_list")
 
 
-def _is_global_code(symbol: str) -> bool:
-    """检测是否为全球行情代码（非A股6位数字代码）。
-
-    v3.4.0：service/price_service.py 有同名函数副本（保持工具与 service 解耦）。
-    本函数仍被本文件未抽层的 get_market_capitalization 使用，保留。
-    """
-    return symbol.startswith(("us", "hk", "kr", "wh", "int_", "hf_"))
-
-
-def _find_code_col(df) -> str:
-    """Find the stock code column in a DataFrame (varies by data source).
-
-    v3.4.0：service/price_service.py 有同名函数副本（保持工具与 service 解耦）。
-    本函数仍被本文件未抽层的 get_market_capitalization 使用，保留。
-    """
-    for c in df.columns:
-        if c in ("代码", "code", "symbol"):
-            return c
-        if "代码" in c or "code" in c.lower() or "symbol" in c.lower():
-            return c
-    return df.columns[0]
+# 副本函数已收敛 service 真身（QI-ARCH-03/A⑤，2026-11-18：原 v3.4.0 两对
+# 「完全一致」隔缝结对副本——改 import 单点，判型行为零变化）。
+from ..service.price_service import _find_code_col, _is_global_code
