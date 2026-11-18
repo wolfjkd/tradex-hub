@@ -67,9 +67,11 @@ class TestTdxMcpToolCount:
         assert _count_decorators(p) == 3
 
     def test_tdx_tq_contributes_exactly_two(self):
-        p = os.path.join(_TOOLS_DIR, "tdx_tq.py")
-        assert os.path.exists(p), f"tdx_tq.py 不存在: {p}"
-        assert _count_decorators(p) == 2
+        """QI-ARCH-02（2026-11-19）：tdx_tq 工具体上提后改注册衍生口径
+        （AST 数装饰器断言退役——工具体无装饰器可数）。"""
+        tools = _registered_tools()
+        tq_tools = [n for n in tools if n in ("get_l2_stats", "run_tdx_formula")]
+        assert len(tq_tools) == 2, f"tdx_tq 应贡献 2 工具，实得 {tq_tools}"
 
 
 class TestTotalToolCount:
