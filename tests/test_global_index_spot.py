@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
-from tradex.data_sources import akshare_fetchers as akf
+from tradex.data_sources import akshare_em as akf  # 真身随 A⑨ 拆分迁至 akshare_em
 
 
 def _fake_df() -> pd.DataFrame:

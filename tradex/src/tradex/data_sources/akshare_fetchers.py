@@ -23,27 +23,65 @@ import pandas as pd
 
 from ..utils.cache import cache
 
+# —— QI-ARCH-09 六上游拆分（2026-11-19）：公共层独立 + EM/四池/备源三子模块；
+# 本文件保留 akshare 主族 25 函数 + baidu 主族；下方 re-export 为兼容层
+# （registry/_SOURCE_TABLE 等调用方 import 路径不变 = 行为零变化；渐进改引记录交接）。
+from .akshare_common import (  # noqa: E402,F401 — 兼容 re-export
+    _ak,
+    _normalize_ak_period,
+    _prev_quarter_end,
+    _is_arrow_escape_invalid,
+)
+from .akshare_em import (  # noqa: E402,F401
+    fetch_fund_hold_direct,
+    fetch_dt_detail_em,
+    fetch_dt_institution_em,
+    fetch_dt_stock_stats_em,
+    fetch_dt_branch_rank_em,
+    fetch_margin_account_info_em,
+    fetch_block_trade_market_stat_em,
+    fetch_block_trade_detail_em,
+    fetch_block_trade_daily_stat_em,
+    fetch_bigcaps_em,
+    fetch_global_index_spot,
+)
+from .akshare_pools import (  # noqa: E402,F401
+    fetch_limit_up_board_em,
+    _normalize_board_date,
+    _latest_board_date,
+    _trade_dates_recent,
+    _latest_board_date_with_rows,
+    _pick_field,
+    _map_pool_rows,
+    _fetch_pool_rows,
+    _fetch_pool_with_fields,
+    fetch_limit_up_board,
+    fetch_board_sentiment,
+)
+from .akshare_backup import (  # noqa: E402,F401
+    _fetch_sina_index_amount_today,
+    _fetch_index_daily_from_push2his,
+    _code6,
+    _prefixed_code,
+    fetch_company_info_cninfo,
+    fetch_financial_stmt_sina,
+    fetch_industry_data_ths,
+    fetch_industry_comparison_ths,
+    fetch_hot_rank_ths,
+    fetch_baidu_economic_calendar_bak,
+    fetch_market_sentiment_legu,
+    fetch_baidu_trade_notify_tfp,
+    fetch_bond_yield_cn_backup,
+)
+
 logger = logging.getLogger("tradex.akshare")
 
 # v3.3.15 新增：季度末日期计算。
 # 旧实现用 f"{year}{q*3:02d}31" 硬编码 31 日，Q2(6月)/Q3(9月) 会算出
 # 20260631 / 20260931 这类**不存在的日期**，上游直接报错，而错误又被
 # except 静默吞成空表 —— 结果是每年 4–9 月「机构持仓」默认调用恒返回空。
-_QUARTER_END_MONTH = {1: 3, 2: 6, 3: 9, 4: 12}
 
 
-def _prev_quarter_end(today: "datetime | None" = None) -> str:
-    """返回「上一季度末」的真实日期，格式 YYYYMMDD。
-
-    以真实月末为准（6→30、9→30、12→31），不再硬编码 31 日。
-    今天 2026-09-14 → 所属 Q3 → 上一季度末 = 20260630。
-    """
-    d = (today or datetime.now()).date()
-    q = (d.month - 1) // 3 + 1          # 当前季度 1-4
-    py, pq = (d.year, q - 1) if q > 1 else (d.year - 1, 4)   # 上一季度
-    m = _QUARTER_END_MONTH[pq]
-    last_day = calendar.monthrange(py, m)[1]                  # 真实月末，不假设 31
-    return f"{py}{m:02d}{last_day:02d}"
 
 # 待发版：`_ssl_patch_lock` 已随 `fetch_index_news_sentiment` 一并删除。
 # 原因：该锁只为串行化「临时篡改进程级 requests.sessions.Session.request 的
@@ -53,32 +91,8 @@ def _prev_quarter_end(today: "datetime | None" = None) -> str:
 # 这把拿全局副作用换来的锁自然失去存在理由。
 
 
-_AK_TIMEOUT_APPLIED = False
 
 
-def _ak():
-    """延迟导入 akshare，避免模块加载时副作用。
-
-    工单 04（2026-11-01）：akshare 1.20.4 起对所有 requests 接口启用全局
-    默认硬超时 (连接 10s / 读取 60s)，此前本项目从未显式管理超时，升级即
-    被动继承隐含默认值。此处显式设定，不再依赖库的隐含行为：
-      - 连接 10s：与上游默认一致，容忍慢握手；
-      - 读取 30s：全市场 spot / 龙虎榜翻页等大表耗时 3–15s 量级，30s 留足
-        余量；走 SmartRouter 的调用另有 12s 路由超时先行掐断（二者取小），
-        本值主要保护 fetcher 内部 fallback 链等非路由直调场景。
-    """
-    global _AK_TIMEOUT_APPLIED
-    import akshare as ak
-    if not _AK_TIMEOUT_APPLIED:
-        # set_timeout 是 akshare 1.20.4 与「全局默认硬超时」同期引入的 API；
-        # 更旧的版本既没有此 API、也没有隐含全局超时问题，跳过即语义正确。
-        # 缺属性时绝不抬源（2026-11-08：TradeX 侧 uv.lock 锁 1.19.1，无防御会令
-        # akshare_em 源全灭、情绪复盘等下游五块全挂）。
-        set_timeout = getattr(ak, "set_timeout", None)
-        if set_timeout is not None:
-            set_timeout((10, 30))
-        _AK_TIMEOUT_APPLIED = True
-    return ak
 
 
 # ============================================================
@@ -89,20 +103,8 @@ def _ak():
 # eltdx 源内部有 _normalize_period() 归一化，akshare 源此前没有 ——
 # 于是传 'day' 时主源正常、一旦降级到 akshare 就 KeyError('day')，降级链在该值下必断。
 # 这里做反向归一化，使两个源的 period 语义对齐。
-_AK_PERIOD_ALIASES = {
-    "day": "daily", "daily": "daily", "d": "daily", "1d": "daily",
-    "week": "weekly", "weekly": "weekly", "w": "weekly", "1w": "weekly",
-    "month": "monthly", "monthly": "monthly", "m": "monthly", "1m": "monthly",
-}
 
 
-def _normalize_ak_period(period: str) -> str:
-    """把 eltdx 风格周期名(day/week/month)转成 akshare 期望的(daily/weekly/monthly)。
-
-    已是 akshare 风格的值保持不变；未识别的值原样透传，交由 akshare 自行报错。
-    """
-    key = str(period or "").strip().lower()
-    return _AK_PERIOD_ALIASES.get(key, period)
 
 
 # ============================================================
@@ -245,92 +247,8 @@ def fetch_index_daily_amount(symbol: str = "", code: str = "", days: int = 6, **
     return out
 
 
-def _fetch_sina_index_amount_today(sym: str):
-    """新浪实时行情（hq.sinajs.cn）取指数当日成交额(元)。
-
-    sym: sh000001 / sz399001 / sz399006 等。
-    新浪指数行情字段：…, 成交量(手), 成交额(元), …（上证/深证的额在第10位）。返回整数成交额(元)或 None。
-    """
-    import urllib.request
-    # 铁律：国内接口直连。默认 opener 会读 HTTP(S)_PROXY 环境变量，必须绕过。
-    _opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    url = f"https://hq.sinajs.cn/list={sym}"
-    req = urllib.request.Request(url, headers={
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120",
-        "Referer": "https://finance.sina.com.cn",
-    })
-    resp = _opener.open(req, timeout=8)
-    raw = resp.read().decode("gbk", "ignore")
-    quotes = raw.split("=", 1)[-1].strip(";").strip('"')
-    if not quotes:
-        return None
-    parts = quotes.split(",")
-    # 指数格式: 名称,今开,昨收,现价,最高,最低,买一?,卖一?,成交量(手),成交额(元),...
-    # 兼容两侧字段偏移——成交额在成交量之后。
-    try:
-        vol_idx = 8
-        amt_idx = 9
-        amount = float(parts[amt_idx]) if len(parts) > amt_idx else None
-        return amount
-    except (ValueError, IndexError):
-        return None
 
 
-def _fetch_index_daily_from_push2his(sym: str, days: int) -> list:
-    """直连东财 push2his 历史K线接口取指数量能序列（含成交额）。
-
-    返回 [{"date","volume","amount"}, ...]；成交额/成交量为 None 时表示该源未提供。
-    """
-    from curl_cffi import requests as _rq
-
-    # symbol 格式 sh000001 / sz399001 / sz399006 → secid
-    if sym.lower().startswith("sh") or sym.lower().startswith("1."):
-        secid = "1." + sym[2:].zfill(6) if "." not in sym else sym
-    elif sym.lower().startswith("sz") or sym.lower().startswith("0."):
-        secid = "0." + sym[2:].zfill(6) if "." not in sym else sym
-    else:
-        # 纯数字：上证≈1.，深证≈0.
-        secid = f"1.{sym.zfill(6)}" if sym.startswith(("000001", "999999")) else f"0.{sym.zfill(6)}"
-
-    _session = _rq.Session()
-    _session.headers.update({
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        ),
-        "Referer": "https://quote.eastmoney.com/",
-    })
-    url = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
-    params = {
-        "secid": secid,
-        "ut": "fa5fd1943c7b386f172d6893dbfba10b",
-        "fields1": "f1,f2,f3,f4,f5,f6",
-        "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
-        "klt": 101,
-        "fqt": 0,
-        "end": "20500101",
-        "lmt": max(int(days), 10),
-    }
-
-    resp = _session.get(url, params=params, timeout=10)
-    resp.raise_for_status()
-    data = resp.json()
-    klines = (data.get("data") or {}).get("klines") or []
-    if not klines:
-        raise RuntimeError(f"push2his kline empty for {sym}")
-
-    out = []
-    for line in klines[-int(days):]:
-        p = line.split(",")
-        # f51..f61: 0日期 1开 2收 3高 4低 5成交量(手) 6成交额(元)
-        vol = float(p[5]) if len(p) > 5 and p[5] not in (None, "", "-") else 0.0
-        amt = float(p[6]) if len(p) > 6 and p[6] not in (None, "", "-") else None
-        out.append({
-            "date": p[0],
-            "volume": vol,
-            "amount": amt,
-        })
-    return out
 
 
 # ============================================================
@@ -585,20 +503,6 @@ def fetch_market_overview(symbol: str = "", **kwargs):
 # news_data — 新闻与公告（多 endpoint）
 # ============================================================
 
-def _is_arrow_escape_invalid(e: BaseException) -> bool:
-    """判定是否 akshare stock_news_em 的 pyarrow ArrowInvalid 库内 bug。
-
-    akshare stock_news_em 内部 `.str.replace(r"\\u3000",…, regex=True)` 在装了
-    pyarrow 的环境由 RE2 内核执行，不支持 `\\u` 转义 → ArrowInvalid("invalid
-    escape sequence")。hub venv 无 pyarrow 不触发，下游环境（如 TradeX）必炸。
-    pyarrow 可导入时按 isinstance 精判；否则按类型名 + 消息特征兜底（测试用
-    假异常与真 ArrowInvalid 同名同特征）。
-    """
-    try:
-        from pyarrow.lib import ArrowInvalid  # noqa: PLC0415 仅 pyarrow 环境可导入
-    except ImportError:
-        return type(e).__name__ == "ArrowInvalid" or "invalid escape sequence" in str(e)
-    return isinstance(e, ArrowInvalid)
 
 
 def fetch_news_data(
@@ -1363,128 +1267,17 @@ def fetch_fund_hold_data(endpoint: str = "hold", symbol: str = "基金持仓", d
 # 上游：东方财富 datacenter /dataapi/zlsj/list
 # 与 akshare 的唯一区别：**按上游字段名映射中文列名**，而不是按位置。
 # 上游字段顺序再变也不会错位。
-_EM_ZLSJ_URL = "http://data.eastmoney.com/dataapi/zlsj/list"
 
 # 机构类型 -> 东财 type 参数
-_FUND_HOLD_SYMBOL_MAP = {
-    "基金持仓": "1",
-    "QFII持仓": "2",
-    "社保持仓": "3",
-    "券商持仓": "4",
-    "保险持仓": "5",
-    "信托持仓": "6",
-}
 
 # (上游字段名, 输出中文列名) —— 顺序即输出列顺序
 #
 # ⚠️ 列名**刻意沿用 akshare 原有的 9 个列名**（不新增/不改名），只把「哪个字段
 # 填进哪个列」改对。原因：下游（如周末复盘报告模板）按列名取值，改名会静默
 # 打断它们。最后额外追加一列 持股占流通股比（纯新增，不改动既有列，风险低）。
-_FUND_HOLD_FIELDS = [
-    ("SECURITY_CODE", "股票代码"),
-    ("SECURITY_NAME_ABBR", "股票简称"),
-    ("HOULD_NUM", "持有基金家数"),
-    ("TOTAL_SHARES", "持股总数"),
-    ("HOLD_VALUE", "持股市值"),
-    ("HOLDCHA", "持股变化"),          # 增仓 / 减仓（方向）
-    ("HOLDCHA_NUM", "持股变动数值"),   # 股数增减
-    ("HOLDCHA_RATIO", "持股变动比例"), # 百分比
-    ("FREESHARES_RATIO", "持股占流通股比"),  # 新增列（akshare 原 schema 无此列）
-]
-
-_FUND_HOLD_NUM_COLS = (
-    "持有基金家数", "持股总数", "持股市值", "持股变动数值",
-    "持股变动比例", "持股占流通股比",
-)
 
 
-def fetch_fund_hold_direct(
-    endpoint: str = "hold", symbol: str = "基金持仓", date: str = "", **kwargs
-) -> pd.DataFrame:
-    """机构持仓汇总 —— 直取东财 datacenter，按字段名映射列（修复列错位）。
 
-    仅支持 endpoint="hold"；其余 endpoint 抛 ValueError，交由 SmartRouter
-    降级到 akshare 源（后者负责 detail）。
-
-    Args:
-        endpoint: 仅 "hold"
-        symbol: {"基金持仓","QFII持仓","社保持仓","券商持仓","保险持仓","信托持仓"}
-        date: 财报日期 "YYYYMMDD"，默认上一季度末
-
-    Returns:
-        DataFrame，列沿用 akshare 原有命名以保证下游不被打断：
-        序号 / 股票代码 / 股票简称 / 持有基金家数 / 持股总数 / 持股市值 /
-        持股变化 / 持股变动数值 / 持股变动比例，并追加 持股占流通股比。
-        其中「持股变化」为方向文本（增仓/减仓），「持股变动数值」为股数，
-        「持股变动比例」为百分比。
-    """
-    if endpoint != "hold":
-        raise ValueError(
-            f"fetch_fund_hold_direct 仅支持 endpoint='hold'，收到 {endpoint!r}"
-            "（detail 请走 akshare 源）"
-        )
-    t = str(symbol or "基金持仓").strip()
-    if t not in _FUND_HOLD_SYMBOL_MAP:
-        raise ValueError(
-            f"未知机构类型 {symbol!r}（支持: {list(_FUND_HOLD_SYMBOL_MAP)}）"
-        )
-    if not date:
-        date = _prev_quarter_end()
-    em_date = (
-        f"{date[:4]}-{date[4:6]}-{date[6:]}"
-        if (len(date) == 8 and date.isdigit())
-        else date
-    )
-
-    from .em_client import em_get
-
-    rows: list = []
-    page = 1
-    total_pages = 1
-    while page <= total_pages:
-        params = {
-            "date": em_date,
-            "type": _FUND_HOLD_SYMBOL_MAP[t],
-            "zjc": "0",
-            "sortField": "HOULD_NUM",
-            "sortDirec": "1",
-            "pageNum": str(page),
-            "pageSize": "500",
-            "p": str(page),
-            "pageNo": str(page),
-        }
-        resp = em_get(_EM_ZLSJ_URL, params=params, timeout=25)
-        payload = resp.json()
-        if not payload or not payload.get("data"):
-            break
-        rows.extend(payload["data"])
-        try:
-            total_pages = int(payload.get("pages") or 1)
-        except (TypeError, ValueError):
-            total_pages = 1
-        page += 1
-        if page > 60:  # 安全阀：最多 60 页（3 万条），防上游 pages 异常导致死循环
-            logger.warning("fetch_fund_hold_direct(%s): 分页超过 60 页，提前截断", t)
-            break
-
-    if not rows:
-        raise RuntimeError(f"东财机构持仓({t}, {date}) 返回空数据")
-
-    out = pd.DataFrame(
-        [{cn: r.get(en) for en, cn in _FUND_HOLD_FIELDS} for r in rows]
-    )
-    out.insert(0, "序号", range(1, len(out) + 1))
-    for c in _FUND_HOLD_NUM_COLS:
-        if c in out.columns:
-            out[c] = pd.to_numeric(out[c], errors="coerce")
-    # 护栏：列错位会立刻暴露 —— 股票代码必须是 6 位数字，否则宁可失败也不给错标数据
-    codes = out["股票代码"].astype(str).str.strip()
-    if not codes.str.fullmatch(r"\d{6}").all():
-        bad = codes[~codes.str.fullmatch(r"\d{6}")].head(3).tolist()
-        raise RuntimeError(
-            f"东财机构持仓({t}) 股票代码列异常（疑似上游字段再变）：{bad}"
-        )
-    return out
 
 
 # ============================================================
@@ -1496,92 +1289,16 @@ def fetch_fund_hold_direct(
 # 以下备源刻意选用**非东财**厂商：巨潮资讯 / 新浪财经 / 同花顺。
 
 
-def _code6(code: str) -> str:
-    """提取 6 位纯代码（去掉 sh/sz/bj 前缀）。"""
-    c = str(code or "").strip().lower()
-    return c[2:] if c.startswith(("sh", "sz", "bj")) else c
 
 
-def _prefixed_code(code: str) -> str:
-    """补全为 sh/sz/bj 前缀形式（新浪等接口需要）。"""
-    c = str(code or "").strip().lower()
-    if c.startswith(("sh", "sz", "bj")):
-        return c
-    if len(c) == 6 and c.isdigit():
-        if c.startswith(("60", "68", "90", "11", "13")):
-            return "sh" + c
-        if c.startswith(("00", "30", "20")):
-            return "sz" + c
-        if c.startswith(("8", "43", "92")):
-            return "bj" + c
-    return c
 
 
-def fetch_company_info_cninfo(
-    endpoint: str = "individual_info",
-    symbol: str = "",
-    code: str = "",
-    **kwargs,
-) -> pd.DataFrame:
-    """公司信息备源（巨潮资讯 stock_profile_cninfo，非东财）。
-
-    v3.3.14 新增：company_info 此前只有 akshare 东财单源。
-    仅覆盖 individual_info 语义；其它 endpoint 直接报错，交由路由汇总失败原因。
-    """
-    if endpoint != "individual_info":
-        raise ValueError(
-            f"cninfo 备源不支持 company_info endpoint={endpoint!r}（仅 individual_info）"
-        )
-    sym = _code6(code or symbol)
-    if not sym:
-        raise RuntimeError("stock code is required")
-    return _ak().stock_profile_cninfo(symbol=sym)
 
 
-_SINA_STMT_MAP = {
-    "profit": "利润表",
-    "balance": "资产负债表",
-    "cashflow": "现金流量表",
-}
 
 
-def fetch_financial_stmt_sina(
-    endpoint: str = "profit",
-    symbol: str = "",
-    code: str = "",
-    **kwargs,
-) -> pd.DataFrame:
-    """财务报表备源（新浪财经 stock_financial_report_sina，非东财）。
-
-    v3.3.14 新增：financial_stmt 此前只有 akshare 东财单源。
-    覆盖 profit / balance / cashflow 三个主 endpoint。
-    """
-    if endpoint not in _SINA_STMT_MAP:
-        raise ValueError(
-            f"sina 备源不支持 financial_stmt endpoint={endpoint!r}"
-            f"（支持: {list(_SINA_STMT_MAP)}）"
-        )
-    sym = _prefixed_code(code or symbol)
-    if not sym:
-        raise RuntimeError("stock code is required")
-    return _ak().stock_financial_report_sina(stock=sym, symbol=_SINA_STMT_MAP[endpoint])
 
 
-def fetch_industry_data_ths(endpoint: str = "board_industry_name_em", **kwargs):
-    """行业 / 概念板块备源（同花顺，非东财）。
-
-    v3.3.14 新增：industry_data 此前只有 akshare 东财单源。
-    接受主源的 endpoint 名并映射到对应的同花顺接口。
-    """
-    ak = _ak()
-    if endpoint in ("board_industry_name_em", "board_industry_name_ths"):
-        return ak.stock_board_industry_name_ths()
-    if endpoint in ("board_concept_name_em", "board_concept_name_ths"):
-        return ak.stock_board_concept_name_ths()
-    raise ValueError(
-        f"ths 备源不支持 industry_data endpoint={endpoint!r}"
-        "（支持: board_industry_name_em/ths, board_concept_name_em/ths）"
-    )
 
 
 # ============================================================
@@ -1597,140 +1314,14 @@ def fetch_industry_data_ths(endpoint: str = "board_industry_name_em", **kwargs):
 #   东财 push2 族在本机会间歇性被 RST，故首选同花顺 / 百度 / 巨潮等独立上游。
 
 
-def fetch_industry_comparison_ths(
-    endpoint: str = "即时", code: str = "", symbol: str = "",
-    trade_date: str = "", top_n: int = 20, **kwargs,
-) -> dict:
-    """行业横向对比备源（同花顺行业资金流，非东财）。
-
-    v3.3.15 新增：industry_comparison 原先主备两源（em_push2 / akshare
-    stock_sector_fund_flow_rank）**都打东财 push2 族**，主源被限流时备源一同失败，
-    整类型失效。本源改走同花顺 10jqka，与主源完全解耦。
-
-    返回与 em_push2 / akshare 源完全相同的 dict 结构，工具层无需改动。
-    """
-    ak = _ak()
-    if not trade_date:
-        trade_date = datetime.now().strftime("%Y-%m-%d")
-
-    # 同花顺行业资金流：即时 / 3日排行 / 5日排行 / 10日排行 / 20日排行
-    indicator = endpoint if endpoint in (
-        "即时", "3日排行", "5日排行", "10日排行", "20日排行"
-    ) else "即时"
-
-    df = ak.stock_fund_flow_industry(symbol=indicator)
-    if df is None or df.empty:
-        raise RuntimeError("同花顺行业资金流数据为空")
-
-    chg_col = next(
-        (c for c in ("行业-涨跌幅", "阶段涨跌幅", "涨跌幅") if c in df.columns), None
-    )
-
-    result: dict = {
-        "source": f"THS stock_fund_flow_industry({indicator})",
-        "date": trade_date,
-        "code": code or symbol or None,
-        "industries": [],
-    }
-    for i, (_, row) in enumerate(df.iterrows()):
-        if i >= top_n:
-            break
-        try:
-            chg = float(row.get(chg_col, 0) or 0) if chg_col else 0.0
-        except (TypeError, ValueError):
-            chg = 0.0
-        result["industries"].append({
-            "rank": i + 1,
-            "name": str(row.get("行业", "") or ""),
-            "change_pct": chg,
-            "up_count": 0,
-            "down_count": 0,
-            "leader": str(row.get("领涨股", "") or ""),
-        })
-    if not result["industries"]:
-        raise RuntimeError("同花顺行业资金流解析后为空")
-    return result
 
 
-def fetch_hot_rank_ths(
-    endpoint: str = "rank", symbol: str = "", period: str = "", **kwargs,
-) -> pd.DataFrame:
-    """热度榜备源（同花顺人气榜，非东财）。
-
-    v3.3.15 新增，同时服务 hot_rank / hot_search / xueqiu_hot 三个类型的降级兜底。
-    这三类主源分别是东财人气榜(push2，本机会间歇性 RST)、百度股市通、雪球热度，
-    都属"个股热度排行"语义，同花顺人气榜可作为结构相近的降级备源。
-
-    返回列：排名 / 代码 / 名称 / 人气值 / 涨幅% / 排名变化 / 概念标签 / 热度标签
-
-    个股维度的 endpoint（detail/realtime/keyword/latest/relate）无法用全市场榜
-    替代，遇到时直接抛错 —— 宁可如实记为失败，也不返回语义不符的数据。
-    """
-    from . import ths_fetchers as _ths   # 局部导入，避免模块级循环依赖
-
-    if endpoint in ("detail", "realtime", "keyword", "latest", "relate"):
-        raise ValueError(
-            f"ths 备源不支持个股维度 endpoint={endpoint!r}（同花顺热榜仅提供全市场榜）"
-        )
-    p = period or ("day" if endpoint in ("up", "3日排行") else "hour")
-    df = _ths.fetch_ths_hot_list(period=p)
-    if df is None or df.empty:
-        raise RuntimeError("同花顺热榜返回空")
-    return df
 
 
-def fetch_baidu_economic_calendar_bak(date: str = "", **kwargs) -> pd.DataFrame:
-    """财报披露日历备源（百度股市通，非东财）。
-
-    v3.3.15 新增，服务 baidu_economic_calendar 的兜底。
-    主源是百度理财日历（宏观事件），本备源给的是 A股财报披露时间表，
-    语义偏"财报日历"一侧，属**降级备源**（字段不同，工具层泛化输出）。
-    """
-    ak = _ak()
-    # 注意：ak.news_report_time_baidu 的 date 默认值是**写死的过期日期**，
-    # 不传就用 2025 年的旧值。这里显式补当天，避免备源返回陈旧数据。
-    d = date or datetime.now().strftime("%Y%m%d")
-    df = ak.news_report_time_baidu(date=d)
-    if df is None or df.empty:
-        raise RuntimeError(f"百度财报披露时间表返回空（date={d}）")
-    return df
 
 
-def fetch_market_sentiment_legu(**kwargs) -> pd.DataFrame:
-    """A股市场情绪备源（乐咕乐股「赚钱效应分析」，非东财、非 chinascope）。
-
-    v3.3.15 新增，服务 index_news_sentiment 的兜底。
-
-    背景（实测结论）：主源 akshare index_news_sentiment_scope 的上游
-    www.chinascope.com 已**不再提供 JSON 接口**，现在返回 HTML 页面
-    （content-type: text/html，正文是 <!DOCTYPE html>），任何客户端都拿不到数据 ——
-    属上游永久失效，非本机网络/证书问题。
-
-    本备源给出标准 A股市场情绪口径（上涨/下跌/涨停/跌停家数、真实涨跌幅、
-    活跃度等），来自 legulegu.com，与主源完全独立。
-    """
-    ak = _ak()
-    df = ak.stock_market_activity_legu()
-    if df is None or df.empty:
-        raise RuntimeError("乐咕乐股市场活跃度返回空")
-    return df
 
 
-def fetch_baidu_trade_notify_tfp(
-    endpoint: str = "suspend", symbol: str = "", date: str = "", **kwargs,
-) -> pd.DataFrame:
-    """交易提示/停复牌备源（akshare stock_tfp_em 全市场停复牌表，非百度）。
-
-    v3.3.15 新增，服务 baidu_trade_notify 的兜底。
-    主源是百度交易提示（停复牌口径）。本备源给出全市场停复牌明细
-    （序号/代码/名称/停牌时间/停牌截止时间/停牌期限/停牌原因），语义精确对应，
-    且**不需要股票代码**，与工具层"市场级调用"的方式一致。
-    """
-    ak = _ak()
-    df = ak.stock_tfp_em()
-    if df is None or df.empty:
-        raise RuntimeError("全市场停复牌表返回空")
-    return df
 
 
 # ============================================================
@@ -1762,293 +1353,22 @@ def fetch_baidu_trade_notify_tfp(
 # ============================================================
 
 
-def _ak_date_range_kwargs(
-    start_date: str | None, end_date: str | None, default_days: int = 5,
-) -> tuple[str, str]:
-    """统一处理 start_date/end_date 参数：兼容 YYYY-MM-DD / YYYYMMDD / None。
-
-    返回 (start, end) 都是 YYYYMMDD 格式（akshare 接受的格式）。
-    任一缺失时按 default_days 天回溯填充。
-    """
-    def _norm(d: str | None) -> str | None:
-        if not d:
-            return None
-        s = str(d).strip().replace("-", "")
-        return s if len(s) == 8 else None
-
-    s = _norm(start_date)
-    e = _norm(end_date)
-    if not e:
-        e = datetime.now().strftime("%Y%m%d")
-    if not s:
-        s = (datetime.now() - timedelta(days=default_days)).strftime("%Y%m%d")
-    return s, e
 
 
-def fetch_dt_detail_em(
-    *, start_date: str | None = None, end_date: str | None = None, **kwargs,
-) -> list[dict]:
-    """龙虎榜上榜个股详情 —— akshare stock_lhb_detail_em 包装。
-
-    字段对齐主源 em_datacenter.fetch_dragon_tiger_detail：
-      code/name/date/close/change_pct/net_buy/buy_amt/sell_amt/deal_amt/
-      net_buy_ratio/deal_amount_ratio/turnover_rate/float_market_value/
-      reason/after_1d/after_2d/after_5d/after_10d
-    """
-    ak = _ak()
-    s, e = _ak_date_range_kwargs(start_date, end_date, default_days=5)
-    df = ak.stock_lhb_detail_em(start_date=s, end_date=e)
-    if df is None or df.empty:
-        raise RuntimeError(f"AKShare stock_lhb_detail_em 返回空（{s}~{e}）")
-    result: list[dict] = []
-    for _, row in df.iterrows():
-        result.append({
-            "code": str(row.get("代码", "")),
-            "name": str(row.get("名称", "")),
-            "date": str(row.get("上榜日", "")),
-            "close": float(row.get("收盘价", 0) or 0),
-            "change_pct": float(row.get("涨跌幅", 0) or 0),
-            "net_buy": float(row.get("龙虎榜净买额", 0) or 0),
-            "buy_amt": float(row.get("龙虎榜买入额", 0) or 0),
-            "sell_amt": float(row.get("龙虎榜卖出额", 0) or 0),
-            "deal_amt": float(row.get("龙虎榜成交额", 0) or 0),
-            "total_amount": float(row.get("市场总成交额", 0) or 0),
-            "net_buy_ratio": float(row.get("净买额占总成交比", 0) or 0),
-            "deal_amount_ratio": float(row.get("成交额占总成交比", 0) or 0),
-            "turnover_rate": float(row.get("换手率", 0) or 0),
-            "float_market_value": float(row.get("流通市值", 0) or 0),
-            "reason": str(row.get("上榜原因", "")),
-            "after_1d": float(row.get("上榜后1日", 0) or 0) if pd.notna(row.get("上榜后1日")) else 0.0,
-            "after_2d": float(row.get("上榜后2日", 0) or 0) if pd.notna(row.get("上榜后2日")) else 0.0,
-            "after_5d": float(row.get("上榜后5日", 0) or 0) if pd.notna(row.get("上榜后5日")) else 0.0,
-            "after_10d": float(row.get("上榜后10日", 0) or 0) if pd.notna(row.get("上榜后10日")) else 0.0,
-            "source": "AKShare_stock_lhb_detail_em",
-        })
-    return result
 
 
-def fetch_dt_institution_em(
-    *, start_date: str | None = None, end_date: str | None = None, **kwargs,
-) -> list[dict]:
-    """龙虎榜机构买卖统计 —— akshare stock_lhb_jgmmtj_em 包装。
-
-    字段对齐主源 em_datacenter.fetch_dragon_tiger_institution。
-    """
-    ak = _ak()
-    s, e = _ak_date_range_kwargs(start_date, end_date, default_days=30)
-    df = ak.stock_lhb_jgmmtj_em(start_date=s, end_date=e)
-    if df is None or df.empty:
-        raise RuntimeError(f"AKShare stock_lhb_jgmmtj_em 返回空（{s}~{e}）")
-    result: list[dict] = []
-    for _, row in df.iterrows():
-        result.append({
-            "code": str(row.get("代码", "")),
-            "name": str(row.get("名称", "")),
-            "date": str(row.get("上榜日期", "")),
-            "close": float(row.get("收盘价", 0) or 0),
-            "change_pct": float(row.get("涨跌幅", 0) or 0),
-            "buy_org_count": int(row.get("买方机构数", 0) or 0),
-            "sell_org_count": int(row.get("卖方机构数", 0) or 0),
-            "org_buy_amt": float(row.get("机构买入总额", 0) or 0),
-            "org_sell_amt": float(row.get("机构卖出总额", 0) or 0),
-            "org_net_amt": float(row.get("机构买入净额", 0) or 0),
-            "source": "AKShare_stock_lhb_jgmmtj_em",
-        })
-    return result
 
 
-def fetch_dt_stock_stats_em(*, period: str = "1month", **kwargs) -> list[dict]:
-    """龙虎榜个股上榜统计（机构席位追踪） —— akshare stock_lhb_jgstatistic_em 包装。
-
-    与主源 dt_stock_stats 字段一致（个股视角，按周期聚合）。
-    akshare symbol 参数：'近一月'/'近三月'/'近六月'/'近一年'。
-    """
-    ak = _ak()
-    period_map = {
-        "1month": "近一月", "3month": "近三月",
-        "6month": "近六月", "1year": "近一年",
-    }
-    sym = period_map.get(period)
-    if not sym:
-        raise ValueError(f"period 必须是 {list(period_map.keys())} 之一，实际 {period}")
-    df = ak.stock_lhb_jgstatistic_em(symbol=sym)
-    if df is None or df.empty:
-        raise RuntimeError(f"AKShare stock_lhb_jgstatistic_em 返回空（{sym}）")
-    result: list[dict] = []
-    for _, row in df.iterrows():
-        result.append({
-            "code": str(row.get("代码", "")),
-            "name": str(row.get("名称", "")),
-            "close": float(row.get("收盘价", 0) or 0),
-            "change_pct": float(row.get("涨跌幅", 0) or 0),
-            "appearances": int(row.get("上榜次数", 0) or 0),
-            "total_buy": float(row.get("机构买入额", 0) or 0),
-            "total_sell": float(row.get("机构卖出额", 0) or 0),
-            "total_net": float(row.get("机构净买额", 0) or 0),
-            "buy_org_count": int(row.get("机构买入次数", 0) or 0),
-            "sell_org_count": int(row.get("机构卖出次数", 0) or 0),
-            "deal_amt": float(row.get("龙虎榜成交金额", 0) or 0),
-            "source": "AKShare_stock_lhb_jgstatistic_em",
-        })
-    return result
 
 
-def fetch_dt_branch_rank_em(*, period: str = "1month", **kwargs) -> list[dict]:
-    """龙虎榜营业部排行 —— akshare stock_lhb_yybph_em 包装。
-
-    主源 em_datacenter 没有对应 report（之前手写删除），akshare 是这个维度的
-    **唯一可用源**，注册为 priority=1 主源（而非备源）。
-    """
-    ak = _ak()
-    period_map = {
-        "1month": "近一月", "3month": "近三月",
-        "6month": "近六月", "1year": "近一年",
-    }
-    sym = period_map.get(period)
-    if not sym:
-        raise ValueError(f"period 必须是 {list(period_map.keys())} 之一，实际 {period}")
-    df = ak.stock_lhb_yybph_em(symbol=sym)
-    if df is None or df.empty:
-        raise RuntimeError(f"AKShare stock_lhb_yybph_em 返回空（{sym}）")
-    result: list[dict] = []
-    for _, row in df.iterrows():
-        result.append({
-            "branch_name": str(row.get("营业部名称", "")),
-            "buy_count_1d": int(row.get("上榜后1天-买入次数", 0) or 0),
-            "avg_change_1d": float(row.get("上榜后1天-平均涨幅", 0) or 0),
-            "win_rate_1d": float(row.get("上榜后1天-上涨概率", 0) or 0),
-            "buy_count_2d": int(row.get("上榜后2天-买入次数", 0) or 0),
-            "avg_change_2d": float(row.get("上榜后2天-平均涨幅", 0) or 0),
-            "win_rate_2d": float(row.get("上榜后2天-上涨概率", 0) or 0),
-            "buy_count_3d": int(row.get("上榜后3天-买入次数", 0) or 0),
-            "avg_change_3d": float(row.get("上榜后3天-平均涨幅", 0) or 0),
-            "win_rate_3d": float(row.get("上榜后3天-上涨概率", 0) or 0),
-            "buy_count_5d": int(row.get("上榜后5天-买入次数", 0) or 0),
-            "avg_change_5d": float(row.get("上榜后5天-平均涨幅", 0) or 0),
-            "win_rate_5d": float(row.get("上榜后5天-上涨概率", 0) or 0),
-            "buy_count_10d": int(row.get("上榜后10天-买入次数", 0) or 0),
-            "avg_change_10d": float(row.get("上榜后10天-平均涨幅", 0) or 0),
-            "win_rate_10d": float(row.get("上榜后10天-上涨概率", 0) or 0),
-            "source": "AKShare_stock_lhb_yybph_em",
-        })
-    return result
 
 
-def fetch_margin_account_info_em(**kwargs) -> list[dict]:
-    """两融账户统计 —— akshare stock_margin_account_info 包装。
-
-    字段对齐主源 em_datacenter.fetch_margin_account_info。
-    akshare 无日期过滤参数（一次拉全市场全历史，按日期倒序），按需返回近 N 日。
-    """
-    ak = _ak()
-    df = ak.stock_margin_account_info()
-    if df is None or df.empty:
-        raise RuntimeError("AKShare stock_margin_account_info 返回空")
-    # 按日期倒序排列后取最近 500 日（主源 page_size=500 对齐）
-    df = df.sort_values(by="日期", ascending=False).head(500)
-    result: list[dict] = []
-    for _, row in df.iterrows():
-        result.append({
-            "date": str(row.get("日期", "")),
-            "fin_balance": float(row.get("融资余额", 0) or 0) if pd.notna(row.get("融资余额")) else 0.0,
-            "loan_balance": float(row.get("融券余额", 0) or 0) if pd.notna(row.get("融券余额")) else 0.0,
-            "fin_buy_amt": float(row.get("融资买入额", 0) or 0) if pd.notna(row.get("融资买入额")) else 0.0,
-            "loan_sell_amt": float(row.get("融券卖出额", 0) or 0) if pd.notna(row.get("融券卖出额")) else 0.0,
-            "investor_count": int(row.get("参与交易的投资者数量", 0) or 0) if pd.notna(row.get("参与交易的投资者数量")) else 0,
-            "liability_investor_count": int(row.get("有融资融券负债的投资者数量", 0) or 0) if pd.notna(row.get("有融资融券负债的投资者数量")) else 0,
-            "broker_count": int(row.get("证券公司数量", 0) or 0) if pd.notna(row.get("证券公司数量")) else 0,
-            "branch_count": int(row.get("营业部数量", 0) or 0) if pd.notna(row.get("营业部数量")) else 0,
-            "total_guarantee": float(row.get("担保物总价值", 0) or 0) if pd.notna(row.get("担保物总价值")) else 0.0,
-            "avg_guarantee_ratio": float(row.get("平均维持担保比例", 0) or 0) if pd.notna(row.get("平均维持担保比例")) else 0.0,
-            "source": "AKShare_stock_margin_account_info",
-        })
-    return result
 
 
-def fetch_block_trade_market_stat_em(**kwargs) -> list[dict]:
-    """大宗交易市场统计 —— akshare stock_dzjy_sctj 包装。
-
-    字段对齐主源 em_datacenter.fetch_block_trade_market_stat。
-    akshare 无参数（一次拉全历史，按日期倒序），取最近 500 日对齐主源。
-    """
-    ak = _ak()
-    df = ak.stock_dzjy_sctj()
-    if df is None or df.empty:
-        raise RuntimeError("AKShare stock_dzjy_sctj 返回空")
-    df = df.sort_values(by="交易日期", ascending=False).head(500)
-    result: list[dict] = []
-    for _, row in df.iterrows():
-        result.append({
-            "date": str(row.get("交易日期", "")),
-            "sz_index": float(row.get("上证指数", 0) or 0),
-            "sz_change_pct": float(row.get("上证指数涨跌幅", 0) or 0),
-            "total_amount": float(row.get("大宗交易成交总额", 0) or 0),
-            "premium_amount": float(row.get("溢价成交总额", 0) or 0),
-            "premium_ratio": float(row.get("溢价成交总额占比", 0) or 0),
-            "discount_amount": float(row.get("折价成交总额", 0) or 0),
-            "discount_ratio": float(row.get("折价成交总额占比", 0) or 0),
-            "source": "AKShare_stock_dzjy_sctj",
-        })
-    return result
 
 
-def fetch_block_trade_detail_em(
-    *, start_date: str | None = None, end_date: str | None = None, **kwargs,
-) -> list[dict]:
-    """大宗交易明细 —— akshare stock_dzjy_mrmx 包装。
-
-    字段对齐主源 em_datacenter.fetch_block_trade_detail。
-    """
-    ak = _ak()
-    s, e = _ak_date_range_kwargs(start_date, end_date, default_days=5)
-    df = ak.stock_dzjy_mrmx(start_date=s, end_date=e)
-    if df is None or df.empty:
-        raise RuntimeError(f"AKShare stock_dzjy_mrmx 返回空（{s}~{e}）")
-    result: list[dict] = []
-    for _, row in df.iterrows():
-        result.append({
-            "code": str(row.get("证券代码", "")),
-            "name": str(row.get("证券简称", "")),
-            "date": str(row.get("交易日期", "")),
-            "deal_price": float(row.get("成交价", 0) or 0),
-            "deal_volume": float(row.get("成交量", 0) or 0),
-            "deal_amount": float(row.get("成交额", 0) or 0),
-            "buy_branch": str(row.get("买方营业部", "")),
-            "sell_branch": str(row.get("卖方营业部", "")),
-            "source": "AKShare_stock_dzjy_mrmx",
-        })
-    return result
 
 
-def fetch_block_trade_daily_stat_em(
-    *, start_date: str | None = None, end_date: str | None = None, **kwargs,
-) -> list[dict]:
-    """大宗交易每日统计 —— akshare stock_dzjy_mrtj 包装。
-
-    字段对齐主源 em_datacenter.fetch_block_trade_daily_stat。
-    """
-    ak = _ak()
-    s, e = _ak_date_range_kwargs(start_date, end_date, default_days=5)
-    df = ak.stock_dzjy_mrtj(start_date=s, end_date=e)
-    if df is None or df.empty:
-        raise RuntimeError(f"AKShare stock_dzjy_mrtj 返回空（{s}~{e}）")
-    result: list[dict] = []
-    for _, row in df.iterrows():
-        result.append({
-            "code": str(row.get("证券代码", "")),
-            "name": str(row.get("证券简称", "")),
-            "date": str(row.get("交易日期", "")),
-            "close": float(row.get("收盘价", 0) or 0),
-            "change_pct": float(row.get("涨跌幅", 0) or 0),
-            "deal_price": float(row.get("成交价", 0) or 0),
-            "premium_rate": float(row.get("折溢率", 0) or 0),
-            "deal_count": int(row.get("成交笔数", 0) or 0),
-            "deal_total_volume": float(row.get("成交总量", 0) or 0),
-            "deal_total_amount": float(row.get("成交总额", 0) or 0),
-            "deal_amount_ratio": float(row.get("成交总额/流通市值", 0) or 0),
-            "source": "AKShare_stock_dzjy_mrtj",
-        })
-    return result
 
 
 # ============================================================
@@ -2057,34 +1377,6 @@ def fetch_block_trade_daily_stat_em(
 # akshare 包装东财涨停板池接口，由 akshare 维护字段映射，独立于 push2 域名族。
 # 实测返回字段包含「连板数」（原 SPEC 假设无该字段，实测纠正）。
 # ============================================================
-def fetch_limit_up_board_em(*, date: str = "", **kwargs) -> list[dict]:
-    """涨停板池 —— akshare stock_zt_pool_em 包装。
-
-    Args:
-        date: 交易日日期 YYYYMMDD 格式（必填，akshare 该接口必须传日期）
-
-    Returns:
-        list[dict] with keys:
-            code/nickname/change_pct/latest_price/deal_amount/float_mv/
-            total_mv/turnover_rate/sealed_capital/first_seal_time/last_seal_time/
-            break_count/limit_up_stats/consecutive_days/industry
-
-    字段映射说明（对齐 SPEC §S1）：
-        - 连板数：实测 akshare 直接提供，无需历史推断（原 SPEC 假设已纠正）
-        - 涨停统计：格式 "今涨停数/历史涨停数"，可用作题材热度参考
-        - 所属行业：东财二级行业分类
-
-    Raises:
-        ValueError: date 格式错误
-        RuntimeError: akshare 返回空（非交易日 / 数据未更新）
-    """
-    s = _normalize_board_date(date) if date else _latest_board_date()
-
-    ak = _ak()
-    df = ak.stock_zt_pool_em(date=s)
-    if df is None or df.empty:
-        raise RuntimeError(f"AKShare stock_zt_pool_em 返回空（date={s}，可能非交易日或数据未更新）")
-    return _map_pool_rows(df, "zt")
 
 
 # ============================================================
@@ -2098,13 +1390,6 @@ def fetch_limit_up_board_em(*, date: str = "", **kwargs) -> list[dict]:
 # ============================================================
 
 # 四池原始列名不完全一致，按语义归一到统一字段
-_POOL_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
-    "sealed_capital": ("封板资金", "封单资金", "封单额"),
-    "first_seal_time": ("首次封板时间", "昨日封板时间"),
-    "last_seal_time": ("最后封板时间",),
-    "break_count": ("炸板次数", "开板次数"),
-    "consecutive_days": ("连板数", "昨日连板数", "连续跌停"),
-}
 
 _POOL_AK_FUNCS: dict[str, str] = {
     "zt": "stock_zt_pool_em",
@@ -2113,282 +1398,26 @@ _POOL_AK_FUNCS: dict[str, str] = {
     "prev_zt": "stock_zt_pool_previous_em",
 }
 
-_BOARD_TYPE_ALIASES = {
-    "zt": "zt", "涨停": "zt", "limit_up": "zt",
-    "zb": "zb", "炸板": "zb", "break": "zb",
-    "dt": "dt", "跌停": "dt", "limit_down": "dt",
-    "prev_zt": "prev_zt", "prev": "prev_zt", "昨日涨停": "prev_zt",
-}
 
 
-def _normalize_board_date(date: str) -> str:
-    """校验并归一日期为 YYYYMMDD（允许 YYYY-MM-DD）。"""
-    s = str(date or "").strip().replace("-", "")
-    if len(s) != 8 or not s.isdigit():
-        raise ValueError(f"date 参数格式错误：{date!r}（应为 YYYYMMDD 8 位数字）")
-    return s
 
 
-def _latest_board_date(max_back_days: int = 15) -> str:
-    """从今天往回找最近一个「涨停池有数据」的交易日。
-
-    非交易日（周末/长假）直接传当天会拿到空表，调用方还得自己猜哪天是交易日。
-    这里代劳：最多回溯 max_back_days 个自然日（覆盖春节/国庆长假）。
-    """
-    date_str, _rows = _latest_board_date_with_rows(max_back_days)
-    return date_str
 
 
-def _trade_dates_recent() -> list[str]:
-    """全量交易日清单（YYYYMMDD 升序；TTL 到当日午夜的统一缓存条目）。
-
-    批次C4 并入统一序列化边界（get_or_set）：缓存键含获取日期 → 跨天（含
-    跨年）即自然换键重拉（保证清单始终覆盖「今天」所在年份，替代批次A的
-    (获取日戳, days) 手工日戳结构）；TTL 设到当日午夜，进程内最多一日一拉。
-    """
-    today = datetime.now().strftime("%Y%m%d")
-
-    def _fetch() -> list[str]:
-        ak = _ak()
-        df = ak.tool_trade_date_hist_sina()
-        if df is None or df.empty or "trade_date" not in df.columns:
-            raise RuntimeError("sina 交易日清单返回空或结构变化")
-        days = pd.to_datetime(df["trade_date"], errors="coerce").dropna()
-        return sorted(days.dt.strftime("%Y%m%d").tolist())
-
-    midnight = datetime.strptime(today, "%Y%m%d") + timedelta(days=1)
-    ttl = max(60, int((midnight - datetime.now()).total_seconds()))
-    return cache.get_or_set(f"trade_dates_recent:{today}", _fetch, ttl=ttl)
 
 
-def _latest_board_date_with_rows(
-    max_back_days: int = 15,
-) -> tuple[str, list[dict]]:
-    """同 _latest_board_date，但顺带返回涨停池已取到的行，省一次重复请求。
-
-    2026-11-08 修复：回溯改为只试交易日——东财对非交易日 date 不再返回
-    空表而是返回最近交易日数据（实测周日 20261108 返回 11-06 池但标签
-    写 20261108），旧逻辑 back=0 命中自然日造成日期语义污染，连累
-    collect_snapshot 的 prev_zt 封板时间注入对错位。
-    """
-    today = datetime.now().strftime("%Y%m%d")
-    trade_days = [d for d in _trade_dates_recent() if d <= today]
-    ak = _ak()  # 日历缓存命中时无需拉 akshare 模块
-    for candidate in trade_days[-max_back_days:][::-1]:
-        try:
-            df = ak.stock_zt_pool_em(date=candidate)
-        except Exception:  # noqa: BLE001 - 单日探测失败继续回溯
-            continue
-        if df is not None and not df.empty:
-            return candidate, _map_pool_rows(df, "zt")
-    raise RuntimeError(
-        f"近 {max_back_days} 个交易日内未取到涨停池数据，无法推断最近交易日；"
-        "请显式传 date（YYYYMMDD）"
-    )
 
 
-def _pick_field(row, columns, aliases: tuple[str, ...], default=0):
-    """按别名顺序从行里取第一个存在的字段。"""
-    for name in aliases:
-        if name in columns:
-            value = row.get(name)
-            if value is not None and not (isinstance(value, float) and pd.isna(value)):
-                return value
-    return default
 
 
-def _map_pool_rows(df: pd.DataFrame, board_type: str) -> list[dict]:
-    """把某个池的原始表映射为统一字段结构。"""
-    if df is None or df.empty:
-        return []
-    columns = set(df.columns)
-    source = f"AKShare_{_POOL_AK_FUNCS.get(board_type, 'stock_zt_pool_em')}"
-    rows: list[dict] = []
-    for _, row in df.iterrows():
-        rows.append({
-            "code": str(row.get("代码", "")).zfill(6),
-            "name": str(row.get("名称", "")),
-            "change_pct": float(row.get("涨跌幅", 0) or 0),
-            "latest_price": float(row.get("最新价", 0) or 0),
-            "deal_amount": float(row.get("成交额", 0) or 0),
-            "float_mv": float(row.get("流通市值", 0) or 0),
-            "total_mv": float(row.get("总市值", 0) or 0),
-            "turnover_rate": float(row.get("换手率", 0) or 0),
-            "sealed_capital": float(
-                _pick_field(row, columns, _POOL_FIELD_ALIASES["sealed_capital"], 0) or 0
-            ),
-            "first_seal_time": str(
-                _pick_field(row, columns, _POOL_FIELD_ALIASES["first_seal_time"], "")
-            ),
-            "last_seal_time": str(
-                _pick_field(row, columns, _POOL_FIELD_ALIASES["last_seal_time"], "")
-            ),
-            "break_count": int(
-                _pick_field(row, columns, _POOL_FIELD_ALIASES["break_count"], 0) or 0
-            ),
-            "limit_up_stats": str(row.get("涨停统计", "")),
-            "consecutive_days": int(
-                _pick_field(row, columns, _POOL_FIELD_ALIASES["consecutive_days"], 0) or 0
-            ),
-            "industry": str(row.get("所属行业", "")),
-            "source": source,
-        })
-    return rows
 
 
-def _fetch_pool_rows(board_type: str, date: str) -> list[dict]:
-    """取单个池（日期已归一）。空表返回空列表，不抛。"""
-    rows, _fields = _fetch_pool_with_fields(board_type, date)
-    return rows
 
 
-def _fetch_pool_with_fields(board_type: str, date: str) -> tuple[list[dict], list[str]]:
-    """取单个池，并带回上游原始列名（工单 H2/H7 的字段清单 / 漂移检测原料）。"""
-    func_name = _POOL_AK_FUNCS.get(board_type)
-    if func_name is None:
-        raise ValueError(
-            f"未知 board_type：{board_type!r}（可选 zt/zb/dt/prev_zt/sentiment）"
-        )
-    ak = _ak()
-    df = getattr(ak, func_name)(date=date)
-    fields = list(df.columns) if df is not None and not df.empty else []
-    return _map_pool_rows(df, board_type), fields
 
 
-def fetch_limit_up_board(
-    *,
-    board_type: str = "zt",
-    date: str = "",
-    **kwargs,
-) -> dict:
-    """涨停四池（统一信封）—— limit_up_board 路由入口。
-
-    board_type: zt(涨停) / zb(炸板) / dt(跌停) / prev_zt(昨日涨停) / sentiment(打板情绪)
-
-    Returns:
-        {"board_type","date","count","data":[...]}；sentiment 见 fetch_board_sentiment
-    """
-    bt = _BOARD_TYPE_ALIASES.get(str(board_type or "zt").strip().lower())
-    if str(board_type or "").strip().lower() == "sentiment":
-        return fetch_board_sentiment(date=date)
-
-    if bt is None:
-        raise ValueError(
-            f"未知 board_type：{board_type!r}（可选 zt/zb/dt/prev_zt/sentiment）"
-        )
-
-    s = _normalize_board_date(date) if date else _latest_board_date()
-    rows, fields = _fetch_pool_with_fields(bt, s)
-    if not rows:
-        raise RuntimeError(f"{bt} 池返回空（date={s}，可能非交易日或数据未更新）")
-    return {
-        "board_type": bt,
-        "date": s,
-        "count": len(rows),
-        "data": rows,
-        # 上游原始列名：structure 端点展示 + H7 字段漂移检测都用这一份
-        "fields": fields,
-    }
 
 
-def fetch_board_sentiment(*, date: str = "", **kwargs) -> dict:
-    """打板情绪速算（由涨停四池现算，不依赖已失效的 push2 clist）。
-
-    指标口径（写在代码里，避免以后又变成口头传说）：
-      - 炸板率 = 炸板数 / (涨停数 + 炸板数)，反映封板强度
-      - 连板梯队 = 涨停池中连板数 ≥2 的分档计数
-      - 晋级率 = 今日涨停 ∩ 昨日涨停池 / 昨日涨停池数量
-      - 平均溢价 = 昨日涨停股「今日」涨跌幅均值（打板次日收益的近似）
-      - 热门题材 = 涨停池按所属行业计数 Top5
-
-    涨停池取不到直接抛错（核心口径不可缺）；其余三池缺失时降级为空并标注
-    missing，绝不拿 0 冒充有效值。
-    """
-    s = _normalize_board_date(date) if date else ""
-
-    from collections import Counter
-    from concurrent.futures import ThreadPoolExecutor
-
-    if s:
-        zt_rows = _fetch_pool_rows("zt", s)
-    else:
-        s, zt_rows = _latest_board_date_with_rows()
-
-    if not zt_rows:
-        raise RuntimeError(f"涨停池为空（date={s}），无法计算打板情绪")
-
-    missing: list[str] = []
-    aux: dict[str, list[dict]] = {}
-    # 三个辅助池并发取：串行 4 池会把路由的单次尝试超时（12s）顶穿
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        futures = {key: pool.submit(_fetch_pool_rows, key, s) for key in ("zb", "dt", "prev_zt")}
-        for key, future in futures.items():
-            try:
-                aux[key] = future.result(timeout=10)
-            except Exception as exc:  # noqa: BLE001 - 辅助池失败只降级不拦截
-                logger.warning("board_sentiment: %s 池获取失败(%s): %s", key, s, exc)
-                aux[key] = []
-                missing.append(key)
-
-    zb_rows, dt_rows, prev_rows = aux["zb"], aux["dt"], aux["prev_zt"]
-
-    # 辅助池缺失时计数必须是 None —— 用 0 会算出「炸板率 0%」这种伪造的强封板信号
-    limit_up_count = len(zt_rows)
-    broken_count = None if "zb" in missing else len(zb_rows)
-    limit_down_count = None if "dt" in missing else len(dt_rows)
-    seal_base = (
-        limit_up_count + broken_count if broken_count is not None else None
-    )
-    broken_rate = (
-        round(broken_count / seal_base * 100, 2) if seal_base else None
-    )
-
-    ladder_counter = Counter(
-        row["consecutive_days"] for row in zt_rows if row["consecutive_days"] >= 2
-    )
-    ladder = {
-        f"{days}连板": ladder_counter[days]
-        for days in sorted(ladder_counter, reverse=True)
-    }
-    max_consecutive = max((row["consecutive_days"] for row in zt_rows), default=0)
-
-    prev_codes = {row["code"] for row in prev_rows}
-    today_codes = {row["code"] for row in zt_rows}
-    promoted = None if "prev_zt" in missing else len(prev_codes & today_codes)
-    promotion_rate = (
-        round(promoted / len(prev_codes) * 100, 2)
-        if promoted is not None and prev_codes
-        else None
-    )
-
-    premium_values = [row["change_pct"] for row in prev_rows]
-    avg_premium = (
-        round(sum(premium_values) / len(premium_values), 2) if premium_values else None
-    )
-
-    hot_industries = [
-        {"题材": name, "涨停数": count}
-        for name, count in Counter(
-            row["industry"] for row in zt_rows if row["industry"]
-        ).most_common(5)
-    ]
-
-    return {
-        "date": s,
-        "涨停数": limit_up_count,
-        "炸板数": broken_count,
-        "跌停数": limit_down_count,
-        "炸板率(%)": broken_rate,
-        "最高连板": max_consecutive,
-        "连板梯队": ladder,
-        "昨日涨停数": len(prev_rows),
-        "晋级数": promoted,
-        "晋级率(%)": promotion_rate,
-        "平均溢价(%)": avg_premium,
-        "热门题材": hot_industries,
-        "missing_pools": missing,
-        "source": "akshare_em(zt/zb/dt/prev_zt)",
-    }
 
 
 # ============================================================
@@ -2469,65 +1498,6 @@ def fetch_trading_calendar(year: int = 0, month: int = 0, **kwargs) -> pd.DataFr
 # 口径：总市值 ≥ 门槛（亿元），缺市值不丢票、写 reason。
 # ============================================================
 
-def fetch_bigcaps_em(min_mktcap_yi: float = 500, **kwargs) -> dict:
-    """大市值名单（东财全市场快照备源）。"""
-    ak = _ak()
-    df = ak.stock_zh_a_spot_em()
-    if df is None or df.empty:
-        raise RuntimeError("东财全市场快照返回空（stock_zh_a_spot_em）")
-    missing_cols = {"代码", "名称", "总市值"} - set(df.columns)
-    if missing_cols:
-        raise RuntimeError(f"东财全市场快照缺列 {sorted(missing_cols)}（字段可能漂移）")
-
-    threshold = float(min_mktcap_yi or 0) * 1e8
-    stocks: list[dict] = []
-    unpriced: list[dict] = []
-    for _, row in df.iterrows():
-        code = str(row.get("代码") or "").strip()
-        if not code:
-            continue
-        name = str(row.get("名称") or "").strip()
-        total_mv = row.get("总市值")
-        try:
-            total_mv_f = float(total_mv)
-        except (TypeError, ValueError):
-            total_mv_f = 0.0
-        if total_mv_f <= 0 or pd.isna(total_mv_f):
-            unpriced.append({"code": code, "name": name, "reason": "total_mv_missing"})
-            continue
-        if total_mv_f < threshold:
-            continue
-        price = float(row.get("最新价") or 0)
-        stocks.append({
-            "code": code,
-            "name": name,
-            "market_cap_yi": round(total_mv_f / 1e8, 2),
-            "float_cap_yi": (
-                round(float(row.get("流通市值")) / 1e8, 2)
-                if row.get("流通市值") not in (None, "") and not pd.isna(row.get("流通市值"))
-                else None
-            ),
-            "price": price if price > 0 else None,
-            "change_pct": float(row.get("涨跌幅") or 0),
-            "amount_yi": round(float(row.get("成交额") or 0) / 1e8, 4),
-            "turnover_pct": float(row.get("换手率") or 0),
-            "suspended": price <= 0,
-            **({"reason": "suspended"} if price <= 0 else {}),
-        })
-    stocks.sort(key=lambda item: (-item["market_cap_yi"], item["code"]))
-    return {
-        "as_of": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "source": "akshare_em",
-        "source_url": "akshare.stock_zh_a_spot_em",
-        "threshold_yi": float(min_mktcap_yi or 0),
-        "count": len(stocks),
-        "stocks": stocks,
-        "unpriced": unpriced,
-        "source_note": (
-            "东财全市场快照（stock_zh_a_spot_em）按总市值过滤；"
-            "总市值原始单位元，已换算亿元；与新浪源口径一致"
-        ),
-    }
 
 
 
@@ -2542,68 +1512,9 @@ def fetch_bigcaps_em(min_mktcap_yi: float = 500, **kwargs) -> dict:
 # 兜底国债曲线。仅支持 curve=国债（信用债曲线无对应上游，抛出走记账）。
 
 
-def fetch_bond_yield_cn_backup(curve: str = "国债", **kwargs) -> pd.DataFrame:
-    """中国国债收益率曲线备源（东财 datacenter，2/5/10/30 年）。
-
-    Returns:
-        DataFrame with columns: 期限, 收益率(%)——取最新有值交易日
-    """
-    if curve != "国债":
-        raise ValueError(f"备源仅支持国债曲线，收到 curve={curve}")
-    # 2026-11-10 审计修复：改走模块统一 _ak()（含 set_timeout getattr 防御，
-    # akshare<1.20.4 不再炸源），不再裸 import 绕过防御。
-    ak = _ak()
-
-    df = ak.bond_zh_us_rate()
-    if df is None or df.empty:
-        raise ValueError("bond_zh_us_rate 返回空")
-    terms = [
-        ("中国国债收益率2年", "2年"),
-        ("中国国债收益率5年", "5年"),
-        ("中国国债收益率10年", "10年"),
-        ("中国国债收益率30年", "30年"),
-    ]
-    cols_present = [c for c, _ in terms if c in df.columns]
-    valid = df.dropna(how="all", subset=cols_present)
-    if valid.empty:
-        raise ValueError("bond_zh_us_rate 全列 NaN（疑似上游改版）")
-    latest = valid.iloc[-1]  # 最新有值行；行内个别期限 NaN 则该期限不进结果
-    rows = [
-        {"期限": label, "收益率(%)": float(latest[col])}
-        for col, label in terms
-        if col in df.columns and pd.notna(latest[col])
-    ]
-    if not rows:
-        raise ValueError("bond_zh_us_rate 最新行无有效收益率")
-    return pd.DataFrame(rows)
 
 
 # QI-STD-95：fetch_global_index_spot 频控契约代码化（原仅 docstring「调用方必须
 # 做 ≥60s 级缓存」）——push2 clist 对高频有 IP 风控，模块级最小间隔兜底
-_GLOBAL_INDEX_MIN_INTERVAL = 60.0
-_last_global_index_call = 0.0
 
 
-def fetch_global_index_spot(**kwargs) -> pd.DataFrame:
-    """东财全球指数实时快照（ak.index_global_spot_em）。
-
-    一次返回 56 个全球指数（韩国KOSPI=KS11、KOSPI200、恒生、恒生科技、日经、
-    纳指、道指等），含 最新价/涨跌额/涨跌幅/开高低/昨收/振幅/最新行情时间；
-    **无成交额字段**（东财全球指数不提供）。
-
-    用途：TradeX 指数关注池海外指数行情（gi 前缀代码，如 giKS11 韩国KOSPI）。
-
-    频控（QI-STD-95 契约代码化）：底层为 push2 clist 端点，一次取全表即可覆盖
-    全部全球指数——模块级最小间隔 60s 节流（间隔不足自动补眠），调用方仍建议
-    叠加 ≥60s 级缓存；勿做秒级轮询（push2 对高频有 IP 风控）。
-    """
-    global _last_global_index_call
-    now = time.monotonic()
-    wait = _GLOBAL_INDEX_MIN_INTERVAL - (now - _last_global_index_call)
-    if wait > 0:
-        time.sleep(wait)
-    _last_global_index_call = time.monotonic()
-    df = _ak().index_global_spot_em()
-    # 空态：None → 空 DataFrame（诚实空态，AGENTS.md rule 5 书面豁免口径——
-    # 本 fetcher 未注册 SmartRouter、TradeX 直连消费；注册前必须过空态语义检查）
-    return df if df is not None else pd.DataFrame()

@@ -13,6 +13,7 @@ import pandas as pd
 import pytest
 from unittest.mock import MagicMock
 
+from tradex.data_sources import akshare_backup
 from tradex.data_sources import akshare_fetchers as akf
 from tradex.data_sources.akshare_fetchers import (
     _prev_quarter_end,
@@ -384,7 +385,7 @@ class TestBackupAdapterContracts:
         })
         fake_ak = MagicMock()
         fake_ak.stock_fund_flow_industry.return_value = df
-        monkeypatch.setattr(akf, "_ak", lambda: fake_ak)
+        monkeypatch.setattr(akshare_backup, "_ak", lambda: fake_ak)  # 真身随 A⑨ 迁 backup
 
         result = fetch_industry_comparison_ths()
         assert set(["source", "date", "code", "industries"]).issubset(result.keys())
@@ -398,7 +399,7 @@ class TestBackupAdapterContracts:
     def test_industry_comparison_ths_empty_raises(self, monkeypatch):
         fake_ak = MagicMock()
         fake_ak.stock_fund_flow_industry.return_value = pd.DataFrame()
-        monkeypatch.setattr(akf, "_ak", lambda: fake_ak)
+        monkeypatch.setattr(akshare_backup, "_ak", lambda: fake_ak)  # 真身随 A⑨ 迁 backup
         with pytest.raises(RuntimeError):
             fetch_industry_comparison_ths()
 

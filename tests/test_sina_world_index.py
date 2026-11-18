@@ -139,9 +139,11 @@ class TestThreeSourceSchemaConsistency:
         em_df = pd.DataFrame(
             {"名称": ["KOSPI"], "最新价": [5290.53], "最新行情时间": ["2026-11-18 15:00:00"]}
         )
-        with patch.object(akshare_fetchers, "_ak") as mock_ak, patch.object(
-            akshare_fetchers.time, "monotonic", side_effect=[3000.0, 3000.0]
+        from tradex.data_sources import akshare_em
+
+        with patch.object(akshare_em, "_ak") as mock_ak, patch.object(
+            akshare_em.time, "monotonic", side_effect=[3000.0, 3000.0]
         ):
             mock_ak.return_value.index_global_spot_em.return_value = em_df
-            em = akshare_fetchers.fetch_global_index_spot()
+            em = akshare_em.fetch_global_index_spot()
         assert "最新行情时间" in em.columns, "东财源行情时间列存在"

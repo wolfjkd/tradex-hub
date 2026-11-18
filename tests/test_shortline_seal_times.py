@@ -29,26 +29,26 @@ class TestPrevTradingDay:
     def test_normal(self):
         from tradex.service import shortline_service as svc
 
-        with patch("tradex.data_sources.akshare_fetchers._ak", return_value=_fake_ak()):
+        with patch("tradex.data_sources.akshare_pools._ak", return_value=_fake_ak()):  # 真身随 A⑨ 迁 pools
             assert svc._prev_trading_day("20261106") == "20261105"
 
     def test_cross_month(self):
-        from tradex.data_sources import akshare_fetchers as akf
+        from tradex.data_sources import akshare_pools as akf  # 真身随 A⑨ 迁 pools
         from tradex.service import shortline_service as svc
         from tradex.utils.cache import cache
 
         # D⑤ 收拢后 _prev_trading_day 走 trade_dates_recent 统一缓存——用例间隔离
         cache.invalidate(f"trade_dates_recent:{akf.datetime.now().strftime('%Y%m%d')}")
-        with patch("tradex.data_sources.akshare_fetchers._ak", return_value=_fake_ak()):
+        with patch("tradex.data_sources.akshare_pools._ak", return_value=_fake_ak()):  # 真身随 A⑨ 迁 pools
             assert svc._prev_trading_day("20261201") == "20261130"
 
     def test_no_prior_raises(self):
-        from tradex.data_sources import akshare_fetchers as akf
+        from tradex.data_sources import akshare_pools as akf  # 真身随 A⑨ 迁 pools
         from tradex.service import shortline_service as svc
         from tradex.utils.cache import cache
 
         cache.invalidate(f"trade_dates_recent:{akf.datetime.now().strftime('%Y%m%d')}")
-        with patch("tradex.data_sources.akshare_fetchers._ak", return_value=_fake_ak()):
+        with patch("tradex.data_sources.akshare_pools._ak", return_value=_fake_ak()):  # 真身随 A⑨ 迁 pools
             with pytest.raises(ValueError, match="之前"):
                 svc._prev_trading_day("20260101")
 
@@ -61,7 +61,7 @@ class TestLatestBoardDate:
         patch akf.datetime 与运行日解耦（同 TradeX 0be6b58 修 test_etf_scan 的口径）。"""
         from datetime import datetime as _real_dt
 
-        from tradex.data_sources import akshare_fetchers as akf
+        from tradex.data_sources import akshare_pools as akf  # 真身随 A⑨ 迁 pools
 
         class _FixedDT(_real_dt):
             @classmethod
@@ -89,7 +89,7 @@ class TestLatestBoardDate:
         assert rows
 
     def test_cache_reuse(self):
-        from tradex.data_sources import akshare_fetchers as akf
+        from tradex.data_sources import akshare_pools as akf  # 真身随 A⑨ 迁 pools
         from tradex.utils.cache import cache as _shared_cache
 
         # 2026-11-11 批次C4：缓存并入统一边界，键含获取日期（trade_dates_recent:{today}）

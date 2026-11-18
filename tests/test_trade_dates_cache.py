@@ -22,7 +22,7 @@ def _calendar(years: list[int]):
 
 def _seed(days_ago: int, value: list[str]) -> str:
     """向共享缓存植入 N 天前的键，返回该键。"""
-    from tradex.data_sources import akshare_fetchers as akf
+    from tradex.data_sources import akshare_pools as akf  # 真身随 A⑨ 迁 pools
     from tradex.utils.cache import cache
 
     stamp = (akf.datetime.now() - timedelta(days=days_ago)).strftime("%Y%m%d")
@@ -34,7 +34,7 @@ def _seed(days_ago: int, value: list[str]) -> str:
 class TestTradeDatesCacheDailyRefresh:
     def teardown_method(self):
         from tradex.utils.cache import cache
-        from tradex.data_sources import akshare_fetchers as akf
+        from tradex.data_sources import akshare_pools as akf  # 真身随 A⑨ 迁 pools
 
         today = akf.datetime.now().strftime("%Y%m%d")
         cache.invalidate(f"trade_dates_recent:{today}")
@@ -47,7 +47,7 @@ class TestTradeDatesCacheDailyRefresh:
 
     def test_same_day_cache_hit(self):
         """当日键已存在：命中缓存，不重拉日历。"""
-        from tradex.data_sources import akshare_fetchers as akf
+        from tradex.data_sources import akshare_pools as akf  # 真身随 A⑨ 迁 pools
         from tradex.utils.cache import cache
 
         today = akf.datetime.now().strftime("%Y%m%d")
@@ -60,7 +60,7 @@ class TestTradeDatesCacheDailyRefresh:
 
     def test_stale_stamp_refetches(self):
         """只有昨日键：换键重拉并写入今日键。"""
-        from tradex.data_sources import akshare_fetchers as akf
+        from tradex.data_sources import akshare_pools as akf  # 真身随 A⑨ 迁 pools
         from tradex.utils.cache import cache
 
         stale_key = _seed(1, ["20260101"])
@@ -75,7 +75,7 @@ class TestTradeDatesCacheDailyRefresh:
 
     def test_cross_year_refetch_picks_new_year(self):
         """跨年炸弹回归测试：钉住去年键的缓存，重拉必须拿到新年日历。"""
-        from tradex.data_sources import akshare_fetchers as akf
+        from tradex.data_sources import akshare_pools as akf  # 真身随 A⑨ 迁 pools
 
         today = akf.datetime.now()
         stale_key = _seed(365, [f"{today.year - 1}0601"])
