@@ -45,7 +45,7 @@ async def get_shortline_catalog() -> str:
     Returns:
         CATALOG JSON（含 schema_version、cache_policies、endpoints、validation）。
     """
-    return mcp_serve("get_shortline_catalog", lambda: dict_to_json(build_catalog()), f"获取短线端点目录失败", dump=dict_to_json)
+    return mcp_serve("get_shortline_catalog", lambda: build_catalog(), f"获取短线端点目录失败", dump=dict_to_json)
 
 async def get_shortline_bigcaps(min_mktcap_yi: float = 500, limit: int = 0) -> str:
     """
@@ -61,7 +61,7 @@ async def get_shortline_bigcaps(min_mktcap_yi: float = 500, limit: int = 0) -> s
     Returns:
         名单 JSON（as_of / source / threshold_yi / count / stocks / unpriced / source_note）。
     """
-    return mcp_serve("get_shortline_bigcaps", lambda: dict_to_json(get_bigcaps(min_mktcap_yi=min_mktcap_yi, limit=limit)), f"获取大市值名单失败", dump=dict_to_json)
+    return mcp_serve("get_shortline_bigcaps", lambda: get_bigcaps(min_mktcap_yi=min_mktcap_yi, limit=limit), f"获取大市值名单失败", dump=dict_to_json)
 
 async def get_shortline_turnover_top(date: str = "", limit: int = 20, kind: str = "auto") -> str:
     """
@@ -78,7 +78,7 @@ async def get_shortline_turnover_top(date: str = "", limit: int = 20, kind: str 
     Returns:
         榜单 JSON（kind / date / as_of / source / stocks / degradation）。
     """
-    return mcp_serve("get_shortline_turnover_top", lambda: dict_to_json(get_turnover_top(date=date, limit=limit, kind=kind)), f"获取成交额榜失败", dump=dict_to_json)
+    return mcp_serve("get_shortline_turnover_top", lambda: get_turnover_top(date=date, limit=limit, kind=kind), f"获取成交额榜失败", dump=dict_to_json)
 
 async def get_shortline_emotion(date: str = "") -> str:
     """
@@ -90,7 +90,7 @@ async def get_shortline_emotion(date: str = "") -> str:
     Returns:
         读数 JSON（result + text + computation + partial + missing_reason）。
     """
-    return mcp_serve("get_shortline_emotion", lambda: dict_to_json(get_emotion(date=date)), f"获取情绪四项失败", dump=dict_to_json)
+    return mcp_serve("get_shortline_emotion", lambda: get_emotion(date=date), f"获取情绪四项失败", dump=dict_to_json)
 
 async def get_shortline_cycle(days: int = 5, date: str = "") -> str:
     """
@@ -105,7 +105,7 @@ async def get_shortline_cycle(days: int = 5, date: str = "") -> str:
     Returns:
         周期 JSON（result + text + computation + partial + missing_reason）。
     """
-    return mcp_serve("get_shortline_cycle", lambda: dict_to_json(get_cycle(days=days, date=date)), f"获取情绪周期失败", dump=dict_to_json)
+    return mcp_serve("get_shortline_cycle", lambda: get_cycle(days=days, date=date), f"获取情绪周期失败", dump=dict_to_json)
 
 async def get_shortline_daily(date: str = "") -> str:
     """
@@ -117,7 +117,7 @@ async def get_shortline_daily(date: str = "") -> str:
     Returns:
         读数 JSON（result + text + computation + partial + missing_reason）。
     """
-    return mcp_serve("get_shortline_daily", lambda: dict_to_json(get_daily(date=date)), f"获取每日读数失败", dump=dict_to_json)
+    return mcp_serve("get_shortline_daily", lambda: get_daily(date=date), f"获取每日读数失败", dump=dict_to_json)
 
 async def get_shortline_settled(date: str = "") -> str:
     """
@@ -129,7 +129,7 @@ async def get_shortline_settled(date: str = "") -> str:
     Returns:
         明细 JSON（count / stocks / stats / missing_reason）。
     """
-    return mcp_serve("get_shortline_settled", lambda: dict_to_json(get_settled(date=date)), f"获取昨日涨停表现失败", dump=dict_to_json)
+    return mcp_serve("get_shortline_settled", lambda: get_settled(date=date), f"获取昨日涨停表现失败", dump=dict_to_json)
 
 async def get_shortline_live() -> str:
     """
@@ -140,7 +140,7 @@ async def get_shortline_live() -> str:
     Returns:
         盘中读数 JSON（result + text + computation + partial）。
     """
-    return mcp_serve("get_shortline_live", lambda: dict_to_json(get_live()), f"获取盘中情绪失败", dump=dict_to_json)
+    return mcp_serve("get_shortline_live", lambda: get_live(), f"获取盘中情绪失败", dump=dict_to_json)
 
 async def get_shortline_ladder(date: str = "") -> str:
     """
@@ -152,7 +152,7 @@ async def get_shortline_ladder(date: str = "") -> str:
     Returns:
         梯队 JSON（levels / stocks / missing_reason）。
     """
-    return mcp_serve("get_shortline_ladder", lambda: dict_to_json(get_ladder(date=date)), f"获取昨日梯队失败", dump=dict_to_json)
+    return mcp_serve("get_shortline_ladder", lambda: get_ladder(date=date), f"获取昨日梯队失败", dump=dict_to_json)
 
 async def get_shortline_board_ladder(date: str = "") -> str:
     """
@@ -164,7 +164,7 @@ async def get_shortline_board_ladder(date: str = "") -> str:
     Returns:
         天梯 JSON（levels / missed / missing_reason）。
     """
-    return mcp_serve("get_shortline_board_ladder", lambda: dict_to_json(get_board_ladder(date=date)), f"获取连板天梯失败", dump=dict_to_json)
+    return mcp_serve("get_shortline_board_ladder", lambda: get_board_ladder(date=date), f"获取连板天梯失败", dump=dict_to_json)
 
 async def get_shortline_structure(date: str = "") -> str:
     """
@@ -176,7 +176,7 @@ async def get_shortline_structure(date: str = "") -> str:
     Returns:
         结构 JSON（structure 各项 / upstream_fields / missing_reason）。
     """
-    return mcp_serve("get_shortline_structure", lambda: dict_to_json(get_structure(date=date)), f"获取涨停结构失败", dump=dict_to_json)
+    return mcp_serve("get_shortline_structure", lambda: get_structure(date=date), f"获取涨停结构失败", dump=dict_to_json)
 
 async def get_shortline_themes(date: str = "") -> str:
     """
@@ -191,7 +191,7 @@ async def get_shortline_themes(date: str = "") -> str:
     Returns:
         题材 JSON（reason_source / events / keywords / unattributed / missing_reason）。
     """
-    return mcp_serve("get_shortline_themes", lambda: dict_to_json(get_themes(date=date)), f"获取题材事件树失败", dump=dict_to_json)
+    return mcp_serve("get_shortline_themes", lambda: get_themes(date=date), f"获取题材事件树失败", dump=dict_to_json)
 
 async def get_shortline_firstboard(date: str = "") -> str:
     """
@@ -203,7 +203,7 @@ async def get_shortline_firstboard(date: str = "") -> str:
     Returns:
         名单 JSON（count / stocks / reversal_count）。
     """
-    return mcp_serve("get_shortline_firstboard", lambda: dict_to_json(get_firstboard(date=date)), f"获取首板名单失败", dump=dict_to_json)
+    return mcp_serve("get_shortline_firstboard", lambda: get_firstboard(date=date), f"获取首板名单失败", dump=dict_to_json)
 
 async def get_shortline_facts(date: str = "") -> str:
     """
@@ -215,7 +215,7 @@ async def get_shortline_facts(date: str = "") -> str:
     Returns:
         事实 JSON（seal_quality / losing_effect / feedback_matrix / missing_reason）。
     """
-    return mcp_serve("get_shortline_facts", lambda: dict_to_json(get_facts(date=date)), f"获取盘面事实失败", dump=dict_to_json)
+    return mcp_serve("get_shortline_facts", lambda: get_facts(date=date), f"获取盘面事实失败", dump=dict_to_json)
 
 async def get_shortline_theme_rotation(days: int = 5, date: str = "") -> str:
     """
@@ -230,7 +230,7 @@ async def get_shortline_theme_rotation(days: int = 5, date: str = "") -> str:
     Returns:
         轮动 JSON（days / rows（含 counts/display/ranks/streak/is_returning）/ missing_dates）。
     """
-    return mcp_serve("get_shortline_theme_rotation", lambda: dict_to_json(get_theme_rotation(days=days, date=date)), f"获取题材轮动失败", dump=dict_to_json)
+    return mcp_serve("get_shortline_theme_rotation", lambda: get_theme_rotation(days=days, date=date), f"获取题材轮动失败", dump=dict_to_json)
 
 async def shortline_close_fetch(date: str = "", force: bool = False) -> str:
     """
@@ -246,7 +246,7 @@ async def shortline_close_fetch(date: str = "", force: bool = False) -> str:
     Returns:
         落库结果 JSON（date / status / written / reason / schema_version / missing_reasons）。
     """
-    return mcp_serve("shortline_close_fetch", lambda: dict_to_json(store.close_fetch(date=date, force=force)), f"收盘落库失败", dump=dict_to_json)
+    return mcp_serve("shortline_close_fetch", lambda: store.close_fetch(date=date, force=force), f"收盘落库失败", dump=dict_to_json)
 
 async def get_shortline_history(date: str = "", days: int = 5) -> str:
     """
@@ -259,7 +259,7 @@ async def get_shortline_history(date: str = "", days: int = 5) -> str:
     Returns:
         历史 JSON（count / dates / records / missing_dates / schema_version）。
     """
-    return mcp_serve("get_shortline_history", lambda: dict_to_json(store.history(days=days, date=date)), f"读取收盘历史失败", dump=dict_to_json)
+    return mcp_serve("get_shortline_history", lambda: store.history(days=days, date=date), f"读取收盘历史失败", dump=dict_to_json)
 
 async def get_shortline_field_drift(date: str = "", lookback: int = 10) -> str:
     """
@@ -275,7 +275,7 @@ async def get_shortline_field_drift(date: str = "", lookback: int = 10) -> str:
     Returns:
         漂移 JSON（drift / added / removed / alias_gaps / zero_suspects / alerts）。
     """
-    return mcp_serve("get_shortline_field_drift", lambda: dict_to_json(drift.field_drift(date=date, lookback=lookback)), f"获取字段漂移报告失败", dump=dict_to_json)
+    return mcp_serve("get_shortline_field_drift", lambda: drift.field_drift(date=date, lookback=lookback), f"获取字段漂移报告失败", dump=dict_to_json)
 
 
 def register(mcp: FastMCP):
