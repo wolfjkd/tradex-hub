@@ -65,3 +65,23 @@ def serve_envelope(build: Callable[[], Any]) -> Envelope:
         raise business_error(e)
     except Exception as e:
         raise data_source_error(e)
+
+
+async def serve_envelope_async(build: Callable[[], Any]) -> Envelope:
+    """serve_envelope 的 async 版（QI-STD-04 收拢 diagnostic async 路由，
+    2026-11-18）：唯一语义与 sync 版完全一致——HTTPException 穿透 /
+    ValueError→400 / 其余→502。
+
+    build 可返回 awaitable（async service 调用）或直接返回值。
+    """
+    try:
+        result = build()
+        if hasattr(result, "__await__"):
+            result = await result
+        return envelope_ok(result)
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise business_error(e)
+    except Exception as e:
+        raise data_source_error(e)

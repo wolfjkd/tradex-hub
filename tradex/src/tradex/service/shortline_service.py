@@ -258,47 +258,71 @@ def _build_envelope(
     return envelope
 
 
+def _serve_cached(key: str, build) -> dict:
+    """信封对象缓存样板单点（QI-STD-05 收拢，2026-11-18：原 4 处裸
+    手抄 get/set 样板收敛于此，全走 get_or_set 统一边界）。
+
+    build() 返回 (envelope, decision)：decision.enabled 控制是否落缓存、
+    decision.ttl_seconds 作动态 TTL（走 get_or_set 的 store 回调承载）；
+    命中分支由 out 标志承载，dict 浅拷贝 + cache_hit=True 标注（行为同原样板）。
+    """
+    decision_holder: dict = {}
+    flag: dict = {}
+
+    def _factory() -> dict:
+        envelope, decision = build()
+        decision_holder["d"] = decision
+        return envelope
+
+    envelope = cache.get_or_set(
+        key,
+        _factory,
+        store=lambda env: (decision_holder["d"].enabled, decision_holder["d"].ttl_seconds),
+        out=flag,
+    )
+    if flag.get("cache_hit"):
+        result = dict(envelope)
+        result["cache_hit"] = True
+        return result
+    return envelope
+
+
 def _serve(endpoint_id: str, date: str, need: tuple[str, ...], compute_fn) -> dict:
     meta = get_endpoint(endpoint_id)
     key = cache_key(endpoint_id, date=_effective_date(date))
 
-    cached = cache.get(key)
-    if cached is not None:
-        result = dict(cached)
-        result["cache_hit"] = True
-        return result
+    def _build():
+        snapshot = collect_snapshot(date=date, need=need)
+        payload, text = compute_fn(snapshot)
 
-    snapshot = collect_snapshot(date=date, need=need)
-    payload, text = compute_fn(snapshot)
+        partial = bool(snapshot.missing) or _is_intraday(snapshot.date)
+        if endpoint_id == "shortline.live":
+            partial = True  # 此刻快照天然是盘中态
 
-    partial = bool(snapshot.missing) or _is_intraday(snapshot.date)
-    if endpoint_id == "shortline.live":
-        partial = True  # 此刻快照天然是盘中态
+        reasons = dict(snapshot.reasons)
+        endpoint_missing = payload.get("missing_reason") if isinstance(payload, dict) else None
+        if endpoint_missing:
+            reasons["endpoint"] = endpoint_missing
 
-    reasons = dict(snapshot.reasons)
-    endpoint_missing = payload.get("missing_reason") if isinstance(payload, dict) else None
-    if endpoint_missing:
-        reasons["endpoint"] = endpoint_missing
+        decision = resolve_cache(meta.cache_policy, partial=partial)
+        envelope = _build_envelope(
+            endpoint_id=endpoint_id,
+            date=snapshot.date,
+            source=_SOURCE,
+            partial=partial,
+            missing_reason=reasons or None,
+            payload=payload,
+            text=text,
+            params={"date": date or "auto"},
+            definitions=_DEFINITIONS.get(endpoint_id, {}),
+            pools_used=["zt", *(p for p in _AUX_POOLS if snapshot.has(p))],
+            missing_pools=list(snapshot.missing),
+            compliance=_COMPLIANCE,
+            cache_info=(meta.cache_policy, decision),
+        )
+        return envelope, decision
 
-    decision = resolve_cache(meta.cache_policy, partial=partial)
-    envelope = _build_envelope(
-        endpoint_id=endpoint_id,
-        date=snapshot.date,
-        source=_SOURCE,
-        partial=partial,
-        missing_reason=reasons or None,
-        payload=payload,
-        text=text,
-        params={"date": date or "auto"},
-        definitions=_DEFINITIONS.get(endpoint_id, {}),
-        pools_used=["zt", *(p for p in _AUX_POOLS if snapshot.has(p))],
-        missing_pools=list(snapshot.missing),
-        compliance=_COMPLIANCE,
-        cache_info=(meta.cache_policy, decision),
-    )
-    if decision.enabled:
-        cache.set(key, envelope, decision.ttl_seconds)
-    return envelope
+    return _serve_cached(key, _build)
 
 
 # ---------------------------------------------------------------- 八个端点
@@ -351,42 +375,39 @@ def get_cycle(days: int = 5, date: str = "") -> dict:
 
     meta = get_endpoint("shortline.cycle")
     key = cache_key("shortline.cycle", date=_effective_date(date), days=window_days)
-    cached = cache.get(key)
-    if cached is not None:
-        result = dict(cached)
-        result["cache_hit"] = True
-        return result
 
-    snapshot = collect_snapshot(date=date, need=("zt", *_AUX_POOLS))
-    history, missing_dates, history_note = _load_history(window_days, end_date=snapshot.date)
-    payload, text = compute.cycle(snapshot, days=window_days, history=history, missing_dates=missing_dates)
+    def _build():
 
-    partial = bool(snapshot.missing) or not history or _is_intraday(snapshot.date)
-    reasons = dict(snapshot.reasons)
-    if history_note:
-        reasons["history"] = history_note
-    if payload.get("missing_reason"):
-        reasons["endpoint"] = payload["missing_reason"]
+        snapshot = collect_snapshot(date=date, need=("zt", *_AUX_POOLS))
+        history, missing_dates, history_note = _load_history(window_days, end_date=snapshot.date)
+        payload, text = compute.cycle(snapshot, days=window_days, history=history, missing_dates=missing_dates)
 
-    decision = resolve_cache(meta.cache_policy, partial=partial)
-    envelope = _build_envelope(
-        endpoint_id="shortline.cycle",
-        date=snapshot.date,
-        source=f"shortline_store + {_SOURCE}",
-        partial=partial,
-        missing_reason=reasons or None,
-        payload=payload,
-        text=text,
-        params={"days": window_days, "date": date or "auto"},
-        definitions=_DEFINITIONS.get("shortline.cycle", {}),
-        pools_used=["zt", *(p for p in _AUX_POOLS if snapshot.has(p))],
-        missing_pools=list(snapshot.missing),
-        compliance=_COMPLIANCE,
-        cache_info=(meta.cache_policy, decision),
-    )
-    if decision.enabled:
-        cache.set(key, envelope, decision.ttl_seconds)
-    return envelope
+        partial = bool(snapshot.missing) or not history or _is_intraday(snapshot.date)
+        reasons = dict(snapshot.reasons)
+        if history_note:
+            reasons["history"] = history_note
+        if payload.get("missing_reason"):
+            reasons["endpoint"] = payload["missing_reason"]
+
+        decision = resolve_cache(meta.cache_policy, partial=partial)
+        envelope = _build_envelope(
+            endpoint_id="shortline.cycle",
+            date=snapshot.date,
+            source=f"shortline_store + {_SOURCE}",
+            partial=partial,
+            missing_reason=reasons or None,
+            payload=payload,
+            text=text,
+            params={"days": window_days, "date": date or "auto"},
+            definitions=_DEFINITIONS.get("shortline.cycle", {}),
+            pools_used=["zt", *(p for p in _AUX_POOLS if snapshot.has(p))],
+            missing_pools=list(snapshot.missing),
+            compliance=_COMPLIANCE,
+            cache_info=(meta.cache_policy, decision),
+        )
+        return envelope, decision
+
+    return _serve_cached(key, _build)
 
 
 def _load_history(days: int, end_date: str = "") -> tuple[list[dict], list[str], str | None]:
@@ -503,39 +524,35 @@ _THEME_DEFINITIONS = {
 def _themes_envelope(endpoint_id: str, date: str) -> dict:
     meta = get_endpoint(endpoint_id)
     key = cache_key(endpoint_id, date=_effective_date(date))
-    cached = cache.get(key)
-    if cached is not None:
-        result = dict(cached)
-        result["cache_hit"] = True
-        return result
 
-    snapshot = collect_snapshot(date=date, need=("zt",))
-    reasons, source, problems = fetch_reasons(snapshot.date)
-    payload, text = compute.themes(snapshot, reasons, source)
-    partial = _is_intraday(snapshot.date) or not reasons
+    def _build():
+        snapshot = collect_snapshot(date=date, need=("zt",))
+        reasons, source, problems = fetch_reasons(snapshot.date)
+        payload, text = compute.themes(snapshot, reasons, source)
+        partial = _is_intraday(snapshot.date) or not reasons
 
-    decision = resolve_cache(meta.cache_policy, partial=partial)
-    reasons_map: dict = dict(snapshot.reasons)
-    if problems:
-        reasons_map["theme_source"] = problems
-    envelope = _build_envelope(
-        endpoint_id=endpoint_id,
-        date=snapshot.date,
-        source=source,
-        partial=partial,
-        missing_reason=reasons_map or None,
-        payload=payload,
-        text=text,
-        params={"date": date or "auto"},
-        definitions={"题材事件树": _THEME_DEFINITIONS["题材事件树"]},
-        pools_used=["zt"],
-        missing_pools=list(snapshot.missing),
-        compliance=_COMPLIANCE,
-        cache_info=(meta.cache_policy, decision),
-    )
-    if decision.enabled:
-        cache.set(key, envelope, decision.ttl_seconds)
-    return envelope
+        decision = resolve_cache(meta.cache_policy, partial=partial)
+        reasons_map: dict = dict(snapshot.reasons)
+        if problems:
+            reasons_map["theme_source"] = problems
+        envelope = _build_envelope(
+            endpoint_id=endpoint_id,
+            date=snapshot.date,
+            source=source,
+            partial=partial,
+            missing_reason=reasons_map or None,
+            payload=payload,
+            text=text,
+            params={"date": date or "auto"},
+            definitions={"题材事件树": _THEME_DEFINITIONS["题材事件树"]},
+            pools_used=["zt"],
+            missing_pools=list(snapshot.missing),
+            compliance=_COMPLIANCE,
+            cache_info=(meta.cache_policy, decision),
+        )
+        return envelope, decision
+
+    return _serve_cached(key, _build)
 
 
 def get_themes(date: str = "") -> dict:
@@ -564,67 +581,64 @@ def get_theme_rotation(days: int = 5, date: str = "") -> dict:
         window = 5
     meta = get_endpoint("shortline.theme_rotation")
     key = cache_key("shortline.theme_rotation", date=_effective_date(date), days=window)
-    cached = cache.get(key)
-    if cached is not None:
-        result = dict(cached)
-        result["cache_hit"] = True
-        return result
 
-    snapshot = collect_snapshot(date=date, need=("zt",))
-    reasons, source, problems = fetch_reasons(snapshot.date)
-    payload, text = compute.themes(snapshot, reasons, source)
-    today_counts = {item["theme"]: item["count"] for item in payload.get("keywords", [])}
+    def _build():
 
-    history, missing_dates, history_note = _load_history(window + 1, end_date=snapshot.date)
-    days_records: list[dict] = []
-    for record in history:
-        if str(record.get("date")) == snapshot.date:
-            continue  # 今日一律用实时快照重算，避免历史里的同日记录重复成两天
-        counts = record.get("theme_counts")
+        snapshot = collect_snapshot(date=date, need=("zt",))
+        reasons, source, problems = fetch_reasons(snapshot.date)
+        payload, text = compute.themes(snapshot, reasons, source)
+        today_counts = {item["theme"]: item["count"] for item in payload.get("keywords", [])}
+
+        history, missing_dates, history_note = _load_history(window + 1, end_date=snapshot.date)
+        days_records: list[dict] = []
+        for record in history:
+            if str(record.get("date")) == snapshot.date:
+                continue  # 今日一律用实时快照重算，避免历史里的同日记录重复成两天
+            counts = record.get("theme_counts")
+            days_records.append({
+                "date": record.get("date"),
+                "available": counts is not None,
+                "theme_counts": counts,
+            })
         days_records.append({
-            "date": record.get("date"),
-            "available": counts is not None,
-            "theme_counts": counts,
+            "date": snapshot.date,
+            "available": bool(today_counts),
+            "theme_counts": today_counts,
         })
-    days_records.append({
-        "date": snapshot.date,
-        "available": bool(today_counts),
-        "theme_counts": today_counts,
-    })
-    days_records = days_records[-window:]
+        days_records = days_records[-window:]
 
-    rotation, text = compute.theme_rotation(days_records, missing_dates=missing_dates)
+        rotation, text = compute.theme_rotation(days_records, missing_dates=missing_dates)
 
-    partial = _is_intraday(snapshot.date) or not today_counts or not history
-    reasons_map: dict = dict(snapshot.reasons)
-    if problems:
-        reasons_map["theme_source"] = problems
-    if history_note:
-        reasons_map["history"] = history_note
-    if partial:
-        reasons_map.setdefault("endpoint", []).append(
-            "题材轮动窗口不完整（历史缺天或今日归因缺失），缺天显示「—」"
+        partial = _is_intraday(snapshot.date) or not today_counts or not history
+        reasons_map: dict = dict(snapshot.reasons)
+        if problems:
+            reasons_map["theme_source"] = problems
+        if history_note:
+            reasons_map["history"] = history_note
+        if partial:
+            reasons_map.setdefault("endpoint", []).append(
+                "题材轮动窗口不完整（历史缺天或今日归因缺失），缺天显示「—」"
+            )
+
+        decision = resolve_cache(meta.cache_policy, partial=partial)
+        envelope = _build_envelope(
+            endpoint_id="shortline.theme_rotation",
+            date=snapshot.date,
+            source=f"{source} + shortline_store",
+            partial=partial,
+            missing_reason=reasons_map or None,
+            payload=rotation,
+            text=text,
+            params={"days": window, "date": date or "auto"},
+            definitions={"题材轮动": _THEME_DEFINITIONS["题材轮动"]},
+            pools_used=["zt"],
+            missing_pools=list(snapshot.missing),
+            compliance=_COMPLIANCE,
+            cache_info=(meta.cache_policy, decision),
         )
+        return envelope, decision
 
-    decision = resolve_cache(meta.cache_policy, partial=partial)
-    envelope = _build_envelope(
-        endpoint_id="shortline.theme_rotation",
-        date=snapshot.date,
-        source=f"{source} + shortline_store",
-        partial=partial,
-        missing_reason=reasons_map or None,
-        payload=rotation,
-        text=text,
-        params={"days": window, "date": date or "auto"},
-        definitions={"题材轮动": _THEME_DEFINITIONS["题材轮动"]},
-        pools_used=["zt"],
-        missing_pools=list(snapshot.missing),
-        compliance=_COMPLIANCE,
-        cache_info=(meta.cache_policy, decision),
-    )
-    if decision.enabled:
-        cache.set(key, envelope, decision.ttl_seconds)
-    return envelope
+    return _serve_cached(key, _build)
 
 
 def get_history(days: int = 10, date: str = "") -> dict:

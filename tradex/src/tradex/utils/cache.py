@@ -297,7 +297,15 @@ class TwoLevelCache:
         if self._file is not None:
             self._file.invalidate(key)
 
-    def get_or_set(self, key: str, factory, ttl: int = TTL_DAILY) -> Any:
+    def get_or_set(
+        self,
+        key: str,
+        factory,
+        ttl: int = TTL_DAILY,
+        *,
+        store=None,
+        out: dict | None = None,
+    ) -> Any:
         """读-算-写一体入口：序列化边界收进缓存层（批次C4，2026-11-11）。
 
         调用方一律传/收 Python 对象（dict/list/DataFrame…），不再各自判型
@@ -310,7 +318,13 @@ class TwoLevelCache:
         Args:
             key: 缓存键
             factory: 未命中时的取数回调（无参），异常向上抛且不缓存
-            ttl: TTL 秒数
+            ttl: TTL 秒数（store 传了则被忽略）
+            store: （QI-STD-05 扩展，2026-11-18）可选回调 store(value) ->
+                (bool, int)——动态落缓存决策（是否落 + 有效 TTL 依赖 factory
+                产物时用，如信封对象按 partial 决定 enabled 与 ttl_seconds）；
+            out: （QI-STD-05 扩展）可选 dict——命中写 out["cache_hit"]=True、
+                未命中 False，调用方标注信封 cache_hit 用，替代手写
+                「dict(cached) + 标志」样板。
 
         Returns:
             缓存命中值（已还原为对象）或 factory() 结果
@@ -319,14 +333,25 @@ class TwoLevelCache:
         if cached is not None:
             if isinstance(cached, str):
                 try:
-                    return json.loads(cached)
+                    value = json.loads(cached)
                 except (ValueError, TypeError):
                     logger.debug("get_or_set: 非 JSON 字符串条目原样返回 %s", key)
-                    return cached
-            return cached
+                    value = cached
+            else:
+                value = cached
+            if out is not None:
+                out["cache_hit"] = True
+            return value
         value = factory()
         if value is not None:
-            self.set(key, value, ttl)
+            if store is None:
+                self.set(key, value, ttl)
+            else:
+                do_store, eff_ttl = store(value)
+                if do_store:
+                    self.set(key, value, eff_ttl)
+        if out is not None:
+            out["cache_hit"] = False
         return value
 
     def clear(self) -> None:

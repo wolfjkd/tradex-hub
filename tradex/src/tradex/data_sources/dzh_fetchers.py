@@ -86,8 +86,9 @@ def _send_recv(ws: Any, query: str, to: float = 8.0) -> dict[str, Any]:
 def _parse_dyna(head: list, row: list) -> dict[str, Any]:
     """dyna 行（head/row 按位 zip）→ 标准行情 dict。纯函数，便于单测。
 
-    字段位置（IXKS11/SH000001 实测）：3=现价(new)前是 4=昨收/5=开/6=高/7=低
-    ——准确序：head.index('new')/'lastclose'/'amount'/'time'，不做硬编码位次。
+    字段定位一律 head.index('<名>') 取键（'new'/'lastclose'/'amount'/'time'），
+    不做硬编码位次（QI-STD-06：原 docstring「3=现价…」硬位次描述与实现
+    自相矛盾，2026-11-18 修正——dzh 改版换列序时不至于误导读改动者）。
     """
     d = dict(zip(head, row))
 

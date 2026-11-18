@@ -15,7 +15,7 @@ service 层异常（含 RuntimeError 包装后的原 panic）一律转 502 + cod
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
-from ._helpers import serve_envelope
+from ._helpers import serve_envelope, validate_symbol
 
 from ...api.schemas import (
     ERR_BAD_REQUEST,
@@ -50,12 +50,7 @@ def kline(
             detail=f"period 只能是 daily/weekly/monthly，收到: {period}",
             headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
         )
-    if not symbol.isdigit():
-        raise HTTPException(
-            status_code=400,
-            detail=f"symbol 必须是 6 位数字代码，收到: {symbol}",
-            headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
-        )
+    validate_symbol(symbol)
     return serve_envelope(lambda: price_service.get_historical_price(
                 symbol=symbol,
                 period=period,
@@ -69,10 +64,5 @@ def intraday(
     symbol: str = Query(..., min_length=6, max_length=6, description="6 位 A 股代码"),
 ) -> Envelope[dict]:
     """当日分时数据（1 分钟 K 线）。"""
-    if not symbol.isdigit():
-        raise HTTPException(
-            status_code=400,
-            detail=f"symbol 必须是 6 位数字代码，收到: {symbol}",
-            headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
-        )
+    validate_symbol(symbol)
     return serve_envelope(lambda: price_service.get_intraday_data(symbol=symbol))

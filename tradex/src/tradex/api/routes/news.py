@@ -10,11 +10,10 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
-from ._helpers import serve_envelope
+from fastapi import APIRouter, Query
+from ._helpers import serve_envelope, validate_symbol
 
 from ...api.schemas import (
-    ERR_BAD_REQUEST,
     ERR_DATA_SOURCE_UNREACHABLE,
     Envelope,
     envelope_ok,
@@ -29,11 +28,7 @@ def stock(
     symbol: str = Query(..., min_length=6, max_length=6, description="6 位 A 股代码"),
 ) -> Envelope[dict]:
     """个股新闻列表。"""
-    if not symbol.isdigit():
-        raise HTTPException(
-            status_code=400, detail=f"symbol 必须是 6 位数字代码，收到: {symbol}",
-            headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
-        )
+    validate_symbol(symbol)
     return serve_envelope(lambda: news_service.get_stock_news(symbol=symbol))
 
 @router.get("/announcements", response_model=Envelope[dict])
@@ -42,11 +37,8 @@ def announcements(
     num_results: int = Query(30, ge=1, le=100, description="最大返回条数"),
 ) -> Envelope[dict]:
     """上市公司公告。"""
-    if symbol and not symbol.isdigit():
-        raise HTTPException(
-            status_code=400, detail=f"symbol 必须是 6 位数字代码，收到: {symbol}",
-            headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
-        )
+    if symbol:
+        validate_symbol(symbol)
     return serve_envelope(lambda: news_service.get_company_announcements(symbol=symbol, num_results=num_results))
 
 @router.get("/search", response_model=Envelope[dict])
@@ -56,9 +48,6 @@ def search(
     num_results: int = Query(20, ge=1, le=100),
 ) -> Envelope[dict]:
     """关键词搜索财经新闻。"""
-    if symbol and not symbol.isdigit():
-        raise HTTPException(
-            status_code=400, detail=f"symbol 必须是 6 位数字代码，收到: {symbol}",
-            headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
-        )
+    if symbol:
+        validate_symbol(symbol)
     return serve_envelope(lambda: news_service.search_news(keyword=keyword, symbol=symbol, num_results=num_results))

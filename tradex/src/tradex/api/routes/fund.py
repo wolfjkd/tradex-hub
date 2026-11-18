@@ -15,11 +15,10 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
-from ._helpers import serve_envelope
+from fastapi import APIRouter, Query
+from ._helpers import serve_envelope, validate_symbol
 
 from ...api.schemas import (
-    ERR_BAD_REQUEST,
     ERR_DATA_SOURCE_UNREACHABLE,
     Envelope,
     envelope_ok,
@@ -34,13 +33,7 @@ def flow(
     symbol: str = Query(..., min_length=6, max_length=6, description="6 位 A 股代码，如 600519"),
 ) -> Envelope[dict]:
     """个股资金流向数据（主力/超大单/大单/中单/小单净流入序列）。"""
-    # 简单格式校验：6 位数字（Query 的 min/max_length 已限长度，这里补内容校验）
-    if not symbol.isdigit():
-        raise HTTPException(
-            status_code=400,
-            detail=f"symbol 必须是 6 位数字代码，收到: {symbol}",
-            headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
-        )
+    validate_symbol(symbol)
     return serve_envelope(lambda: market_service.get_money_flow(symbol=symbol))
 
 @router.get("/northbound", response_model=Envelope[dict])

@@ -16,14 +16,9 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
-from ._helpers import data_source_error
+from ._helpers import serve_envelope_async, validate_symbol
 
-from ...api.schemas import (
-    ERR_BAD_REQUEST,
-    ERR_DATA_SOURCE_UNREACHABLE,
-    Envelope,
-    envelope_ok,
-)
+from ...api.schemas import ERR_DATA_SOURCE_UNREACHABLE, Envelope
 from ...service import diagnostic_service
 
 router = APIRouter(prefix="/diagnostic", tags=["diagnostic"])
@@ -34,27 +29,17 @@ async def stock(
     symbol: str = Query(..., min_length=6, max_length=6, description="6 位 A 股代码"),
 ) -> Envelope[dict]:
     """个股综合诊断 —— 行情 / 公司 / 财务 / 板块资金 4 维度并行获取。"""
-    if not symbol.isdigit():
-        raise HTTPException(
-            status_code=400,
-            detail=f"symbol 必须为 6 位数字，收到: {symbol}",
-            headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
-        )
-    try:
-        data = await diagnostic_service.analyze_stock_comprehensive(symbol)
-        return envelope_ok(data)
-    except Exception as e:
-        raise data_source_error(e)
+    validate_symbol(symbol)  # QI-STD-04：手写校验收拢 validate_symbol 单点
+    # QI-STD-04：手写 try/except 收拢 serve_envelope_async 唯一语义（502 同前）
+    return await serve_envelope_async(
+        lambda: diagnostic_service.analyze_stock_comprehensive(symbol)
+    )
 
 
 @router.get("/market", response_model=Envelope[dict])
 async def market() -> Envelope[dict]:
     """市场全景诊断 —— 大盘 / 板块资金 / 涨跌停 3 维度并行获取。"""
-    try:
-        data = await diagnostic_service.analyze_market_overview()
-        return envelope_ok(data)
-    except Exception as e:
-        raise data_source_error(e)
+    return await serve_envelope_async(diagnostic_service.analyze_market_overview)
 
 
 @router.get("/technical", response_model=Envelope[dict])
@@ -63,23 +48,17 @@ async def technical(
     look_back_days: int = Query(30, ge=1, le=365, description="回溯交易日数 [1, 365]"),
 ) -> Envelope[dict]:
     """5 维度技术分析 —— 均线 / 趋势 / 量价 / 筹码 / 形态。"""
-    if not symbol.isdigit():
-        raise HTTPException(
-            status_code=400,
-            detail=f"symbol 必须为 6 位数字，收到: {symbol}",
-            headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
-        )
-    try:
+    validate_symbol(symbol)
+    # service 内部已捕获异常并返回 error_response dict（含 success: False）——
+    # 判型转 502 保留（业务判型非样板），HTTPException 经 serve_envelope_async 穿透
+    async def _build():
         data = diagnostic_service.analyze_technical(symbol, look_back_days)
-        # service 内部已捕获异常并返回 error_response dict（含 success: False）
         if isinstance(data, dict) and data.get("success") is False:
             raise HTTPException(
                 status_code=502,
                 detail=data.get("error", "技术分析失败"),
                 headers={"X-ErrCode": str(ERR_DATA_SOURCE_UNREACHABLE)},
             )
-        return envelope_ok(data)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise data_source_error(e)
+        return data
+
+    return await serve_envelope_async(_build)

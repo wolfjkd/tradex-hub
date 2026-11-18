@@ -11,11 +11,10 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
-from ._helpers import serve_envelope
+from fastapi import APIRouter, Query
+from ._helpers import serve_envelope, validate_symbol
 
 from ...api.schemas import (
-    ERR_BAD_REQUEST,
     ERR_DATA_SOURCE_UNREACHABLE,
     Envelope,
     envelope_ok,
@@ -37,12 +36,7 @@ def info(
     symbol: str = Query(..., min_length=6, max_length=6, description="6 位 A 股代码"),
 ) -> Envelope[dict]:
     """公司基本信息。"""
-    if not symbol.isdigit():
-        raise HTTPException(
-            status_code=400,
-            detail=f"symbol 必须是 6 位数字代码，收到: {symbol}",
-            headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
-        )
+    validate_symbol(symbol)
     return serve_envelope(lambda: company_service.get_company_info(symbol=symbol))
 
 @router.get("/profile", response_model=Envelope[dict])
@@ -50,11 +44,7 @@ def profile(
     symbol: str = Query(..., min_length=6, max_length=6),
 ) -> Envelope[dict]:
     """主营业务构成。"""
-    if not symbol.isdigit():
-        raise HTTPException(
-            status_code=400, detail=f"symbol 必须是 6 位数字代码，收到: {symbol}",
-            headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
-        )
+    validate_symbol(symbol)
     return serve_envelope(lambda: company_service.get_company_profile(symbol=symbol))
 
 @router.get("/competitors", response_model=Envelope[dict])
@@ -63,9 +53,5 @@ def competitors(
     industry: str = Query("", description="行业板块名；空则自动推断"),
 ) -> Envelope[dict]:
     """同行业竞争对手。"""
-    if not symbol.isdigit():
-        raise HTTPException(
-            status_code=400, detail=f"symbol 必须是 6 位数字代码，收到: {symbol}",
-            headers={"X-ErrCode": str(ERR_BAD_REQUEST)},
-        )
+    validate_symbol(symbol)
     return serve_envelope(lambda: company_service.get_competitors(symbol=symbol, industry=industry))
