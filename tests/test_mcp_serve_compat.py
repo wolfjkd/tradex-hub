@@ -107,3 +107,54 @@ class TestEventDrivenSnapshot:
             ensure_ascii=False,
         )
         assert out == expected, f"{tool} 失败路径快照不符：{out[:120]}"
+
+    async def test_dual_branch_value_error_semantics(self):
+        """A① 全量补（2026-11-19）：双 except 分支工具的 ValueError 语义——
+        value_error_detail 参数承载「参数错误」文案（原手抄形态逐字节等价）。"""
+        from unittest.mock import patch as _patch
+
+        from tradex.data_sources import em_client
+
+        client = await _make_client()
+
+        def _ve(*a, **kw):
+            raise ValueError("date 越界")
+
+        with _patch.object(em_client, "fetch_unusual_fluctuation", side_effect=_ve):
+            out = _text(
+                await client.call_tool(
+                    "get_unusual_fluctuation", {"trade_date": "2026-13-01"}
+                )
+            )
+        expected = json.dumps(
+            {"error": True, "message": "参数错误: date 越界", "tool": "get_unusual_fluctuation"},
+            ensure_ascii=False,
+        )
+        assert out == expected, f"ValueError 分支快照不符：{out[:120]}"
+
+    async def test_dual_branch_generic_error_semantics(self):
+        """双 except 工具的非 ValueError 走 fail_detail 主文案。"""
+        from unittest.mock import patch as _patch
+
+        from tradex.data_sources import em_client
+
+        client = await _make_client()
+
+        def _boom(*a, **kw):
+            raise RuntimeError("em 挂了")
+
+        with _patch.object(em_client, "fetch_unusual_fluctuation", side_effect=_boom):
+            out = _text(
+                await client.call_tool("get_unusual_fluctuation", {"trade_date": ""})
+            )
+        expected = json.dumps(
+            {"error": True, "message": "获取监管异动失败: em 挂了", "tool": "get_unusual_fluctuation"},
+            ensure_ascii=False,
+        )
+        assert out == expected, f"Exception 分支快照不符：{out[:120]}"
+
+
+async def _make_client():
+    mcp = FastMCP("snapshot-compat-dual")
+    ev.register(mcp)
+    return mcp

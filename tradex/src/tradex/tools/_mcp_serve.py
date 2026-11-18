@@ -27,6 +27,7 @@ def mcp_serve(
     build: Callable[[], Any],
     fail_detail: str,
     *,
+    value_error_detail: str | None = None,
     dump: bool = True,
 ) -> str:
     """MCP 工具体出口单点。
@@ -37,6 +38,10 @@ def mcp_serve(
         fail_detail: 失败文案固定前缀（调用方拼好参数回显，如
             f"获取业绩预告失败 ({symbol})"）——出口统一拼 ": {e}"，
             与原手抄 f"{前缀}: {e}" 逐字节等价
+        value_error_detail: （A① 全量补，2026-11-19）可选——双 except 分支
+            工具（原「except ValueError → '参数错误' / except Exception →
+            '获取XX失败'」形态）的 ValueError 分支文案前缀；None 时
+            ValueError 与其他异常同走 fail_detail（单分支工具行为不变）
         dump: True = json.dumps（默认，原 62 处 dumps 形态）；False = 原样
             返回 build() 的 str 结果（df_to_json 等自带格式化形态），
             失败路径仍走 error_response
@@ -49,5 +54,8 @@ def mcp_serve(
         if dump:
             return json.dumps(result, ensure_ascii=False)
         return result
-    except Exception as e:  # noqa: BLE001 - MCP 出口统一 error_response 形态
+    except ValueError as e:  # noqa: BLE001 - MCP 出口统一 error_response 形态
+        detail = value_error_detail if value_error_detail is not None else fail_detail
+        return error_response(f"{detail}: {e}", tool_name)
+    except Exception as e:  # noqa: BLE001
         return error_response(f"{fail_detail}: {e}", tool_name)
