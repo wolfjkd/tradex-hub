@@ -21,6 +21,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from ._mcp_serve import mcp_serve
 from ..utils.formatter import dict_to_json, error_response
 from .technical_indicators import _sma, _macd_values, _kdj_values, _rsi_values, _boll_values
 
@@ -194,223 +195,235 @@ def _generate_signal_for_stock(
 # MCP 工具注册
 # ──────────────────────────────────────────────────────────────────
 
+# （QI-ARCH-02 全量上提，2026-11-19：3 个工具体模块级化 + mcp_serve 出口
+# 收拢（dump=dict_to_json）；显式参数校验 return error_response 保留原样。）
+
+
+async def generate_trading_signal(
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+    volumes: list[float] | None = None,
+) -> str:
+    """
+    基于多指标组合生成单票交易信号。
+
+    综合 MA/MACD/KDJ/RSI/BOLL/量比 等多维度评分，
+    生成 strong_buy/buy/neutral/sell/strong_sell 五级信号。
+
+    评分：中性起步 50 分，各维度按条件加减分：
+    - 趋势: MA5/MA20 金叉/死叉 ±15，多空排列 ±5
+    - 动量: MACD 金叉/死叉 ±12，零轴位置 ±3
+    - 超买超卖: KDJ 超卖/超买 ±8，RSI 超卖/超买 ±8
+    - 量能: 放量 +7 / 缩量 -3
+    - 风险: 触及布林下轨 +5 / 上轨 -5
+
+    Args:
+        highs: 最高价数组（至少30根K线）
+        lows: 最低价数组
+        closes: 收盘价数组
+        volumes: 成交量数组（可选）
+
+    Returns:
+        交易信号 (JSON):
+        - signal: 信号级别 strong_buy/buy/neutral/sell/strong_sell
+        - score: 综合评分 0-100
+        - reasons: 触发原因列表
+        - indicators: 最新技术指标值
+    """
+    if not (len(highs) == len(lows) == len(closes)):
+        return error_response(
+            "参数错误: highs/lows/closes 长度必须相同",
+            "generate_trading_signal",
+        )
+    if volumes is not None and len(volumes) != len(closes):
+        return error_response(
+            "参数错误: volumes 长度必须与 closes 相同",
+            "generate_trading_signal",
+        )
+
+    def _build() -> dict:
+        result = _generate_signal_for_stock(highs, lows, closes, volumes)
+        result["data_points"] = len(closes)
+        result["success"] = True
+        return result
+
+    return mcp_serve("generate_trading_signal", _build, "信号生成失败", dump=dict_to_json)
+
+
+async def scan_stocks_for_signals(
+    stocks_data: dict[str, dict[str, list[float]]],
+    min_score: float = 0,
+    signal_filter: str = "",
+) -> str:
+    """
+    批量扫描多只股票的交易信号。
+
+    输入多只股票的OHLCV数据，批量生成信号并按评分排序。
+    适用于全市场选股、自选股扫描等场景。
+
+    Args:
+        stocks_data: 股票数据字典
+        {
+            "000001": {
+                "highs": [...], "lows": [...], "closes": [...], "volumes": [...]
+            },
+            "600519": {...}
+        }
+        min_score: 最低评分阈值，默认0（不筛选）
+        signal_filter: 信号过滤，逗号分隔，如 "strong_buy,buy"
+
+    Returns:
+        扫描结果 (JSON):
+        - results: 股票信号列表（按评分降序）
+        - summary: 统计摘要（各信号级别数量）
+        - total_scanned: 扫描总数
+        - total_returned: 返回数量
+    """
+    if not stocks_data:
+        return error_response("参数错误: stocks_data 不能为空", "scan_stocks_for_signals")
+
+    def _build() -> dict:
+        allowed_signals = (
+            set(signal_filter.split(",")) if signal_filter.strip() else None
+        )
+
+        results: list[dict] = []
+        signal_counts: dict[str, int] = {}
+        errors: list[dict] = []
+
+        for code, data in stocks_data.items():
+            try:
+                highs = data.get("highs", [])
+                lows = data.get("lows", [])
+                closes = data.get("closes", [])
+                volumes = data.get("volumes")
+
+                if not (len(highs) == len(lows) == len(closes)):
+                    errors.append({"code": code, "error": "数据长度不一致"})
+                    continue
+
+                sig = _generate_signal_for_stock(highs, lows, closes, volumes)
+                sig["code"] = code
+                sig["data_points"] = len(closes)
+
+                signal_counts[sig["signal"]] = signal_counts.get(sig["signal"], 0) + 1
+
+                if sig["score"] >= min_score:
+                    if allowed_signals is None or sig["signal"] in allowed_signals:
+                        results.append(sig)
+            except Exception as e:
+                errors.append({"code": code, "error": str(e)})
+
+        # 按评分降序
+        results.sort(key=lambda x: x.get("score", 0), reverse=True)
+
+        return {
+            "success": True,
+            "results": results,
+            "summary": {
+                "total_scanned": len(stocks_data),
+                "total_returned": len(results),
+                "signal_counts": signal_counts,
+                "errors_count": len(errors),
+            },
+            "errors": errors[:10] if errors else [],
+        }
+
+    return mcp_serve("scan_stocks_for_signals", _build, "批量扫描失败", dump=dict_to_json)
+
+
+async def validate_signal_quality(
+    closes: list[float],
+    signal_idx: int,
+    forward_days: int = 5,
+) -> str:
+    """
+    验证信号质量（前瞻收益分析）。
+
+    在指定位置的信号生成后，统计未来N日的实际收益，
+    用于评估信号的有效性。
+
+    Args:
+        closes: 收盘价数组
+        signal_idx: 信号产生的索引位置（0-based）
+        forward_days: 前瞻天数，默认5
+
+    Returns:
+        信号质量验证 (JSON):
+        - forward_returns: 未来1/3/5/10/20日收益
+        - max_gain: 期间最大涨幅
+        - max_loss: 期间最大跌幅
+        - win_rate: 上涨概率（基于日收益）
+        - signal_price: 信号位置价格
+        - end_price: 前瞻期末价格
+    """
+    if signal_idx < 0 or signal_idx >= len(closes):
+        return error_response(
+            f"参数错误: signal_idx 必须在 [0, {len(closes) - 1}] 范围内",
+            "validate_signal_quality",
+        )
+    if forward_days <= 0:
+        return error_response(
+            "参数错误: forward_days 必须为正整数",
+            "validate_signal_quality",
+        )
+
+    def _build() -> dict:
+        end_idx = min(signal_idx + forward_days, len(closes) - 1)
+        signal_price = closes[signal_idx]
+        end_price = closes[end_idx]
+
+        # 未来各时点收益
+        check_points = [1, 3, 5, 10, 20]
+        forward_returns: dict[str, float] = {}
+        for d in check_points:
+            idx = min(signal_idx + d, len(closes) - 1)
+            if idx > signal_idx and signal_price > 0:
+                forward_returns[f"d{d}"] = round(
+                    (closes[idx] - signal_price) / signal_price * 100, 4
+                )
+
+        # 期间最大涨跌幅
+        future_prices = closes[signal_idx:end_idx + 1]
+        max_gain = (max(future_prices) - signal_price) / signal_price * 100 if signal_price > 0 else 0
+        max_loss = (min(future_prices) - signal_price) / signal_price * 100 if signal_price > 0 else 0
+
+        # 日上涨概率
+        daily_returns = [
+            1 if future_prices[i] > future_prices[i - 1] else 0
+            for i in range(1, len(future_prices))
+        ]
+        win_rate = sum(daily_returns) / len(daily_returns) if daily_returns else 0
+
+        total_return = (end_price - signal_price) / signal_price * 100 if signal_price > 0 else 0
+
+        return {
+            "success": True,
+            "signal_idx": signal_idx,
+            "signal_price": signal_price,
+            "end_idx": end_idx,
+            "end_price": end_price,
+            "forward_days": end_idx - signal_idx,
+            "total_return_pct": round(total_return, 4),
+            "forward_returns_pct": forward_returns,
+            "max_gain_pct": round(max_gain, 4),
+            "max_loss_pct": round(max_loss, 4),
+            "win_rate": round(win_rate, 4),
+            "up_days": sum(daily_returns),
+            "down_days": len(daily_returns) - sum(daily_returns),
+        }
+
+    return mcp_serve("validate_signal_quality", _build, "信号质量验证失败", dump=dict_to_json)
+
+
 def register(mcp: FastMCP):
-    """Register signal generation tools with the MCP server."""
+    """Register signal generation tools with the MCP server.
 
-    @mcp.tool()
-    async def generate_trading_signal(
-        highs: list[float],
-        lows: list[float],
-        closes: list[float],
-        volumes: list[float] | None = None,
-    ) -> str:
-        """
-        基于多指标组合生成单票交易信号。
-
-        综合 MA/MACD/KDJ/RSI/BOLL/量比 等多维度评分，
-        生成 strong_buy/buy/neutral/sell/strong_sell 五级信号。
-
-        评分：中性起步 50 分，各维度按条件加减分：
-        - 趋势: MA5/MA20 金叉/死叉 ±15，多空排列 ±5
-        - 动量: MACD 金叉/死叉 ±12，零轴位置 ±3
-        - 超买超卖: KDJ 超卖/超买 ±8，RSI 超卖/超买 ±8
-        - 量能: 放量 +7 / 缩量 -3
-        - 风险: 触及布林下轨 +5 / 上轨 -5
-
-        Args:
-            highs: 最高价数组（至少30根K线）
-            lows: 最低价数组
-            closes: 收盘价数组
-            volumes: 成交量数组（可选）
-
-        Returns:
-            交易信号 (JSON):
-            - signal: 信号级别 strong_buy/buy/neutral/sell/strong_sell
-            - score: 综合评分 0-100
-            - reasons: 触发原因列表
-            - indicators: 最新技术指标值
-        """
-        try:
-            if not (len(highs) == len(lows) == len(closes)):
-                return error_response(
-                    "参数错误: highs/lows/closes 长度必须相同",
-                    "generate_trading_signal",
-                )
-            if volumes is not None and len(volumes) != len(closes):
-                return error_response(
-                    "参数错误: volumes 长度必须与 closes 相同",
-                    "generate_trading_signal",
-                )
-
-            result = _generate_signal_for_stock(highs, lows, closes, volumes)
-            result["data_points"] = len(closes)
-            result["success"] = True
-            return dict_to_json(result)
-        except Exception as e:
-            return error_response(f"信号生成失败: {e}", "generate_trading_signal")
-
-    @mcp.tool()
-    async def scan_stocks_for_signals(
-        stocks_data: dict[str, dict[str, list[float]]],
-        min_score: float = 0,
-        signal_filter: str = "",
-    ) -> str:
-        """
-        批量扫描多只股票的交易信号。
-
-        输入多只股票的OHLCV数据，批量生成信号并按评分排序。
-        适用于全市场选股、自选股扫描等场景。
-
-        Args:
-            stocks_data: 股票数据字典
-            {
-                "000001": {
-                    "highs": [...], "lows": [...], "closes": [...], "volumes": [...]
-                },
-                "600519": {...}
-            }
-            min_score: 最低评分阈值，默认0（不筛选）
-            signal_filter: 信号过滤，逗号分隔，如 "strong_buy,buy"
-
-        Returns:
-            扫描结果 (JSON):
-            - results: 股票信号列表（按评分降序）
-            - summary: 统计摘要（各信号级别数量）
-            - total_scanned: 扫描总数
-            - total_returned: 返回数量
-        """
-        try:
-            if not stocks_data:
-                return error_response("参数错误: stocks_data 不能为空", "scan_stocks_for_signals")
-
-            allowed_signals = (
-                set(signal_filter.split(",")) if signal_filter.strip() else None
-            )
-
-            results: list[dict] = []
-            signal_counts: dict[str, int] = {}
-            errors: list[dict] = []
-
-            for code, data in stocks_data.items():
-                try:
-                    highs = data.get("highs", [])
-                    lows = data.get("lows", [])
-                    closes = data.get("closes", [])
-                    volumes = data.get("volumes")
-
-                    if not (len(highs) == len(lows) == len(closes)):
-                        errors.append({"code": code, "error": "数据长度不一致"})
-                        continue
-
-                    sig = _generate_signal_for_stock(highs, lows, closes, volumes)
-                    sig["code"] = code
-                    sig["data_points"] = len(closes)
-
-                    signal_counts[sig["signal"]] = signal_counts.get(sig["signal"], 0) + 1
-
-                    if sig["score"] >= min_score:
-                        if allowed_signals is None or sig["signal"] in allowed_signals:
-                            results.append(sig)
-                except Exception as e:
-                    errors.append({"code": code, "error": str(e)})
-
-            # 按评分降序
-            results.sort(key=lambda x: x.get("score", 0), reverse=True)
-
-            return dict_to_json({
-                "success": True,
-                "results": results,
-                "summary": {
-                    "total_scanned": len(stocks_data),
-                    "total_returned": len(results),
-                    "signal_counts": signal_counts,
-                    "errors_count": len(errors),
-                },
-                "errors": errors[:10] if errors else [],
-            })
-        except Exception as e:
-            return error_response(f"批量扫描失败: {e}", "scan_stocks_for_signals")
-
-    @mcp.tool()
-    async def validate_signal_quality(
-        closes: list[float],
-        signal_idx: int,
-        forward_days: int = 5,
-    ) -> str:
-        """
-        验证信号质量（前瞻收益分析）。
-
-        在指定位置的信号生成后，统计未来N日的实际收益，
-        用于评估信号的有效性。
-
-        Args:
-            closes: 收盘价数组
-            signal_idx: 信号产生的索引位置（0-based）
-            forward_days: 前瞻天数，默认5
-
-        Returns:
-            信号质量验证 (JSON):
-            - forward_returns: 未来1/3/5/10/20日收益
-            - max_gain: 期间最大涨幅
-            - max_loss: 期间最大跌幅
-            - win_rate: 上涨概率（基于日收益）
-            - signal_price: 信号位置价格
-            - end_price: 前瞻期末价格
-        """
-        try:
-            if signal_idx < 0 or signal_idx >= len(closes):
-                return error_response(
-                    f"参数错误: signal_idx 必须在 [0, {len(closes) - 1}] 范围内",
-                    "validate_signal_quality",
-                )
-            if forward_days <= 0:
-                return error_response(
-                    "参数错误: forward_days 必须为正整数",
-                    "validate_signal_quality",
-                )
-
-            end_idx = min(signal_idx + forward_days, len(closes) - 1)
-            signal_price = closes[signal_idx]
-            end_price = closes[end_idx]
-
-            # 未来各时点收益
-            check_points = [1, 3, 5, 10, 20]
-            forward_returns: dict[str, float] = {}
-            for d in check_points:
-                idx = min(signal_idx + d, len(closes) - 1)
-                if idx > signal_idx and signal_price > 0:
-                    forward_returns[f"d{d}"] = round(
-                        (closes[idx] - signal_price) / signal_price * 100, 4
-                    )
-
-            # 期间最大涨跌幅
-            future_prices = closes[signal_idx:end_idx + 1]
-            max_gain = (max(future_prices) - signal_price) / signal_price * 100 if signal_price > 0 else 0
-            max_loss = (min(future_prices) - signal_price) / signal_price * 100 if signal_price > 0 else 0
-
-            # 日上涨概率
-            daily_returns = [
-                1 if future_prices[i] > future_prices[i - 1] else 0
-                for i in range(1, len(future_prices))
-            ]
-            win_rate = sum(daily_returns) / len(daily_returns) if daily_returns else 0
-
-            total_return = (end_price - signal_price) / signal_price * 100 if signal_price > 0 else 0
-
-            return dict_to_json({
-                "success": True,
-                "signal_idx": signal_idx,
-                "signal_price": signal_price,
-                "end_idx": end_idx,
-                "end_price": end_price,
-                "forward_days": end_idx - signal_idx,
-                "total_return_pct": round(total_return, 4),
-                "forward_returns_pct": forward_returns,
-                "max_gain_pct": round(max_gain, 4),
-                "max_loss_pct": round(max_loss, 4),
-                "win_rate": round(win_rate, 4),
-                "up_days": sum(daily_returns),
-                "down_days": len(daily_returns) - sum(daily_returns),
-            })
-        except Exception as e:
-            return error_response(f"信号质量验证失败: {e}", "validate_signal_quality")
+    QI-ARCH-02 全量上提（2026-11-19）：3 工具体模块级，引用注册。"""
+    for _fn in (
+        generate_trading_signal,
+        scan_stocks_for_signals,
+        validate_signal_quality,
+    ):
+        mcp.tool()(_fn)
