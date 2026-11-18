@@ -33,14 +33,21 @@ class TestPrevTradingDay:
             assert svc._prev_trading_day("20261106") == "20261105"
 
     def test_cross_month(self):
+        from tradex.data_sources import akshare_fetchers as akf
         from tradex.service import shortline_service as svc
+        from tradex.utils.cache import cache
 
+        # D⑤ 收拢后 _prev_trading_day 走 trade_dates_recent 统一缓存——用例间隔离
+        cache.invalidate(f"trade_dates_recent:{akf.datetime.now().strftime('%Y%m%d')}")
         with patch("tradex.data_sources.akshare_fetchers._ak", return_value=_fake_ak()):
             assert svc._prev_trading_day("20261201") == "20261130"
 
     def test_no_prior_raises(self):
+        from tradex.data_sources import akshare_fetchers as akf
         from tradex.service import shortline_service as svc
+        from tradex.utils.cache import cache
 
+        cache.invalidate(f"trade_dates_recent:{akf.datetime.now().strftime('%Y%m%d')}")
         with patch("tradex.data_sources.akshare_fetchers._ak", return_value=_fake_ak()):
             with pytest.raises(ValueError, match="之前"):
                 svc._prev_trading_day("20260101")
