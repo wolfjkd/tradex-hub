@@ -571,9 +571,14 @@ def fetch_sina_world_index(code: str = "KOSPI", **kwargs) -> dict[str, Any]:
     )
     # hq.sinajs.cn 返回 GBK；空代码族返回 var hq_str_znb_XXX="";
     text = resp.content.decode("gbk", errors="ignore")
-    if '"' not in text:
+    # 载荷形状校验（QI-STD-92）：znb 族响应必为 var hq_str_znb_<CODE>="名称,点位,...";
+    # （≥12 字段）。风控/错误页含引号极常见，仅查 '"' 可解析出伪造行情值
+    # （伪 point 交 TradeX 展示）→ 不过校验走诚实空态 {}（与既有空态口径一致）
+    if not text.strip().startswith("var hq_str_znb_"):
         return {}
     fields = text.split('"')[1].split(",")
+    if len(fields) < 12:
+        return {}
     return _parse_znb_fields(fields)
 
 
