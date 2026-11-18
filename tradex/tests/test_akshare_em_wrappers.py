@@ -203,19 +203,19 @@ class TestDateParamPassthrough:
     """日期参数兼容 YYYY-MM-DD / YYYYMMDD / None。"""
 
     def test_normalize_yyyymmdd(self):
-        from tradex.data_sources.akshare_fetchers import _ak_date_range_kwargs
+        from tradex.data_sources.akshare_em import _ak_date_range_kwargs  # 真身随 A⑨ 迁 em
         s, e = _ak_date_range_kwargs("20260920", "20260924")
         assert s == "20260920"
         assert e == "20260924"
 
     def test_normalize_yyyy_dash_mm_dd(self):
-        from tradex.data_sources.akshare_fetchers import _ak_date_range_kwargs
+        from tradex.data_sources.akshare_em import _ak_date_range_kwargs  # 真身随 A⑨ 迁 em
         s, e = _ak_date_range_kwargs("2026-09-20", "2026-09-24")
         assert s == "20260920"
         assert e == "20260924"
 
     def test_none_uses_default(self):
-        from tradex.data_sources.akshare_fetchers import _ak_date_range_kwargs
+        from tradex.data_sources.akshare_em import _ak_date_range_kwargs  # 真身随 A⑨ 迁 em
         s, e = _ak_date_range_kwargs(None, None, default_days=5)
         # end 应是今天，start 应是 5 天前
         from datetime import datetime, timedelta

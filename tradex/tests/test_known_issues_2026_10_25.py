@@ -421,7 +421,7 @@ class TestBoardSentiment:
 
     def test_envelope_has_data_key(self, monkeypatch):
         """工具层读 result['data']，fetcher 必须给信封而不是裸 list。"""
-        from tradex.data_sources import akshare_fetchers as akf
+        from tradex.data_sources import akshare_pools as akf  # 真身随 A⑨ 迁 pools
 
         monkeypatch.setattr(
             akf, "_fetch_pool_with_fields",
@@ -435,7 +435,7 @@ class TestBoardSentiment:
         assert out["data"][0]["code"] == "000001"
 
     def test_sentiment_computes_rates(self, monkeypatch):
-        from tradex.data_sources import akshare_fetchers as akf
+        from tradex.data_sources import akshare_pools as akf  # 真身随 A⑨ 迁 pools
 
         pools = {
             "zt": self._rows(["000001", "000002", "000003"], days=2),
@@ -459,7 +459,7 @@ class TestBoardSentiment:
 
     def test_aux_pool_failure_degrades_not_fatal(self, monkeypatch):
         """辅助池挂了要降级并标注，不能把整条情绪链路拖死。"""
-        from tradex.data_sources import akshare_fetchers as akf
+        from tradex.data_sources import akshare_pools as akf  # 真身随 A⑨ 迁 pools
 
         def fake(bt, d):
             if bt == "zt":
@@ -474,14 +474,14 @@ class TestBoardSentiment:
         assert out["炸板率(%)"] is None            # 缺数据标 null，不填 0 冒充
 
     def test_empty_zt_pool_raises(self, monkeypatch):
-        from tradex.data_sources import akshare_fetchers as akf
+        from tradex.data_sources import akshare_pools as akf  # 真身随 A⑨ 迁 pools
 
         monkeypatch.setattr(akf, "_fetch_pool_rows", lambda bt, d: [])
         with pytest.raises(RuntimeError, match="涨停池为空"):
             akf.fetch_board_sentiment(date="20261030")
 
     def test_unknown_board_type_raises(self):
-        from tradex.data_sources import akshare_fetchers as akf
+        from tradex.data_sources import akshare_pools as akf  # 真身随 A⑨ 迁 pools
 
         with pytest.raises(ValueError, match="未知 board_type"):
             akf.fetch_limit_up_board(board_type="xxx", date="20261030")
