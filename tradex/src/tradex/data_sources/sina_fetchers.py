@@ -135,13 +135,17 @@ def _em_secid(sym: str) -> str:
 
     规则：
       - 6 开头（600/601/603/605/688）→ 1.<code>（含科创板 688）
-      - 9 / 7 开头（B 股）→ 1.<code>
+      - 920 开头（北交所新代码段）→ 0.<code>——2026-11-18 补（QI-STD-91）：
+        首位 9 曾误判 B 股规则出 1.920xxx → 东财 data:null → fund_flow 双源全败
+      - 其余 9 / 7 开头（B 股）→ 1.<code>
       - 0/3/2 开头（含创业板 300、深主板 000/001、中小 002）→ 0.<code>
       - 8 / 4 开头（北交所 8xx / 三板 4xx）→ 0.<code>
     """
     sym = sym.strip().lower()
     if not sym or len(sym) != 6 or not sym.isdigit():
         raise ValueError(f"非法股票代码: {sym}")
+    if sym.startswith("920"):
+        return f"0.{sym}"
     first = sym[0]
     if first in ("6", "9", "7"):
         return f"1.{sym}"

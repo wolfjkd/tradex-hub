@@ -355,3 +355,53 @@ class TestAkshareFundFlowParamCompat:
         ):
             with pytest.raises(RuntimeError, match="资金流数据为空"):
                 akshare_fetchers.fetch_fund_flow(code="000001")
+
+
+class TestEmSecidBj920:
+    """北交所 920 段 secid 回归（QI-STD-91，2026-11-18 质检整改施工）。
+
+    根因：_em_secid 把 920xxx 首位 9 判进 B 股规则 → 1.920xxx（沪市桶，错），
+    东财对错 secid 返回 data:null → fetch_fund_flow 主源 RuntimeError，
+    sina 备源走同一 helper 同样错前缀 → 双源全败（底仓 4 只均 600xxx 不受影响）。
+    修复：920 前缀归北交所桶 0.920xxx。
+    """
+
+    _KLINE_PAYLOAD = {
+        "data": {
+            "code": "920946",
+            "klines": [
+                "2026-11-13,213627904.0,-236957408.0,23329504.0,174213264.0,39414640.0",
+            ],
+        }
+    }
+
+    def _fake_session(self, payload):
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.raise_for_status.return_value = None
+        fake_resp.json.return_value = payload
+        fake_session = MagicMock()
+        fake_session.get.return_value = fake_resp
+        return fake_session
+
+    def test_em_secid_bj_920_uses_market_zero(self):
+        """920xxx（北交所新代码段）必须归 0. 桶，不得误判 B 股规则出 1.920xxx。"""
+        from tradex.data_sources.sina_fetchers import _em_secid
+        assert _em_secid("920946") == "0.920946"
+
+    def test_em_secid_sh_b_900_keeps_market_one(self):
+        """沪 B 900xxx 仍走 B 股规则（防修复误伤）。"""
+        from tradex.data_sources.sina_fetchers import _em_secid
+        assert _em_secid("900901") == "1.900901"
+
+    def test_fetch_fund_flow_bj_920_main_source_secid_and_hit(self):
+        """fund_flow 东财主源对 920 段构造 0.920xxx 并 mock 命中非空
+        （修复前 secid=1.920946 → 东财 data:null → RuntimeError 双源全败）。"""
+        from tradex.data_sources import akshare_fetchers
+
+        fake_session = self._fake_session(self._KLINE_PAYLOAD)
+        with patch("curl_cffi.requests.Session", return_value=fake_session):
+            result = akshare_fetchers.fetch_fund_flow(code="920946")
+
+        assert fake_session.get.call_args.kwargs["params"]["secid"] == "0.920946"
+        assert result["history"], "920 段主源必须命中非空 history"
