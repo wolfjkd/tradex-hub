@@ -20,6 +20,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from ._mcp_serve import mcp_serve
 from ..utils.formatter import dict_to_json, error_response
 
 
@@ -155,167 +156,179 @@ def _parse_condition(cond: dict) -> tuple[str, str, Any]:
 # MCP 工具注册
 # ──────────────────────────────────────────────────────────────────
 
-def register(mcp: FastMCP):
-    """Register stock screening tools with the MCP server."""
+# （QI-ARCH-02 全量上提，2026-11-19：2 个工具体模块级化 + mcp_serve 出口
+# 收拢（dump=dict_to_json）；显式参数校验保留原样。）
 
-    @mcp.tool()
-    async def screen_stocks(
-        stocks_data: list[dict[str, Any]],
-        conditions: list[dict[str, Any]],
-        sort_by: str = "",
-        sort_order: str = "desc",
-        limit: int = 50,
-    ) -> str:
-        """
-        条件选股扫描。
 
-        输入股票数据和多维度条件，输出符合条件的股票列表。
-        支持基本面/技术面/资金面/风险面/标记 五大类条件组合筛选。
+async def screen_stocks(
+    stocks_data: list[dict[str, Any]],
+    conditions: list[dict[str, Any]],
+    sort_by: str = "",
+    sort_order: str = "desc",
+    limit: int = 50,
+) -> str:
+    """
+    条件选股扫描。
 
-        Args:
-            stocks_data: 股票数据数组，每个元素是一个股票的字典
-                [{"code": "000001", "name": "平安银行", "pe": 8.5, "pb": 0.6, "price": 12.3, ...}, ...]
-            conditions: 筛选条件数组（AND 逻辑）
-                [
-                    {"field": "pe", "operator": "<", "value": 20},
-                    {"field": "pb", "operator": "<", "value": 2},
-                    {"field": "roe", "operator": ">", "value": 15},
-                    {"field": "is_st", "operator": "==", "value": false},
-                    {"field": "board", "operator": "in", "value": ["main_sh", "main_sz"]}
-                ]
-            sort_by: 排序字段（可选），如 "pe" 或 "total_score"
-            sort_order: 排序方向 "asc" 或 "desc"，默认 desc
-            limit: 返回数量上限，默认50
+    输入股票数据和多维度条件，输出符合条件的股票列表。
+    支持基本面/技术面/资金面/风险面/标记 五大类条件组合筛选。
 
-        Returns:
-            选股结果 (JSON):
-            - results: 符合条件的股票列表
-            - summary: 统计摘要
-            - conditions_applied: 实际应用的条件
-        """
-        try:
-            if not stocks_data:
-                return error_response("参数错误: stocks_data 不能为空", "screen_stocks")
-            if not conditions:
-                return dict_to_json({
-                    "success": True,
-                    "results": stocks_data[:limit],
-                    "summary": {
-                        "total_input": len(stocks_data),
-                        "total_matched": len(stocks_data),
-                        "returned": min(len(stocks_data), limit),
-                    },
-                    "conditions_applied": [],
-                })
+    Args:
+        stocks_data: 股票数据数组，每个元素是一个股票的字典
+            [{"code": "000001", "name": "平安银行", "pe": 8.5, "pb": 0.6, "price": 12.3, ...}, ...]
+        conditions: 筛选条件数组（AND 逻辑）
+            [
+                {"field": "pe", "operator": "<", "value": 20},
+                {"field": "pb", "operator": "<", "value": 2},
+                {"field": "roe", "operator": ">", "value": 15},
+                {"field": "is_st", "operator": "==", "value": false},
+                {"field": "board", "operator": "in", "value": ["main_sh", "main_sz"]}
+            ]
+        sort_by: 排序字段（可选），如 "pe" 或 "total_score"
+        sort_order: 排序方向 "asc" 或 "desc"，默认 desc
+        limit: 返回数量上限，默认50
 
-            # 解析条件
-            parsed_conditions = [_parse_condition(c) for c in conditions]
+    Returns:
+        选股结果 (JSON):
+        - results: 符合条件的股票列表
+        - summary: 统计摘要
+        - conditions_applied: 实际应用的条件
+    """
+    if not stocks_data:
+        return error_response("参数错误: stocks_data 不能为空", "screen_stocks")
 
-            # 筛选
-            matched: list[dict] = []
-            for stock in stocks_data:
-                all_match = True
-                for field, operator, target in parsed_conditions:
-                    value = stock.get(field)
-                    if not _match_condition(value, operator, target):
-                        all_match = False
-                        break
-                if all_match:
-                    matched.append(stock)
-
-            # 排序
-            if sort_by:
-                reverse = (sort_order.lower() == "desc")
-                try:
-                    matched.sort(
-                        key=lambda x: x.get(sort_by) if x.get(sort_by) is not None else float('-inf'),
-                        reverse=reverse,
-                    )
-                except (TypeError, ValueError):
-                    pass  # 排序失败时保持原序
-
-            # 限制数量
-            limited = matched[:limit]
-
-            return dict_to_json({
+    def _build() -> dict:
+        if not conditions:
+            return {
                 "success": True,
-                "results": limited,
+                "results": stocks_data[:limit],
                 "summary": {
                     "total_input": len(stocks_data),
-                    "total_matched": len(matched),
-                    "returned": len(limited),
-                    "match_rate": round(len(matched) / len(stocks_data), 4) if stocks_data else 0,
+                    "total_matched": len(stocks_data),
+                    "returned": min(len(stocks_data), limit),
                 },
-                "conditions_applied": conditions,
-                "sort_by": sort_by,
-                "sort_order": sort_order,
-            })
-        except Exception as e:
-            return error_response(f"条件选股失败: {e}", "screen_stocks")
+                "conditions_applied": [],
+            }
 
-    @mcp.tool()
-    async def get_screening_conditions() -> str:
-        """
-        获取支持的选股条件清单。
+        # 解析条件
+        parsed_conditions = [_parse_condition(c) for c in conditions]
 
-        返回所有可选的筛选字段，包含字段名、所属类别、类型、单位和支持的运算符。
-        可用于让 AI Agent 了解 screen_stocks 工具支持的筛选条件。
+        # 筛选
+        matched: list[dict] = []
+        for stock in stocks_data:
+            all_match = True
+            for field, operator, target in parsed_conditions:
+                value = stock.get(field)
+                if not _match_condition(value, operator, target):
+                    all_match = False
+                    break
+            if all_match:
+                matched.append(stock)
 
-        Returns:
-            选股条件清单 (JSON):
-            - categories: 条件类别
-            - conditions: 条件详情列表
-            - total_count: 条件总数
-            - examples: 使用示例
-        """
-        try:
-            return dict_to_json({
-                "success": True,
-                "categories": CONDITION_CATEGORIES,
-                "conditions": SCREENING_CONDITIONS,
-                "total_count": len(SCREENING_CONDITIONS),
-                "operator_explanation": {
-                    "<": "小于",
-                    "<=": "小于等于",
-                    ">": "大于",
-                    ">=": "大于等于",
-                    "==": "等于（用于布尔/枚举）",
-                    "between": "区间（value 传 [low, high]）",
-                    "in": "在集合中（value 传数组）",
-                    "not_in": "不在集合中（value 传数组）",
+        # 排序
+        if sort_by:
+            reverse = (sort_order.lower() == "desc")
+            try:
+                matched.sort(
+                    key=lambda x: x.get(sort_by) if x.get(sort_by) is not None else float('-inf'),
+                    reverse=reverse,
+                )
+            except (TypeError, ValueError):
+                pass  # 排序失败时保持原序
+
+        # 限制数量
+        limited = matched[:limit]
+
+        return {
+            "success": True,
+            "results": limited,
+            "summary": {
+                "total_input": len(stocks_data),
+                "total_matched": len(matched),
+                "returned": len(limited),
+                "match_rate": round(len(matched) / len(stocks_data), 4) if stocks_data else 0,
+            },
+            "conditions_applied": conditions,
+            "sort_by": sort_by,
+            "sort_order": sort_order,
+        }
+
+    return mcp_serve("screen_stocks", _build, "条件选股失败", dump=dict_to_json)
+
+
+async def get_screening_conditions() -> str:
+    """
+    获取支持的选股条件清单。
+
+    返回所有可选的筛选字段，包含字段名、所属类别、类型、单位和支持的运算符。
+    可用于让 AI Agent 了解 screen_stocks 工具支持的筛选条件。
+
+    Returns:
+        选股条件清单 (JSON):
+        - categories: 条件类别
+        - conditions: 条件详情列表
+        - total_count: 条件总数
+        - examples: 使用示例
+    """
+    def _build() -> dict:
+        return {
+            "success": True,
+            "categories": CONDITION_CATEGORIES,
+            "conditions": SCREENING_CONDITIONS,
+            "total_count": len(SCREENING_CONDITIONS),
+            "operator_explanation": {
+                "<": "小于",
+                "<=": "小于等于",
+                ">": "大于",
+                ">=": "大于等于",
+                "==": "等于（用于布尔/枚举）",
+                "between": "区间（value 传 [low, high]）",
+                "in": "在集合中（value 传数组）",
+                "not_in": "不在集合中（value 传数组）",
+            },
+            "examples": [
+                {
+                    "desc": "低估值蓝筹",
+                    "conditions": [
+                        {"field": "pe", "operator": "<", "value": 15},
+                        {"field": "pb", "operator": "<", "value": 1.5},
+                        {"field": "market_cap", "operator": ">", "value": 500},
+                        {"field": "is_st", "operator": "==", "value": False}
+                    ]
                 },
-                "examples": [
-                    {
-                        "desc": "低估值蓝筹",
-                        "conditions": [
-                            {"field": "pe", "operator": "<", "value": 15},
-                            {"field": "pb", "operator": "<", "value": 1.5},
-                            {"field": "market_cap", "operator": ">", "value": 500},
-                            {"field": "is_st", "operator": "==", "value": False}
-                        ]
-                    },
-                    {
-                        "desc": "高成长小盘",
-                        "conditions": [
-                            {"field": "revenue_growth", "operator": ">", "value": 30},
-                            {"field": "profit_growth", "operator": ">", "value": 50},
-                            {"field": "market_cap", "operator": "between", "value": [50, 300]},
-                            {"field": "board", "operator": "in", "value": ["main_sh", "main_sz"]}
-                        ]
-                    },
-                    {
-                        "desc": "超跌反弹",
-                        "conditions": [
-                            {"field": "rsi_14", "operator": "<", "value": 30},
-                            {"field": "boll_percent_b", "operator": "<", "value": 0.2},
-                            {"field": "momentum_20d", "operator": "<", "value": -10}
-                        ]
-                    }
-                ],
-                "usage": (
-                    "调用 screen_stocks 工具，传入 stocks_data 和 conditions 即可筛选。"
-                    "stocks_data 的每个元素必须包含 conditions 中用到的字段名。"
-                ),
-            })
-        except Exception as e:
-            return error_response(f"获取选股条件清单失败: {e}", "get_screening_conditions")
+                {
+                    "desc": "高成长小盘",
+                    "conditions": [
+                        {"field": "revenue_growth", "operator": ">", "value": 30},
+                        {"field": "profit_growth", "operator": ">", "value": 50},
+                        {"field": "market_cap", "operator": "between", "value": [50, 300]},
+                        {"field": "board", "operator": "in", "value": ["main_sh", "main_sz"]}
+                    ]
+                },
+                {
+                    "desc": "超跌反弹",
+                    "conditions": [
+                        {"field": "rsi_14", "operator": "<", "value": 30},
+                        {"field": "boll_percent_b", "operator": "<", "value": 0.2},
+                        {"field": "momentum_20d", "operator": "<", "value": -10}
+                    ]
+                }
+            ],
+            "usage": (
+                "调用 screen_stocks 工具，传入 stocks_data 和 conditions 即可筛选。"
+                "stocks_data 的每个元素必须包含 conditions 中用到的字段名。"
+            ),
+        }
+
+    return mcp_serve("get_screening_conditions", _build, "获取选股条件清单失败", dump=dict_to_json)
+
+
+def register(mcp: FastMCP):
+    """Register stock screening tools with the MCP server.
+
+    QI-ARCH-02 全量上提（2026-11-19）：2 工具体模块级，引用注册。"""
+    for _fn in (
+        screen_stocks,
+        get_screening_conditions,
+    ):
+        mcp.tool()(_fn)
