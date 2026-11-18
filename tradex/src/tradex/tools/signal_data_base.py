@@ -26,6 +26,7 @@ import pandas as pd
 from mcp.server.fastmcp import FastMCP
 
 from ..data_sources import get_router
+from ..data_sources._column_adapter import OHLCV_EN, rename_present
 from ..utils.cache import TTL_DAILY, cache
 from ..utils.formatter import error_response, dict_to_json
 from ..utils.symbol import normalize_symbol
@@ -248,14 +249,8 @@ def register(mcp: FastMCP):
                     f"无 {indicator} 数据 ({symbol})", "get_technical_indicator"
                 )
 
-            # 列名标准化（中文 → 英文，兼容多数据源）
-            col_map = {
-                "日期": "Date", "开盘": "Open", "最高": "High",
-                "最低": "Low", "收盘": "Close", "成交量": "Volume",
-                "date": "Date", "open": "Open", "high": "High",
-                "low": "Low", "close": "Close", "volume": "Volume",
-            }
-            df = df.rename(columns={k: v for k, v in col_map.items() if k in df.columns})
+            # 源列名翻译下沉适配器出口（QI-ARCH-04）
+            df = rename_present(df, OHLCV_EN)
             needed = ["Date", "Open", "High", "Low", "Close", "Volume"]
             df = df[[c for c in needed if c in df.columns]]
 

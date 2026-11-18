@@ -23,6 +23,7 @@ import pandas as pd
 from mcp.server.fastmcp import FastMCP
 
 from ..data_sources import get_router
+from ..data_sources._column_adapter import OHLCV_EN, rename_present
 from ..utils.cache import TTL_DAILY, cache
 from ..utils.formatter import dict_to_json, error_response
 from ..utils.symbol import normalize_symbol
@@ -704,14 +705,8 @@ def _load_ohlcv(code: str, look_back_days: int) -> pd.DataFrame:
     if df is None or df.empty:
         raise ValueError(f"无法获取 {code} 的 OHLCV 数据")
 
-    # 列名标准化（兼容东方财富中文列名与 eltdx/腾讯英文列名）
-    col_map = {
-        "日期": "Date", "开盘": "Open", "最高": "High",
-        "最低": "Low", "收盘": "Close", "成交量": "Volume",
-        "date": "Date", "open": "Open", "high": "High",
-        "low": "Low", "close": "Close", "volume": "Volume",
-    }
-    df = df.rename(columns=col_map)
+    # 源列名翻译下沉适配器出口（QI-ARCH-04）
+    df = rename_present(df, OHLCV_EN)
     needed = ["Date", "Open", "High", "Low", "Close", "Volume"]
     df = df[[c for c in needed if c in df.columns]]
 

@@ -22,6 +22,7 @@ from typing import Any
 import pandas as pd
 
 from ..data_sources import get_router
+from ..data_sources._column_adapter import MINUTE_EN, rename_present
 from ..utils.cache import TTL_DAILY, TTL_REALTIME, cache
 from ..utils.formatter import df_to_json, df_to_records, dict_to_json, slim_df
 from ..utils.symbol import (
@@ -379,18 +380,8 @@ def get_intraday_data(symbol: str) -> dict[str, Any]:
         if df is None or df.empty:
             raise ValueError(f"获取分时数据失败 ({code}): 数据源返回空数据")
 
-        # 兼容 akshare(时间/开盘/收盘/均价/成交量) 与 eltdx(时间/价格/均价/成交量) 列名
-        col_map = {
-            "时间": "time", "time": "time",
-            "开盘": "open", "open": "open",
-            "收盘": "close", "close": "close", "价格": "close", "price": "close",
-            "最高": "high", "high": "high",
-            "最低": "low", "low": "low",
-            "均价": "avg_price", "avg_price": "avg_price",
-            "成交量": "volume", "volume": "volume",
-            "成交额": "amount", "amount": "amount",
-        }
-        df = df.rename(columns={k: v for k, v in col_map.items() if k in df.columns})
+        # 源列名翻译下沉适配器出口（QI-ARCH-04：映射表归 data_sources 层单点）
+        df = rename_present(df, MINUTE_EN)
 
         points = []
         for _, row in df.iterrows():

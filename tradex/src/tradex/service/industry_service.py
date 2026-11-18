@@ -13,6 +13,7 @@ from typing import Any
 import pandas as pd
 
 from ..data_sources import get_router
+from ..data_sources._column_adapter import SECTOR_SINA_COLS
 from ..utils.cache import TTL_DAILY, cache
 from ..utils.formatter import df_to_json, df_to_records, slim_df
 
@@ -116,15 +117,9 @@ def get_sector_fund_flow(
                 import akshare as ak
                 sina_df = ak.stock_sector_spot()
                 if sina_df is not None and not sina_df.empty:
-                    _col_map = {
-                        "板块": "板块", "涨跌幅": "涨跌幅", "涨跌额": "涨跌额",
-                        "总成交额": "总成交额", "总成交量": "总成交量",
-                        "公司家数": "公司家数", "平均价格": "平均价格",
-                    }
-                    keep = [c for c in _col_map if c in sina_df.columns]
-                    df = sina_df[keep].rename(
-                        columns={k: v for k, v in _col_map.items() if k in keep}
-                    )
+                    # 源列名翻译下沉适配器出口（QI-ARCH-04）
+                    keep = [c for c in SECTOR_SINA_COLS if c in sina_df.columns]
+                    df = sina_df[keep]
                     fallback_note = "新浪财经（备源-无资金流明细）"
             except Exception:
                 pass
