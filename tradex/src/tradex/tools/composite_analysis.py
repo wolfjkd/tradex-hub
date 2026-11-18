@@ -225,205 +225,220 @@ def _get_limit_up_down_sync() -> dict:
     return {"limit_up": up_count, "limit_down": down_count}
 
 
+# （QI-ARCH-02 全量上提，2026-11-19：3 个工具体模块级化——async gather +
+# 多分支显式 error_response 的容错降级语义原样保留（mcp_serve 同步 build
+# 不适配 async 的已知例外，与 diagnostics.list_all_tools 同款，记交接）；
+# 上提主目标达成：_get_*_sync 内部函数行为测试可直接 import 打桩。）
+
+
+
+"""Register composite analysis tools with the MCP server."""
+
+async def analyze_stock_comprehensive(symbol: str) -> str:
+    """
+    个股综合分析 — 一次调用获取完整分析视图。
+
+    组合以下维度数据：
+    - 实时行情（价格、涨跌、成交量、市值、换手率）
+    - 公司信息（行业、上市日期、总股本等）
+    - 财务指标（ROE、净利率、毛利率、资产负债率，最近4期）
+    - 板块资金流向（当日行业资金流入/流出 Top5）
+
+    Args:
+        symbol: 6位A股股票代码，如 "600519"（贵州茅台）
+
+    Returns:
+        JSON 格式的综合分析结果，包含各维度数据和成功/失败状态。
+    """
+    symbol = normalize_symbol(symbol)
+    cache_key = f"composite:stock:{symbol}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    # 并行获取各维度数据
+    quote_task = _safe_call(_get_realtime_quote_sync, symbol)
+    company_task = _safe_call(_get_company_info_sync, symbol)
+    financial_task = _safe_call(_get_financial_indicators_sync, symbol)
+    fund_flow_task = _safe_call(_get_sector_fund_flow_sync)
+
+    quote_result, company_result, financial_result, fund_flow_result = (
+        await asyncio.gather(
+            quote_task, company_task, financial_task, fund_flow_task
+        )
+    )
+
+    result = {
+        "symbol": symbol,
+        "realtime_quote": quote_result,
+        "company_info": company_result,
+        "financial_indicators": financial_result,
+        "sector_fund_flow": fund_flow_result,
+    }
+
+    # 统计成功数
+    success_count = sum(
+        1 for r in [quote_result, company_result, financial_result, fund_flow_result]
+        if r.get("success")
+    )
+    result["summary"] = {
+        "total_dimensions": 4,
+        "success_dimensions": success_count,
+        "status": "complete" if success_count == 4 else "partial",
+    }
+
+    output = dict_to_json(result)
+    cache.set(cache_key, output, TTL_REALTIME)
+    return output
+
+async def analyze_industry_comparison(symbol: str) -> str:
+    """
+    行业对比分析 — 个股指标 vs 同行业均值。
+
+    获取个股的行业分类，然后获取同行业所有股票的关键指标，
+    计算行业平均值，对比个股在行业中的排名。
+
+    Args:
+        symbol: 6位A股股票代码，如 "600519"（贵州茅台）
+
+    Returns:
+        JSON 格式的行业对比分析结果。
+    """
+    symbol = normalize_symbol(symbol)
+    cache_key = f"composite:industry:{symbol}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    # Step 1: 获取个股行业信息
+    company_result = await _safe_call(_get_company_info_sync, symbol)
+    if not company_result.get("success"):
+        return error_response(
+            f"无法获取公司信息: {company_result.get('error')}",
+            "analyze_industry_comparison",
+        )
+
+    industry = company_result["data"].get("行业", "")
+
+    # Step 2: 获取行业成分股
+    try:
+        industry_code = None
+        board_df, _src = _router.route(
+            "industry_data", endpoint="board_industry_name_em"
+        )
+        if board_df is not None and not board_df.empty:
+            match = board_df[board_df["板块名称"].str.contains(industry, na=False)]
+            if not match.empty:
+                industry_code = match.iloc[0].get("板块代码")
+
+        if industry_code is None:
+            return error_response(
+                f"未找到行业 '{industry}' 的板块代码",
+                "analyze_industry_comparison",
+            )
+
+        # 获取行业成分股
+        constituents, _src = _router.route(
+            "industry_data",
+            endpoint="board_industry_cons_em",
+            industry=industry,
+        )
+        if constituents is None or constituents.empty:
+            return error_response(
+                f"行业 '{industry}' 无成分股数据",
+                "analyze_industry_comparison",
+            )
+    except Exception as exc:
+        return error_response(
+            f"获取行业数据失败: {exc}",
+            "analyze_industry_comparison",
+        )
+
+    # Step 3: 计算行业统计
+    stats = {
+        "industry": industry,
+        "constituent_count": len(constituents),
+        "stock_rank": None,
+    }
+
+    # 尝试计算关键指标的行业排名
+    for metric, label in [
+        ("涨跌幅", "change_pct"),
+        ("换手率", "turnover_rate"),
+        ("市盈率-动态", "pe_ratio"),
+    ]:
+        if metric in constituents.columns:
+            col = constituents[metric]
+            stock_row = constituents[constituents["代码"] == symbol]
+            if not stock_row.empty:
+                stock_val = float(stock_row.iloc[0][metric])
+                rank = int((col > stock_val).sum()) + 1
+                stats[label] = {
+                    "stock_value": stock_val,
+                    "industry_avg": round(float(col.mean()), 4),
+                    "industry_median": round(float(col.median()), 4),
+                    "rank": rank,
+                    "total": len(constituents),
+                }
+
+    output = dict_to_json(stats)
+    cache.set(cache_key, output, TTL_DAILY)
+    return output
+
+async def analyze_market_overview() -> str:
+    """
+    市场全景分析 — 大盘指数 + 板块资金 + 涨跌停统计。
+
+    一次获取市场全景数据：
+    - 三大指数（上证、深证、创业板）实时行情
+    - 行业板块资金流向 Top5
+    - 涨停/跌停数量统计
+
+    Returns:
+        JSON 格式的市场全景分析结果。
+    """
+    cache_key = "composite:market_overview"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    # 并行获取
+    market_task = _safe_call(_get_market_overview_sync)
+    fund_flow_task = _safe_call(_get_sector_fund_flow_sync)
+    limit_task = _safe_call(_get_limit_up_down_sync)
+
+    market_result, fund_flow_result, limit_result = await asyncio.gather(
+        market_task, fund_flow_task, limit_task
+    )
+
+    result = {
+        "market_indices": market_result,
+        "sector_fund_flow": fund_flow_result,
+        "limit_up_down": limit_result,
+    }
+
+    success_count = sum(
+        1 for r in [market_result, fund_flow_result, limit_result]
+        if r.get("success")
+    )
+    result["summary"] = {
+        "total_dimensions": 3,
+        "success_dimensions": success_count,
+        "status": "complete" if success_count == 3 else "partial",
+    }
+
+    output = dict_to_json(result)
+    cache.set(cache_key, output, TTL_REALTIME)
+    return output
+
+
 def register(mcp: FastMCP):
-    """Register composite analysis tools with the MCP server."""
+    """Register composite analysis tools with the MCP server.
 
-    @mcp.tool()
-    async def analyze_stock_comprehensive(symbol: str) -> str:
-        """
-        个股综合分析 — 一次调用获取完整分析视图。
-
-        组合以下维度数据：
-        - 实时行情（价格、涨跌、成交量、市值、换手率）
-        - 公司信息（行业、上市日期、总股本等）
-        - 财务指标（ROE、净利率、毛利率、资产负债率，最近4期）
-        - 板块资金流向（当日行业资金流入/流出 Top5）
-
-        Args:
-            symbol: 6位A股股票代码，如 "600519"（贵州茅台）
-
-        Returns:
-            JSON 格式的综合分析结果，包含各维度数据和成功/失败状态。
-        """
-        symbol = normalize_symbol(symbol)
-        cache_key = f"composite:stock:{symbol}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
-        # 并行获取各维度数据
-        quote_task = _safe_call(_get_realtime_quote_sync, symbol)
-        company_task = _safe_call(_get_company_info_sync, symbol)
-        financial_task = _safe_call(_get_financial_indicators_sync, symbol)
-        fund_flow_task = _safe_call(_get_sector_fund_flow_sync)
-
-        quote_result, company_result, financial_result, fund_flow_result = (
-            await asyncio.gather(
-                quote_task, company_task, financial_task, fund_flow_task
-            )
-        )
-
-        result = {
-            "symbol": symbol,
-            "realtime_quote": quote_result,
-            "company_info": company_result,
-            "financial_indicators": financial_result,
-            "sector_fund_flow": fund_flow_result,
-        }
-
-        # 统计成功数
-        success_count = sum(
-            1 for r in [quote_result, company_result, financial_result, fund_flow_result]
-            if r.get("success")
-        )
-        result["summary"] = {
-            "total_dimensions": 4,
-            "success_dimensions": success_count,
-            "status": "complete" if success_count == 4 else "partial",
-        }
-
-        output = dict_to_json(result)
-        cache.set(cache_key, output, TTL_REALTIME)
-        return output
-
-    @mcp.tool()
-    async def analyze_industry_comparison(symbol: str) -> str:
-        """
-        行业对比分析 — 个股指标 vs 同行业均值。
-
-        获取个股的行业分类，然后获取同行业所有股票的关键指标，
-        计算行业平均值，对比个股在行业中的排名。
-
-        Args:
-            symbol: 6位A股股票代码，如 "600519"（贵州茅台）
-
-        Returns:
-            JSON 格式的行业对比分析结果。
-        """
-        symbol = normalize_symbol(symbol)
-        cache_key = f"composite:industry:{symbol}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
-        # Step 1: 获取个股行业信息
-        company_result = await _safe_call(_get_company_info_sync, symbol)
-        if not company_result.get("success"):
-            return error_response(
-                f"无法获取公司信息: {company_result.get('error')}",
-                "analyze_industry_comparison",
-            )
-
-        industry = company_result["data"].get("行业", "")
-
-        # Step 2: 获取行业成分股
-        try:
-            industry_code = None
-            board_df, _src = _router.route(
-                "industry_data", endpoint="board_industry_name_em"
-            )
-            if board_df is not None and not board_df.empty:
-                match = board_df[board_df["板块名称"].str.contains(industry, na=False)]
-                if not match.empty:
-                    industry_code = match.iloc[0].get("板块代码")
-
-            if industry_code is None:
-                return error_response(
-                    f"未找到行业 '{industry}' 的板块代码",
-                    "analyze_industry_comparison",
-                )
-
-            # 获取行业成分股
-            constituents, _src = _router.route(
-                "industry_data",
-                endpoint="board_industry_cons_em",
-                industry=industry,
-            )
-            if constituents is None or constituents.empty:
-                return error_response(
-                    f"行业 '{industry}' 无成分股数据",
-                    "analyze_industry_comparison",
-                )
-        except Exception as exc:
-            return error_response(
-                f"获取行业数据失败: {exc}",
-                "analyze_industry_comparison",
-            )
-
-        # Step 3: 计算行业统计
-        stats = {
-            "industry": industry,
-            "constituent_count": len(constituents),
-            "stock_rank": None,
-        }
-
-        # 尝试计算关键指标的行业排名
-        for metric, label in [
-            ("涨跌幅", "change_pct"),
-            ("换手率", "turnover_rate"),
-            ("市盈率-动态", "pe_ratio"),
-        ]:
-            if metric in constituents.columns:
-                col = constituents[metric]
-                stock_row = constituents[constituents["代码"] == symbol]
-                if not stock_row.empty:
-                    stock_val = float(stock_row.iloc[0][metric])
-                    rank = int((col > stock_val).sum()) + 1
-                    stats[label] = {
-                        "stock_value": stock_val,
-                        "industry_avg": round(float(col.mean()), 4),
-                        "industry_median": round(float(col.median()), 4),
-                        "rank": rank,
-                        "total": len(constituents),
-                    }
-
-        output = dict_to_json(stats)
-        cache.set(cache_key, output, TTL_DAILY)
-        return output
-
-    @mcp.tool()
-    async def analyze_market_overview() -> str:
-        """
-        市场全景分析 — 大盘指数 + 板块资金 + 涨跌停统计。
-
-        一次获取市场全景数据：
-        - 三大指数（上证、深证、创业板）实时行情
-        - 行业板块资金流向 Top5
-        - 涨停/跌停数量统计
-
-        Returns:
-            JSON 格式的市场全景分析结果。
-        """
-        cache_key = "composite:market_overview"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
-        # 并行获取
-        market_task = _safe_call(_get_market_overview_sync)
-        fund_flow_task = _safe_call(_get_sector_fund_flow_sync)
-        limit_task = _safe_call(_get_limit_up_down_sync)
-
-        market_result, fund_flow_result, limit_result = await asyncio.gather(
-            market_task, fund_flow_task, limit_task
-        )
-
-        result = {
-            "market_indices": market_result,
-            "sector_fund_flow": fund_flow_result,
-            "limit_up_down": limit_result,
-        }
-
-        success_count = sum(
-            1 for r in [market_result, fund_flow_result, limit_result]
-            if r.get("success")
-        )
-        result["summary"] = {
-            "total_dimensions": 3,
-            "success_dimensions": success_count,
-            "status": "complete" if success_count == 3 else "partial",
-        }
-
-        output = dict_to_json(result)
-        cache.set(cache_key, output, TTL_REALTIME)
-        return output
+    QI-ARCH-02 全量上提（2026-11-19）：3 工具体模块级，引用注册。"""
+    for _fn in (
+        analyze_stock_comprehensive,
+        analyze_industry_comparison,
+        analyze_market_overview,
+    ):
+        mcp.tool()(_fn)
