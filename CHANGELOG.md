@@ -59,6 +59,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ---
 
+## [批次 A·未发版] - 2026-11-10（审计 P0 清债九项修复——史实补记，代码已随 v3.9.2 起发布）
+
+> 2026-11-18 质检 QI-SPEC-01 补记：批次 A（8124b98 收尾 + 47562d9 恢复）施工时版本号不动未发版，CHANGELOG 零承载，本段按 git log 史实补记。
+
+### Fixed
+- requirements.txt 补 prometheus_client>=0.20.0（审计硬违规#1 依赖双处失同步）
+- lockup RPT_LIFT_STAGE 字段改版重映射：FREE_SHARES_TYPE / CURRENT_FREE_SHARES / FREE_SHARES 新名优先旧名兜底，history+upcoming 两处（P1 空壳假 0 根治；文本版漏改面于批次 C3 收敛单点时补齐）
+- akshare_fetchers `_TRADE_DATES_CACHE` 改 `(fetched_on, days)` 按获取日戳刷新，跨天/跨年即重拉（拆 P1 跨年时间炸弹；批次 C4 并入 get_or_set 统一缓存边界）
+- fetch_bond_yield_cn_backup 改走 `_ak()` 统一 set_timeout 防御
+- macro_official_fetchers 新增 `ChinabondEmptyShellError` 替代「空壳 in str(e)」消息哨兵；`_chinabond_html_to_curve_df` HTML 兜底统一双 schema 归一；裸 raise 改显式 RuntimeError 带真因链（from json_exc）
+
+### Changed
+- CHANGELOG v3.9.1 段勘误：原「零代码维护版」失实，补 6 代码提交清单与计数口径；README badge/计数同步勘误（REST 81→82、注册 158→159、端点 77→82）；docs/MCP_TOOLS.md 版本戳 v3.9.0→v3.9.1
+- 测试补强：新增 test_lockup_fields / test_trade_dates_cache（P1 双修复红回路）；test_bond_yield_backup +83（备源降级链与 HTML 归一覆盖）；test_pmi_returns_envelope 补 network 标（真连统计局源 502 非契约失败实证）
+
+### 事件（get_history 误删-恢复，47562d9）
+- 批次 A 将 shortline_service.get_history 判「零调用死代码」删除（-53 行），后证实系漏判**跨仓调用方**（TradeX emotion_review.get_history:211 在调）→ TradeX 情绪历史页签运行时 AttributeError + 其 CI 连带红灯（run 42778447115 实录）→ 按 8124b98^ 原文恢复 53 行并补 docstring 跨仓调用方警示（本仓内行为零变更）
+
+---
+
 ## [3.9.2] - 2026-11-11（审计批次 B：防御加固，无人值守施工）
 
 ### 代码变更
