@@ -22,6 +22,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from ._mcp_serve import mcp_serve
 from ..utils.formatter import dict_to_json, error_response
 
 
@@ -237,172 +238,183 @@ PERFORMANCE_METRICS_CATALOG = [
 # MCP 工具注册
 # ──────────────────────────────────────────────────────────────────
 
+# （QI-ARCH-02 全量上提，2026-11-19：2 个工具体模块级化 + mcp_serve 出口
+# 收拢（dump=dict_to_json）；显式参数校验保留原样。）
+
+
+async def calculate_performance(
+    equity_curve: list[float],
+    trades: list[dict] | None = None,
+    benchmark_curve: list[float] | None = None,
+    risk_free_rate: float = 0.03,
+    trading_days: int = 252,
+) -> str:
+    """
+    计算完整的策略绩效指标。
+
+    输入权益曲线和交易记录，输出涵盖收益、风险、风险调整收益、
+    交易质量、费用统计的完整绩效报告。
+
+    Args:
+        equity_curve: 权益曲线数组（日频），如 [1000000, 1005000, 1010000, ...]
+        trades: 交易记录数组，每条记录可含 profit/commission/stamp_tax/slippage 字段
+        benchmark_curve: 基准权益曲线（可选），用于计算超额收益
+        risk_free_rate: 无风险利率，默认0.03（3%）
+        trading_days: 年交易日数，默认252
+
+    Returns:
+        完整绩效报告 (JSON)，包含：
+        - return_metrics: 收益类指标
+        - risk_metrics: 风险类指标
+        - risk_adjusted_metrics: 风险调整收益指标
+        - trade_quality_metrics: 交易质量指标
+        - cost_metrics: 费用统计指标
+        - benchmark_metrics: 基准对比指标（如有基准）
+    """
+    if not equity_curve or len(equity_curve) < 2:
+        return error_response(
+            "参数错误: equity_curve 至少需要 2 个数据点",
+            "calculate_performance",
+        )
+
+    def _build() -> dict:
+        trades = trades or []
+        max_dd, peak_idx, trough_idx = _max_drawdown(equity_curve)
+
+        # 收益类
+        total_ret = _total_return(equity_curve)
+        ann_ret = _annualized_return(equity_curve, trading_days)
+
+        return_metrics = {
+            "total_return": round(total_ret, 4),
+            "annualized_return": round(ann_ret, 4),
+            "days": len(equity_curve),
+            "initial_equity": equity_curve[0],
+            "final_equity": equity_curve[-1],
+        }
+
+        # 风险类
+        risk_metrics = {
+            "volatility": round(_volatility(equity_curve, trading_days), 4),
+            "downside_volatility": round(_downside_volatility(equity_curve, trading_days), 4),
+            "max_drawdown": round(max_dd, 4),
+            "max_drawdown_peak_idx": peak_idx,
+            "max_drawdown_trough_idx": trough_idx,
+            "var_95": round(_var_95(equity_curve), 4),
+            "cvar_95": round(_cvar_95(equity_curve), 4),
+        }
+
+        # 风险调整收益（年化基数与 risk_metrics 的 volatility 保持一致）
+        sharpe = _sharpe_ratio(equity_curve, risk_free_rate, trading_days)
+        sortino = _sortino_ratio(equity_curve, risk_free_rate, trading_days)
+        calmar = _calmar_ratio(equity_curve, trading_days)
+        risk_adjusted_metrics = {
+            "sharpe_ratio": round(sharpe, 4) if sharpe != float('inf') else "inf",
+            "sortino_ratio": round(sortino, 4) if sortino != float('inf') else "inf",
+            "calmar_ratio": round(calmar, 4) if calmar != float('inf') else "inf",
+            "risk_free_rate": risk_free_rate,
+        }
+
+        # 交易质量
+        total_profit = sum(t.get('profit', 0) for t in trades)
+        total_trades = len(trades)
+        win_count = sum(1 for t in trades if t.get('profit', 0) > 0)
+        loss_count = sum(1 for t in trades if t.get('profit', 0) < 0)
+        pf = _profit_factor(trades)
+        trade_quality_metrics = {
+            "total_trades": total_trades,
+            "win_count": win_count,
+            "loss_count": loss_count,
+            "win_rate": round(_win_rate(trades), 4),
+            "profit_factor": round(pf, 4) if pf != float('inf') else "inf",
+            "expected_return": round(_expected_return(trades), 4),
+            "total_profit": round(total_profit, 4),
+            "avg_profit_per_trade": round(total_profit / total_trades, 4) if total_trades > 0 else 0.0,
+        }
+
+        # 费用统计
+        total_commission = sum(t.get('commission', 0) for t in trades)
+        total_tax = sum(t.get('stamp_tax', 0) for t in trades)
+        total_slippage = sum(t.get('slippage', 0) for t in trades)
+        cost_metrics = {
+            "total_commission": round(total_commission, 4),
+            "total_tax": round(total_tax, 4),
+            "total_slippage": round(total_slippage, 4),
+            "total_cost": round(total_commission + total_tax + total_slippage, 4),
+            "cost_per_trade": round(
+                (total_commission + total_tax + total_slippage) / total_trades, 4
+            ) if total_trades > 0 else 0.0,
+        }
+
+        result: dict[str, Any] = {
+            "success": True,
+            "return_metrics": return_metrics,
+            "risk_metrics": risk_metrics,
+            "risk_adjusted_metrics": risk_adjusted_metrics,
+            "trade_quality_metrics": trade_quality_metrics,
+            "cost_metrics": cost_metrics,
+        }
+
+        # 基准对比
+        if benchmark_curve and len(benchmark_curve) >= 2:
+            bench_total_ret = _total_return(benchmark_curve)
+            bench_ann_ret = _annualized_return(benchmark_curve, trading_days)
+            benchmark_metrics = {
+                "benchmark_total_return": round(bench_total_ret, 4),
+                "benchmark_annualized_return": round(bench_ann_ret, 4),
+                "excess_return": round(ann_ret - bench_ann_ret, 4),
+                "excess_total_return": round(total_ret - bench_total_ret, 4),
+            }
+            result["benchmark_metrics"] = benchmark_metrics
+
+        return result
+
+    return mcp_serve("calculate_performance", _build, "绩效指标计算失败", dump=dict_to_json)
+
+
+async def list_performance_metrics() -> str:
+    """
+    列出所有支持的绩效指标清单。
+
+    返回按类别分组的绩效指标清单，每个指标包含名称、描述和计算公式。
+    可用于让 AI Agent 了解 calculate_performance 工具的输出字段含义。
+
+    Returns:
+        绩效指标清单 (JSON):
+        - categories: 指标类别列表
+          - return: 收益类
+          - risk: 风险类
+          - risk_adjusted: 风险调整收益类
+          - trade_quality: 交易质量类
+          - cost: 费用统计类
+        - metrics: 所有指标详情列表
+        - total_count: 指标总数
+    """
+    def _build() -> dict:
+        categories = {
+            "return": "收益类指标",
+            "risk": "风险类指标",
+            "risk_adjusted": "风险调整收益指标",
+            "trade_quality": "交易质量指标",
+            "cost": "费用统计指标",
+        }
+        return {
+            "success": True,
+            "categories": categories,
+            "metrics": PERFORMANCE_METRICS_CATALOG,
+            "total_count": len(PERFORMANCE_METRICS_CATALOG),
+            "usage": "调用 calculate_performance 工具，传入 equity_curve 和 trades 即可获得以上所有指标的完整报告",
+        }
+
+    return mcp_serve("list_performance_metrics", _build, "获取绩效指标清单失败", dump=dict_to_json)
+
+
 def register(mcp: FastMCP):
-    """Register performance metrics calculation tools with the MCP server."""
+    """Register performance metrics calculation tools with the MCP server.
 
-    @mcp.tool()
-    async def calculate_performance(
-        equity_curve: list[float],
-        trades: list[dict] | None = None,
-        benchmark_curve: list[float] | None = None,
-        risk_free_rate: float = 0.03,
-        trading_days: int = 252,
-    ) -> str:
-        """
-        计算完整的策略绩效指标。
-
-        输入权益曲线和交易记录，输出涵盖收益、风险、风险调整收益、
-        交易质量、费用统计的完整绩效报告。
-
-        Args:
-            equity_curve: 权益曲线数组（日频），如 [1000000, 1005000, 1010000, ...]
-            trades: 交易记录数组，每条记录可含 profit/commission/stamp_tax/slippage 字段
-            benchmark_curve: 基准权益曲线（可选），用于计算超额收益
-            risk_free_rate: 无风险利率，默认0.03（3%）
-            trading_days: 年交易日数，默认252
-
-        Returns:
-            完整绩效报告 (JSON)，包含：
-            - return_metrics: 收益类指标
-            - risk_metrics: 风险类指标
-            - risk_adjusted_metrics: 风险调整收益指标
-            - trade_quality_metrics: 交易质量指标
-            - cost_metrics: 费用统计指标
-            - benchmark_metrics: 基准对比指标（如有基准）
-        """
-        try:
-            if not equity_curve or len(equity_curve) < 2:
-                return error_response(
-                    "参数错误: equity_curve 至少需要 2 个数据点",
-                    "calculate_performance",
-                )
-
-            trades = trades or []
-            max_dd, peak_idx, trough_idx = _max_drawdown(equity_curve)
-
-            # 收益类
-            total_ret = _total_return(equity_curve)
-            ann_ret = _annualized_return(equity_curve, trading_days)
-
-            return_metrics = {
-                "total_return": round(total_ret, 4),
-                "annualized_return": round(ann_ret, 4),
-                "days": len(equity_curve),
-                "initial_equity": equity_curve[0],
-                "final_equity": equity_curve[-1],
-            }
-
-            # 风险类
-            risk_metrics = {
-                "volatility": round(_volatility(equity_curve, trading_days), 4),
-                "downside_volatility": round(_downside_volatility(equity_curve, trading_days), 4),
-                "max_drawdown": round(max_dd, 4),
-                "max_drawdown_peak_idx": peak_idx,
-                "max_drawdown_trough_idx": trough_idx,
-                "var_95": round(_var_95(equity_curve), 4),
-                "cvar_95": round(_cvar_95(equity_curve), 4),
-            }
-
-            # 风险调整收益（年化基数与 risk_metrics 的 volatility 保持一致）
-            sharpe = _sharpe_ratio(equity_curve, risk_free_rate, trading_days)
-            sortino = _sortino_ratio(equity_curve, risk_free_rate, trading_days)
-            calmar = _calmar_ratio(equity_curve, trading_days)
-            risk_adjusted_metrics = {
-                "sharpe_ratio": round(sharpe, 4) if sharpe != float('inf') else "inf",
-                "sortino_ratio": round(sortino, 4) if sortino != float('inf') else "inf",
-                "calmar_ratio": round(calmar, 4) if calmar != float('inf') else "inf",
-                "risk_free_rate": risk_free_rate,
-            }
-
-            # 交易质量
-            total_profit = sum(t.get('profit', 0) for t in trades)
-            total_trades = len(trades)
-            win_count = sum(1 for t in trades if t.get('profit', 0) > 0)
-            loss_count = sum(1 for t in trades if t.get('profit', 0) < 0)
-            pf = _profit_factor(trades)
-            trade_quality_metrics = {
-                "total_trades": total_trades,
-                "win_count": win_count,
-                "loss_count": loss_count,
-                "win_rate": round(_win_rate(trades), 4),
-                "profit_factor": round(pf, 4) if pf != float('inf') else "inf",
-                "expected_return": round(_expected_return(trades), 4),
-                "total_profit": round(total_profit, 4),
-                "avg_profit_per_trade": round(total_profit / total_trades, 4) if total_trades > 0 else 0.0,
-            }
-
-            # 费用统计
-            total_commission = sum(t.get('commission', 0) for t in trades)
-            total_tax = sum(t.get('stamp_tax', 0) for t in trades)
-            total_slippage = sum(t.get('slippage', 0) for t in trades)
-            cost_metrics = {
-                "total_commission": round(total_commission, 4),
-                "total_tax": round(total_tax, 4),
-                "total_slippage": round(total_slippage, 4),
-                "total_cost": round(total_commission + total_tax + total_slippage, 4),
-                "cost_per_trade": round(
-                    (total_commission + total_tax + total_slippage) / total_trades, 4
-                ) if total_trades > 0 else 0.0,
-            }
-
-            result: dict[str, Any] = {
-                "success": True,
-                "return_metrics": return_metrics,
-                "risk_metrics": risk_metrics,
-                "risk_adjusted_metrics": risk_adjusted_metrics,
-                "trade_quality_metrics": trade_quality_metrics,
-                "cost_metrics": cost_metrics,
-            }
-
-            # 基准对比
-            if benchmark_curve and len(benchmark_curve) >= 2:
-                bench_total_ret = _total_return(benchmark_curve)
-                bench_ann_ret = _annualized_return(benchmark_curve, trading_days)
-                benchmark_metrics = {
-                    "benchmark_total_return": round(bench_total_ret, 4),
-                    "benchmark_annualized_return": round(bench_ann_ret, 4),
-                    "excess_return": round(ann_ret - bench_ann_ret, 4),
-                    "excess_total_return": round(total_ret - bench_total_ret, 4),
-                }
-                result["benchmark_metrics"] = benchmark_metrics
-
-            return dict_to_json(result)
-        except Exception as e:
-            return error_response(f"绩效指标计算失败: {e}", "calculate_performance")
-
-    @mcp.tool()
-    async def list_performance_metrics() -> str:
-        """
-        列出所有支持的绩效指标清单。
-
-        返回按类别分组的绩效指标清单，每个指标包含名称、描述和计算公式。
-        可用于让 AI Agent 了解 calculate_performance 工具的输出字段含义。
-
-        Returns:
-            绩效指标清单 (JSON):
-            - categories: 指标类别列表
-              - return: 收益类
-              - risk: 风险类
-              - risk_adjusted: 风险调整收益类
-              - trade_quality: 交易质量类
-              - cost: 费用统计类
-            - metrics: 所有指标详情列表
-            - total_count: 指标总数
-        """
-        try:
-            categories = {
-                "return": "收益类指标",
-                "risk": "风险类指标",
-                "risk_adjusted": "风险调整收益指标",
-                "trade_quality": "交易质量指标",
-                "cost": "费用统计指标",
-            }
-            return dict_to_json({
-                "success": True,
-                "categories": categories,
-                "metrics": PERFORMANCE_METRICS_CATALOG,
-                "total_count": len(PERFORMANCE_METRICS_CATALOG),
-                "usage": "调用 calculate_performance 工具，传入 equity_curve 和 trades 即可获得以上所有指标的完整报告",
-            })
-        except Exception as e:
-            return error_response(f"获取绩效指标清单失败: {e}", "list_performance_metrics")
+    QI-ARCH-02 全量上提（2026-11-19）：2 工具体模块级，引用注册。"""
+    for _fn in (
+        calculate_performance,
+        list_performance_metrics,
+    ):
+        mcp.tool()(_fn)
