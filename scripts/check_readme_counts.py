@@ -68,11 +68,26 @@ PATTERNS = [
     # (名称, README 提取正则, 实跑值 getter 名)
     ("badge REST", r"badge/REST-(\d+)-", "rest"),
     ("badge Endpoints", r"badge/Endpoints-(\d+)-", "rest"),
+    ("badge Tools", r"badge/Tools-(\d+)-", "mcp"),
     ("数据类型（L34 句式）", r"(\d+) 个数据类型，(\d+) 个数据源注册", "types,regs"),
     ("MCP 工具数", r"(\d+) 个工具", "mcp"),
     ("REST 端点数", r"(\d+) 个端点", "rest"),
     ("REST 端点数（L136 紧凑现势）", r"(\d+) 端点，包裹响应", "rest"),
     ("全量路由图内计数", r"(\d+) 类型 / (\d+) 源", "types,regs"),
+    # —— 2026-11-18 QI-STD-02 补：六处计数漂移全漏的结构性盲区（惯犯 #9 防再犯）——
+    # L25 简介句式（数字与名词之间夹「MCP/REST」词——原「个工具/个端点」正则抓不到）
+    ("MCP 工具数（L25 夹词）", r"(\d+) 个 MCP 工具", "mcp"),
+    ("REST 端点数（L25 夹词）", r"(\d+) 个 REST 端点", "rest"),
+    # L281 REST 段首句（同夹词形态；与 L25 pattern 重叠属冗余护栏——宁重叠不漏抓）
+    ("REST 端点数（L281 夹词）", r"(\d+) 个 REST 端点统一挂在", "rest"),
+    # L246 清单标题（括号计数）
+    ("MCP 工具清单标题", r"MCP 工具清单（(\d+) 个）", "mcp"),
+    # L371 Prometheus 指标注释
+    ("Prometheus 工具计数注记", r"已注册 MCP 工具数（(\d+)，随工具可见性", "mcp"),
+    # L491 冒烟示例输出
+    ("冒烟示例 tools 字段", r'"tools":(\d+)', "mcp"),
+    # L516 工具可见性全量口径
+    ("工具可见性全量口径", r"缺失 = 全量 (\d+)", "mcp"),
 ]
 
 

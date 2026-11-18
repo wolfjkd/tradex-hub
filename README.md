@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/Python-3.13+-blue.svg" alt="Python"/>
   <img src="https://img.shields.io/badge/MCP-1.0-green.svg" alt="MCP"/>
   <img src="https://img.shields.io/badge/REST-83-blue.svg" alt="REST"/>
-  <img src="https://img.shields.io/badge/Tools-191-orange.svg" alt="MCP Tools"/>
+  <img src="https://img.shields.io/badge/Tools-192-orange.svg" alt="MCP Tools"/>
   <img src="https://img.shields.io/badge/Endpoints-83-blue.svg" alt="REST Endpoints"/>
   <img src="https://img.shields.io/badge/License-Apache--2.0-yellow.svg" alt="License"/>
   <img src="https://img.shields.io/badge/Version-3.9.4-blue.svg" alt="Version"/>
@@ -22,7 +22,7 @@
 
 ## 项目介绍
 
-tradex-hub 是一个**本地运行的金融数据中台**，把分散在多个数据源（通达信、腾讯财经、东方财富、同花顺、新浪、巨潮、财联社、AKShare 等）的 A 股数据，统一封装成 **191 个 MCP 工具** + **82 个 REST 端点**（2026-11-08 中证官方估值复活后基线），供 AI Agent（WorkBuddy / Claude Code / Cursor / Dify / LangChain）和前端看板（TradeX）一站式调用。
+tradex-hub 是一个**本地运行的金融数据中台**，把分散在多个数据源（通达信、腾讯财经、东方财富、同花顺、新浪、巨潮、财联社、AKShare 等）的 A 股数据，统一封装成 **192 个 MCP 工具** + **83 个 REST 端点**（2026-11-18 实跑对齐），供 AI Agent（WorkBuddy / Claude Code / Cursor / Dify / LangChain）和前端看板（TradeX）一站式调用。
 
 **核心定位**：让 AI Agent **不用关心数据从哪儿来、怎么反爬、怎么降级** —— 只管调一个统一接口，tradex-hub 自动选最优数据源、自动健康检查、自动故障隔离。
 
@@ -243,7 +243,7 @@ TDX_MCP_MIN_INTERVAL=0.8
 
 ---
 
-## MCP 工具清单（191 个）
+## MCP 工具清单（192 个）
 
 完整工具清单详见 [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md)（由 `scripts/generate_tool_docs.py` 从源码 AST 生成，含每个工具的说明）。按业务领域分组：
 
@@ -278,7 +278,7 @@ TDX_MCP_MIN_INTERVAL=0.8
 
 ## REST API
 
-82 个 REST 端点统一挂在 `/api/v1/*` 路径下，与 MCP 工具共享同一 service 层。
+83 个 REST 端点统一挂在 `/api/v1/*` 路径下，与 MCP 工具共享同一 service 层。
 
 ### 快速上手
 
@@ -368,7 +368,7 @@ if resp["code"] == 0:
 | `tradex_data_source_latency_seconds{source}` | Gauge | 数据源最近响应延迟（秒） |
 | `tradex_slow_queries_total` | Counter | 慢查询总数（超过 `TRADEX_SLOW_QUERY_MS` 默认 800ms） |
 | `tradex_gateway_uptime_seconds` | Gauge | 网关运行时长 |
-| `tradex_tools_registered` | Gauge | 已注册 MCP 工具数（191，随工具可见性 profile 变化） |
+| `tradex_tools_registered` | Gauge | 已注册 MCP 工具数（192，随工具可见性 profile 变化） |
 | `tradex_cache_hits_total` / `cache_misses_total` | Counter | 缓存命中 / 未命中 |
 
 ### Dashboard 监控看板
@@ -488,7 +488,7 @@ curl http://your-host:8000/api/v1/market/overview
 ```bash
 # 健康检查
 curl http://127.0.0.1:8000/health
-# 期望: {"status":"ok","service":"tradex-mcp","tools":191}
+# 期望: {"status":"ok","service":"tradex-mcp","tools":192}
 
 # REST 端点
 curl http://127.0.0.1:8000/api/v1/ping
@@ -513,7 +513,7 @@ curl http://127.0.0.1:8000/mcp -X POST \
 | 限流阈值 | 三层令牌桶阈值适用于通用场景；如需调整可通过环境变量 `TRADEX_RATE_LIMIT_GLOBAL` / `TRADEX_RATE_LIMIT_PER_IP` / `TRADEX_RATE_LIMIT_PER_ENDPOINT` 修改 |
 | 问财接入形态 | Web 端点被 TLS 指纹风控（浏览器环境校验），自建 WAP 通道 + hexin-v token（pywencai bundle.js 现生成）；单请求上限 2000 行 |
 | KPL 竞价历史 | 开盘啦竞价历史数据保留期极短（实测次日已查不到），交易日盘中调用价值最高 |
-| 工具可见性 | `config/mcp_tool_profile.json`（黑名单）可精简 MCP 暴露数量；文件不入 git，缺失 = 全量 191 |
+| 工具可见性 | `config/mcp_tool_profile.json`（黑名单）可精简 MCP 暴露数量；文件不入 git，缺失 = 全量 192 |
 
 ---
 
