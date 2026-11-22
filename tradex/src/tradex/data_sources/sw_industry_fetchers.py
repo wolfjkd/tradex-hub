@@ -108,7 +108,10 @@ def fetch_sw_industry_as_of(
     try:
         history = _load_history()
         if history.empty:
-            return pd.DataFrame()
+            # QI-STD-26（工单 17）：history 唯一空态成因 = 下载失败毒缓存
+            # （QI-STD-27，真实 xls 恒有数据）——断源不再折叠空表，如实抛出；
+            # 毒缓存本体（失败永久缓存空 df）另立台账待修。
+            raise RuntimeError("申万行业分类变迁史为空（历史文件下载失败，毒缓存待修 QI-STD-27）")
 
         # 假设 history 含列：股票代码, 开始日期, 结束日期, 行业代码, 行业名称
         # 列名按实际 .xls 调整
