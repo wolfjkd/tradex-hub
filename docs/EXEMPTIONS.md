@@ -39,9 +39,52 @@
 
 **范围外即违规**：dict/list/对象等非 df_to_json 缓存走裸 get/set = 违反 rule 7，09/10 迁移清单之外新出现的按门纪律处理。
 
+### 表三注记：QI-ARCH-10 全仓实测盘点（2026-11-22，工单 09/10 施工）
+
+> 实测 68 处手写 get/set × 20 文件（P1 估 65 处 ×17 文件，以施工实测为准）。迁移 13 处后，保留组全部登记如下——豁免范围外的裸 get/set grep 以本清单为准判零。
+
+**A 组｜df_to_json 序列化串缓存（裁决②豁免内，保留，28 处）**
+
+| 文件 | 处数 | 说明 |
+|---|---|---|
+| tools/macro_fx.py | 8 | 全部 df_to_json 串缓存 |
+| tools/news_events.py | 11 | 全部 df_to_json 串缓存 |
+| tools/valuation.py | 4 | 全部 df_to_json 串缓存（get_dividend_data 双分支各一 set） |
+| tools/exchange_official.py | 1 | df_to_json 串缓存 |
+| tools/kpl.py | 3 | get_kpl_limit_up / get_kpl_boards / get_kpl_bidding（df_to_json，含条件 TTL 变体） |
+| tools/price_data.py | 1 | get_stock_list（df_to_json 串缓存） |
+
+**B 组｜非 df_to_json 串缓存，get_or_set 不可保真迁移（保留待裁决，22 处）**
+
+| 文件 | 处数 | 不适配理由 |
+|---|---|---|
+| tools/signal_data_base.py | 5 | dict_to_json/json.dumps 串缓存 + miss 路线经 `mcp_serve(dump=dict_to_json)`/默认 dump 双重编码、hit 路线单编码直返（**原态 hit/miss 线上格式不一致**，QI-BUG-03 待裁决）；其中 2 处另有内容条件缓存 |
+| tools/signal_data_etf.py | 2 | 同上双重编码不对称 + 条件缓存 |
+| tools/signal_data_board.py | 3 | 同上 + get_limit_up_board 条件缓存含 WsServer 推送副作用 |
+| tools/signal_data_cb.py | 2 | 同上双重编码不对称 + 条件缓存 |
+| tools/signal_data_flow.py | 3 | 同上双重编码不对称（get_fund_flow_signal / get_dragon_tiger_signal / get_industry_comparison_signal） |
+| tools/analysis_engine.py | 1 | analyze_technical 同上双重编码不对称 |
+| tools/signal_data_flow.py（get_northbound_flow_signal） | 1 | 运行时类型依赖序列化器（dict→dict_to_json / DataFrame→df_to_json 双分支），命中丢类型信息不可保真迁移 |
+| tools/price_data.py（get_market_capitalization） | 1 | 多级降级编排，Tier1 dict_to_json / Tier2 df_to_json 混合串，串缓存命中即返回不可对象化 |
+| tools/tdx_tq.py | 1 | `_route_to_json` 骨架按运行时类型选 df_to_json/dict_to_json，命中丢类型信息不可保真迁移 |
+| tools/tdx_mcp.py | 3 | 同上骨架（`_router_route_cached`）+ 3 工具体前置 get |
+
+> B 组小计 22 = 双重编码组 16（signal_data_base 5 + etf 2 + board 3 + cb 2 + flow 3 + analysis_engine 1，QI-BUG-03）+ 类型依赖/多级编排组 6（flow.northbound 1 + market_capitalization 1 + tdx_tq 1 + tdx_mcp 3）。
+
+**C 组｜dict 对象缓存但 get_or_set 同步 factory 契约不适配（保留待裁决，5 处）**
+
+| 文件 | 处数 | 不适配理由 |
+|---|---|---|
+| service/diagnostic_service.py | 2 | analyze_stock_comprehensive / analyze_market_overview 的取数体为 `await asyncio.gather(...)`，get_or_set factory 为同步回调，协程不可等待（误用会缓存未 await 的 coroutine 对象） |
+| tools/composite_analysis.py | 3 | 同上（async gather / await _safe_call 编排体） |
+
+**D 组｜已迁移（13 处）**：service/market_service.py 7（工单 09 试点）+ service/diagnostic_service.py 1（analyze_technical）+ service/bigcaps_service.py 1（out=/store= 形态）+ service/price_service.py 1 + service/turnover_service.py 2（out=/store= + 降级原因串 store 闸门）+ tools/kpl.py 1（get_kpl_sentiment）——键/TTL/None 不缓存语义逐一保真，见台账「机械迁移模式」。
+
+
 ## 变更记录
 
 | 日期 | 变更 |
 |---|---|
 | 2026-11-22 | 初版（票 03，qc-20261122）：三张表登记 + 裁决②收紧范围落表三；composite/dividend/market_cap 三行标注「随裁决③收拢同步更新」 |
 | 2026-11-22 | 表一头注 AST 实测勘误（票 06，check_exit_shapes.py 挂门实测）：原式「9 手写 + tdx 自有骨架 5 + eltdx_data」重复计 tdx_tq 组 2（既在本表 9 行内又计入 5）；实测账 149 mcp_serve + 9 手写 + 3 tdx_mcp + 31 eltdx_data = 192，与 9 行表逐一对上、无 ±1 出入 |
+| 2026-11-22 | 表三注记（票 09/10，QI-ARCH-10）：全仓实测 68 处 × 20 文件盘点落档——A 组 df_to_json 豁免 28 保留；B 组非 df_to_json 串缓存 22 保留待裁决（双重编码组 16 = QI-BUG-03 + 类型依赖/多级 6）；C 组 async 编排体 5 保留待裁决；D 组迁移 13（试点 market_service 7 + 全量批 6） |
