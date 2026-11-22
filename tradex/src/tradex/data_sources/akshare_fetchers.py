@@ -918,7 +918,10 @@ def fetch_profit_forecast(symbol: str = "", **kwargs) -> dict:
         import urllib.request as _ur
         # 铁律：国内接口直连。默认 opener 会读 HTTP(S)_PROXY 环境变量，必须绕过。
         _opener = _ur.build_opener(_ur.ProxyHandler({}))
-        quote_url = f"https://qt.gtimg.cn/q={prefix}{code}"
+        # QI-BUG-01 修复：原代码引用未定义名 prefix → NameError 被尾部 except
+        # 吞成 valuation_note → 六字段静默失效 + 备源永不接管。
+        # 语义：A 股代码补交易所前缀拼腾讯行情 URL（同 http_fetchers._tencent_quote_vals）。
+        quote_url = f"https://qt.gtimg.cn/q={_prefixed_code(code)}"
         req = _ur.Request(quote_url)
         req.add_header("User-Agent", "Mozilla/5.0")
         quote_resp = _opener.open(req, timeout=5)
