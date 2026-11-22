@@ -916,6 +916,161 @@ def _build_eltdx_get_auction_data(code: str) -> str:
         return _err(f"auction data query failed: {e}")
 
 
+def _build_eltdx_get_category_quotes(category: str = "沪深a股", sort_by: str = "涨幅", count: int = 80) -> str:
+    """构建 eltdx_get_category_quotes 响应（原嵌套工具体上提，逻辑零改动）。"""
+    try:
+        start = time.time()
+        df, _src = _router.route("category_quotes", category=category, sort_by=sort_by, count=count)
+        latency_ms = round((time.time() - start) * 1000, 1)
+
+        if df is None or df.empty:
+            return _no_data(f"no category quotes for {category}")
+
+        quotes = []
+        for _, row in df.iterrows():
+            quotes.append({
+                "code": str(row.get("代码", "")),
+                "last_price": row.get("现价"),
+                "change_pct": row.get("涨跌幅"),
+                "amount": row.get("成交额"),
+                "bid1": row.get("买一"),
+                "ask1": row.get("卖一"),
+                "rise_speed": row.get("涨速"),
+            })
+
+        return _ok({
+            "category": category,
+            "sort_by": sort_by,
+            "latency_ms": latency_ms,
+            "count": len(quotes),
+            "quotes": quotes,
+        })
+    except Exception as e:
+        logger.exception("eltdx_get_category_quotes failed")
+        return _err(f"category quotes query failed: {e}")
+
+
+def _build_eltdx_get_trading_day() -> str:
+    """构建 eltdx_get_trading_day 响应（原嵌套工具体上提，逻辑零改动）。"""
+    try:
+        df, _src = _router.route("trading_day")
+        if df is None or df.empty:
+            return _no_data("no trading day")
+        row = df.iloc[0]
+        return _ok({
+            "server_date": str(row.get("服务器日期", "")),
+            "server_datetime": str(row.get("服务器时间", "")),
+        })
+    except Exception as e:
+        logger.exception("eltdx_get_trading_day failed")
+        return _err(f"trading day query failed: {e}")
+
+
+def _build_eltdx_get_opening_match_history(code: str, trading_date: str) -> str:
+    """构建 eltdx_get_opening_match_history 响应（原嵌套工具体上提，逻辑零改动）。"""
+    try:
+        start = time.time()
+        df, _src = _router.route("opening_match_history", code=code, trading_date=trading_date)
+        latency_ms = round((time.time() - start) * 1000, 1)
+
+        if df is None or df.empty:
+            return _no_data(f"no opening match for {code} on {trading_date}")
+
+        row = df.iloc[0]
+        return _ok({
+            "code": normalize_code_bare(code),
+            "trading_date": trading_date,
+            "latency_ms": latency_ms,
+            "open_price": float(row.get("价格", 0) or 0),
+            "open_volume": float(row.get("成交量", 0) or 0),
+            "open_amount": float(row.get("成交额", 0) or 0),
+        })
+    except Exception as e:
+        logger.exception("eltdx_get_opening_match_history failed")
+        return _err(f"opening match history query failed: {e}")
+
+
+def _build_eltdx_get_capital_changes(code: str) -> str:
+    """构建 eltdx_get_capital_changes 响应（原嵌套工具体上提，逻辑零改动）。"""
+    try:
+        start = time.time()
+        df, _src = _router.route("capital_changes", code=code)
+        latency_ms = round((time.time() - start) * 1000, 1)
+
+        if df is None or df.empty:
+            return _no_data(f"no capital changes for {code}")
+
+        changes = []
+        for _, row in df.iterrows():
+            changes.append({
+                "date": str(row.get("日期", "")),
+                "type": str(row.get("变动类型", "")),
+                "shares_before": row.get("变动前股本"),
+                "shares_after": row.get("变动后股本"),
+            })
+
+        return _ok({
+            "code": normalize_code_bare(code),
+            "latency_ms": latency_ms,
+            "count": len(changes),
+            "changes": changes,
+        })
+    except Exception as e:
+        logger.exception("eltdx_get_capital_changes failed")
+        return _err(f"capital changes query failed: {e}")
+
+
+def _build_eltdx_get_special_limits_scan() -> str:
+    """构建 eltdx_get_special_limits_scan 响应（原嵌套工具体上提，逻辑零改动）。"""
+    try:
+        start = time.time()
+        df, _src = _router.route("special_limits_scan")
+        latency_ms = round((time.time() - start) * 1000, 1)
+
+        if df is None or df.empty:
+            return _no_data("no special limits scan")
+
+        limits = []
+        for _, row in df.iterrows():
+            limits.append({
+                "code": str(row.get("代码", "")),
+                "limit_up_price": row.get("涨停价"),
+                "limit_down_price": row.get("跌停价"),
+            })
+
+        return _ok({
+            "latency_ms": latency_ms,
+            "count": len(limits),
+            "limits": limits,
+        })
+    except Exception as e:
+        logger.exception("eltdx_get_special_limits_scan failed")
+        return _err(f"special limits scan query failed: {e}")
+
+
+def _build_eltdx_get_f10_extra(entry: str, code: str) -> str:
+    """构建 eltdx_get_f10_extra 响应（原嵌套工具体上提，逻辑零改动）。"""
+    try:
+        start = time.time()
+        df, _src = _router.route("f10_extra", entry=entry, code=code)
+        latency_ms = round((time.time() - start) * 1000, 1)
+
+        if df is None or df.empty:
+            return _no_data(f"no f10 data for {entry} {code}")
+
+        return _ok({
+            "entry": entry,
+            "code": normalize_code_bare(code),
+            "latency_ms": latency_ms,
+            "columns": list(df.columns),
+            "row_count": len(df),
+            "rows": df.head(20).to_dict(orient="records"),
+        })
+    except Exception as e:
+        logger.exception("eltdx_get_f10_extra failed")
+        return _err(f"f10 extra query failed: {e}")
+
+
 # ============================================================
 # MCP 工具注册
 # ============================================================
@@ -1391,36 +1546,12 @@ def register(mcp: FastMCP):
             sort_by: 排序字段，"涨幅" / "成交额" / "现价" / "封单额" 等
             count: 返回条数，默认 80
         """
-        try:
-            start = time.time()
-            df, _src = _router.route("category_quotes", category=category, sort_by=sort_by, count=count)
-            latency_ms = round((time.time() - start) * 1000, 1)
-
-            if df is None or df.empty:
-                return _no_data(f"no category quotes for {category}")
-
-            quotes = []
-            for _, row in df.iterrows():
-                quotes.append({
-                    "code": str(row.get("代码", "")),
-                    "last_price": row.get("现价"),
-                    "change_pct": row.get("涨跌幅"),
-                    "amount": row.get("成交额"),
-                    "bid1": row.get("买一"),
-                    "ask1": row.get("卖一"),
-                    "rise_speed": row.get("涨速"),
-                })
-
-            return _ok({
-                "category": category,
-                "sort_by": sort_by,
-                "latency_ms": latency_ms,
-                "count": len(quotes),
-                "quotes": quotes,
-            })
-        except Exception as e:
-            logger.exception("eltdx_get_category_quotes failed")
-            return _err(f"category quotes query failed: {e}")
+        return mcp_serve(
+            "eltdx_get_category_quotes",
+            lambda: _build_eltdx_get_category_quotes(category, sort_by, count),
+            "category quotes query failed",
+            dump=False,
+        )
 
     @mcp.tool()
     async def eltdx_get_trading_day() -> str:
@@ -1432,18 +1563,12 @@ def register(mcp: FastMCP):
         Args:
             无参数
         """
-        try:
-            df, _src = _router.route("trading_day")
-            if df is None or df.empty:
-                return _no_data("no trading day")
-            row = df.iloc[0]
-            return _ok({
-                "server_date": str(row.get("服务器日期", "")),
-                "server_datetime": str(row.get("服务器时间", "")),
-            })
-        except Exception as e:
-            logger.exception("eltdx_get_trading_day failed")
-            return _err(f"trading day query failed: {e}")
+        return mcp_serve(
+            "eltdx_get_trading_day",
+            _build_eltdx_get_trading_day,
+            "trading day query failed",
+            dump=False,
+        )
 
     @mcp.tool()
     async def eltdx_get_opening_match_history(code: str, trading_date: str) -> str:
@@ -1456,26 +1581,12 @@ def register(mcp: FastMCP):
             code: 股票代码，如 "600170"
             trading_date: 交易日，格式 "20260813" 或 "2026-08-13"
         """
-        try:
-            start = time.time()
-            df, _src = _router.route("opening_match_history", code=code, trading_date=trading_date)
-            latency_ms = round((time.time() - start) * 1000, 1)
-
-            if df is None or df.empty:
-                return _no_data(f"no opening match for {code} on {trading_date}")
-
-            row = df.iloc[0]
-            return _ok({
-                "code": normalize_code_bare(code),
-                "trading_date": trading_date,
-                "latency_ms": latency_ms,
-                "open_price": float(row.get("价格", 0) or 0),
-                "open_volume": float(row.get("成交量", 0) or 0),
-                "open_amount": float(row.get("成交额", 0) or 0),
-            })
-        except Exception as e:
-            logger.exception("eltdx_get_opening_match_history failed")
-            return _err(f"opening match history query failed: {e}")
+        return mcp_serve(
+            "eltdx_get_opening_match_history",
+            lambda: _build_eltdx_get_opening_match_history(code, trading_date),
+            "opening match history query failed",
+            dump=False,
+        )
 
     @mcp.tool()
     async def eltdx_get_capital_changes(code: str) -> str:
@@ -1487,32 +1598,12 @@ def register(mcp: FastMCP):
         Args:
             code: 股票代码，如 "600170"
         """
-        try:
-            start = time.time()
-            df, _src = _router.route("capital_changes", code=code)
-            latency_ms = round((time.time() - start) * 1000, 1)
-
-            if df is None or df.empty:
-                return _no_data(f"no capital changes for {code}")
-
-            changes = []
-            for _, row in df.iterrows():
-                changes.append({
-                    "date": str(row.get("日期", "")),
-                    "type": str(row.get("变动类型", "")),
-                    "shares_before": row.get("变动前股本"),
-                    "shares_after": row.get("变动后股本"),
-                })
-
-            return _ok({
-                "code": normalize_code_bare(code),
-                "latency_ms": latency_ms,
-                "count": len(changes),
-                "changes": changes,
-            })
-        except Exception as e:
-            logger.exception("eltdx_get_capital_changes failed")
-            return _err(f"capital changes query failed: {e}")
+        return mcp_serve(
+            "eltdx_get_capital_changes",
+            lambda: _build_eltdx_get_capital_changes(code),
+            "capital changes query failed",
+            dump=False,
+        )
 
     @mcp.tool()
     async def eltdx_get_special_limits_scan() -> str:
@@ -1524,30 +1615,12 @@ def register(mcp: FastMCP):
         Args:
             无参数
         """
-        try:
-            start = time.time()
-            df, _src = _router.route("special_limits_scan")
-            latency_ms = round((time.time() - start) * 1000, 1)
-
-            if df is None or df.empty:
-                return _no_data("no special limits scan")
-
-            limits = []
-            for _, row in df.iterrows():
-                limits.append({
-                    "code": str(row.get("代码", "")),
-                    "limit_up_price": row.get("涨停价"),
-                    "limit_down_price": row.get("跌停价"),
-                })
-
-            return _ok({
-                "latency_ms": latency_ms,
-                "count": len(limits),
-                "limits": limits,
-            })
-        except Exception as e:
-            logger.exception("eltdx_get_special_limits_scan failed")
-            return _err(f"special limits scan query failed: {e}")
+        return mcp_serve(
+            "eltdx_get_special_limits_scan",
+            _build_eltdx_get_special_limits_scan,
+            "special limits scan query failed",
+            dump=False,
+        )
 
     @mcp.tool()
     async def eltdx_get_f10_extra(entry: str, code: str) -> str:
@@ -1565,22 +1638,9 @@ def register(mcp: FastMCP):
                    announcements(公告)/news(新闻)/stock_info(基础信息)
             code: 股票代码，如 "600170"
         """
-        try:
-            start = time.time()
-            df, _src = _router.route("f10_extra", entry=entry, code=code)
-            latency_ms = round((time.time() - start) * 1000, 1)
-
-            if df is None or df.empty:
-                return _no_data(f"no f10 data for {entry} {code}")
-
-            return _ok({
-                "entry": entry,
-                "code": normalize_code_bare(code),
-                "latency_ms": latency_ms,
-                "columns": list(df.columns),
-                "row_count": len(df),
-                "rows": df.head(20).to_dict(orient="records"),
-            })
-        except Exception as e:
-            logger.exception("eltdx_get_f10_extra failed")
-            return _err(f"f10 extra query failed: {e}")
+        return mcp_serve(
+            "eltdx_get_f10_extra",
+            lambda: _build_eltdx_get_f10_extra(entry, code),
+            "f10 extra query failed",
+            dump=False,
+        )
