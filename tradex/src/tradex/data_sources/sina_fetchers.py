@@ -96,13 +96,19 @@ def fetch_sina_research_reports(
         text = resp.text.strip()
 
         # 解析 JSONP 包裹：IO.XSRV2.CallbackList['...']({...})
+        # QI-STD-26（工单 17，2026-11-22）：解析失败 / 空 items 不再折叠为静默
+        # 空表——抛出由 SmartRouter 记账降级（rule 5 / rule 11 注册门槛②）。
         m = re.search(r"\(({.+})\)", text)
         if not m:
-            return pd.DataFrame()
+            raise RuntimeError(
+                f"新浪研报 JSONP 解析失败（响应不是 JSONP 包裹，len={len(text)}）"
+            )
         data = json.loads(m.group(1))
         items = data.get("result", {}).get("data", [])
         if not items:
-            return pd.DataFrame()
+            raise RuntimeError(
+                f"新浪研报返回空 items（该股无研报或接口结构已变）: {sym}"
+            )
 
         rows = []
         for it in items:
@@ -187,8 +193,12 @@ def _sina_moneyflow_snapshot(sym: str) -> pd.DataFrame:
     )
     resp.raise_for_status()
     d = resp.json()
+    # QI-STD-26（工单 17）：netamount 缺失 = 应答结构异常（当日快照接口断源/改版），
+    # 不再折叠空表——抛出让 fetch_sina_fund_flow 的 except 兜底与 SmartRouter 降级可见。
     if not isinstance(d, dict) or "netamount" not in d:
-        return pd.DataFrame()
+        raise RuntimeError(
+            f"新浪 MoneyFlow 快照应答缺 netamount（结构异常）: {sym}"
+        )
 
     def _f(key: str) -> float:
         try:
@@ -268,8 +278,12 @@ def fetch_sina_fund_flow(
         resp.raise_for_status()
         data = resp.json()
         klines = (data.get("data") or {}).get("klines", [])
+        # QI-STD-26（工单 17）：klines 空（data:null 或无行情）不再折叠空表——
+        # 抛出后走本函数既有的新浪 MoneyFlow 当日快照兜底，再由 SmartRouter 降级。
         if not klines:
-            return pd.DataFrame()
+            raise RuntimeError(
+                f"东财 fflow 返回空 klines（secid 无数据或接口结构已变）: {sym}"
+            )
 
         rows = []
         for line in klines:
@@ -299,7 +313,11 @@ def fetch_sina_fund_flow(
             except (ValueError, IndexError):
                 continue
         if not rows:
-            return pd.DataFrame()
+            # QI-STD-26（工单 17）：klines 有载荷但解析零行 = 字段格式变化，
+            # 不再折叠空表，抛出走快照兜底 + SmartRouter 降级。
+            raise RuntimeError(
+                f"东财 fflow klines 解析零行（字段格式可能已变）: {sym}"
+            )
         df = pd.DataFrame(rows)
         df = df.sort_values("日期", ascending=False).reset_index(drop=True)
         return df
