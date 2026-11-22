@@ -15,6 +15,8 @@ import threading
 import atexit
 from typing import Any, Optional
 
+from ..utils.symbol import normalize_code_bare, normalize_code_with_prefix
+
 logger = logging.getLogger("tradex.eltdx")
 
 
@@ -138,31 +140,9 @@ def _shutdown_client() -> None:
 atexit.register(_shutdown_client)
 
 
-def _normalize_code(code: str) -> str:
-    """把 6 位代码或带前缀代码统一成 eltdx 期望的格式。
-
-    eltdx 的 TdxClient 通常接受 'sz000001' / 'sh600000' 或 6 位纯代码。
-    """
-    code = code.strip().lower()
-    if code.startswith(("sz", "sh", "bj")):
-        return code
-    if len(code) == 6 and code.isdigit():
-        if code.startswith(("60", "68", "90", "11", "13")):
-            return "sh" + code
-        if code.startswith(("00", "30", "20")):
-            return "sz" + code
-        if code.startswith(("8", "43", "92")):
-            return "bj" + code
-    return code
-
-
-def _strip_prefix(code: str) -> str:
-    """去除 sh/sz/bj 前缀，返回 6 位纯代码。"""
-    code = code.strip().lower()
-    if code.startswith(("sh", "sz", "bj")):
-        return code[2:]
-    return code
-
+# QI-ARCH-13（2026-11-22）：原 _normalize_code（补前缀）/ _strip_prefix（剥前缀）
+# 两份私有定义已收拢 utils/symbol 公共家显名真身
+# （normalize_code_with_prefix / normalize_code_bare），本文件改 import 调真身。
 
 # ============================================================
 # fetch_fn 包装器
@@ -177,7 +157,7 @@ def _normalize_symbol_code(symbol: str = "", code: str = "") -> str:
     raw = code or symbol
     if not raw:
         raise RuntimeError("stock code is required (symbol or code)")
-    return _normalize_code(raw)
+    return normalize_code_with_prefix(raw)
 
 
 def fetch_call_auction(code: str = "", symbol: str = "", **kwargs) -> Any:
@@ -260,7 +240,7 @@ def fetch_realtime_quote(code: str = "", symbol: str = "", **kwargs):
         raise RuntimeError("eltdx returned no quote")
     q = quotes[0]
     return pd.DataFrame([{
-        "代码": getattr(q, "code", _strip_prefix(norm_code)),
+        "代码": getattr(q, "code", normalize_code_bare(norm_code)),
         "最新价": getattr(q, "last_price", None),
         "昨收": getattr(q, "pre_close_price", None),
         "今开": getattr(q, "open_price", None),
@@ -613,7 +593,7 @@ def _parse_codes_arg(codes) -> list[str]:
         raw_list = [c.strip() for c in codes.split(",") if c.strip()]
     else:
         raw_list = [str(c).strip() for c in (codes or []) if str(c).strip()]
-    return [_normalize_code(c) for c in raw_list]
+    return [normalize_code_with_prefix(c) for c in raw_list]
 
 
 def fetch_stock_profile(codes="", symbol: str = "", **kwargs):
@@ -787,7 +767,7 @@ def _f10_rows_to_df(resp) -> "pd.DataFrame":
 
 def _strip_code6(code: str) -> str:
     """归一化并去 sh/sz/bj 前缀，返回 6 位纯代码（f10 接口要求）。"""
-    return _strip_prefix(_normalize_symbol_code("", code))
+    return normalize_code_bare(_normalize_symbol_code("", code))
 
 
 def fetch_finance_report(code: str = "", symbol: str = "", report_type: str = "zcfzb", **kwargs):

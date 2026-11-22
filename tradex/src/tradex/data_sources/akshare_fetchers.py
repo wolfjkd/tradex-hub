@@ -624,7 +624,10 @@ def fetch_fund_flow(code: str = "", curr_date: str = "", include_history: bool =
     code 留空 → secid="0." → 东财对空 secid 返回 {"data": null} →
     NoneType 模糊异常（此前靠 sina 备源兜底）。
     """
-    from .sina_fetchers import _em_secid, _normalize_code as _normalize_sym_code
+    from .sina_fetchers import (
+        _em_secid,
+        _require_symbol_code as _normalize_sym_code,  # QI-ARCH-13 显名随迁
+    )
     from curl_cffi import requests as _rq
 
     sym = _normalize_sym_code(symbol, code)

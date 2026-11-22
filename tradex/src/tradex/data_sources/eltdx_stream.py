@@ -25,6 +25,8 @@ import threading
 import atexit
 from typing import Any, Optional
 
+from ..utils.symbol import normalize_code_with_prefix
+
 logger = logging.getLogger("tradex.eltdx_stream")
 
 
@@ -137,7 +139,7 @@ class EltdxStreamManager:
             if not self._ensure_started():
                 raise RuntimeError("eltdx stream client not available")
             client = self._client
-            norm_codes = [_normalize_code(c) for c in codes]
+            norm_codes = [normalize_code_with_prefix(c) for c in codes]
             # 初始化游标（已订阅的保留，新的从 0 开始）
             for code in norm_codes:
                 self._cursors.setdefault(code, 0)
@@ -171,7 +173,7 @@ class EltdxStreamManager:
             if not self._ensure_started():
                 raise RuntimeError("eltdx stream client not available")
             client = self._client
-            target = [_normalize_code(c) for c in codes] if codes else list(self._cursors.keys())
+            target = [normalize_code_with_prefix(c) for c in codes] if codes else list(self._cursors.keys())
             if not target:
                 return {}
             cursors = {c: self._cursors.get(c, 0) for c in target}
@@ -198,7 +200,7 @@ class EltdxStreamManager:
             if not self._ensure_started():
                 raise RuntimeError("eltdx stream client not available")
             client = self._client
-            norm_codes = [_normalize_code(c) for c in codes]
+            norm_codes = [normalize_code_with_prefix(c) for c in codes]
         try:
             page = client.quotes.refresh(norm_codes, cursors={})
         except Exception as exc:  # noqa: BLE001
@@ -212,7 +214,7 @@ class EltdxStreamManager:
         """退订代码，清除游标。"""
         with self._lock:
             for code in codes:
-                self._cursors.pop(_normalize_code(code), None)
+                self._cursors.pop(normalize_code_with_prefix(code), None)
 
     # ------------------------------------------------------------------
     # 健康状态
@@ -319,19 +321,9 @@ atexit.register(_shutdown_stream)
 # 工具函数
 # ============================================================
 
-def _normalize_code(code: str) -> str:
-    """6 位代码 → sh/sz/bj 前缀格式。"""
-    code = code.strip().lower()
-    if code.startswith(("sh", "sz", "bj")):
-        return code
-    if len(code) == 6 and code.isdigit():
-        if code.startswith(("60", "68", "90", "11", "13")):
-            return "sh" + code
-        if code.startswith(("00", "30", "20")):
-            return "sz" + code
-        if code.startswith(("8", "43", "92")):
-            return "bj" + code
-    return code
+# QI-ARCH-13（2026-11-22）：原 _normalize_code（补前缀，与 eltdx_fetchers 版
+# 逐字节复本）已收拢 utils/symbol 公共家显名真身 normalize_code_with_prefix，
+# 本文件改 import 调真身。
 
 
 def _records_map(page: Any) -> dict:

@@ -33,8 +33,15 @@ _UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like
 _TIMEOUT = 15
 
 
-def _normalize_code(symbol: str = "", code: str = "") -> str:
-    """归一化股票代码为 6 位纯数字。兼容 symbol/code 两种参数名。"""
+def _require_symbol_code(symbol: str = "", code: str = "") -> str:
+    """从 symbol/code 双参数解出代码并要求非空，轻清洗（strip+lower）返回。
+
+    QI-ARCH-13（2026-11-22）显名：原名 _normalize_code 与 eltdx 版同名不同义
+    （eltdx 版补 sh/sz/bj 前缀，本版**不剥不补**——新浪接口吃原始串，
+    仅 strip+lower），方向语义入名「require」表达判空抛 ValueError。
+
+    注意：不补零、不剥前缀、不校验位数——入参原样清洗后返回。
+    """
     sym = (symbol or code or "").strip()
     if not sym:
         raise ValueError("stock code is required (symbol or code)")
@@ -67,7 +74,7 @@ def fetch_sina_research_reports(
     Returns:
         DataFrame with columns: 标题, 类型, 机构, 研究员, 日期, 股票代码
     """
-    sym = _normalize_code(symbol, code)
+    sym = _require_symbol_code(symbol, code)
     try:
         # 新浪研报接口（参照 sinarf 端点）
         url = "https://stock.finance.sina.com.cn/relate/api/jsonp.php/IO.XSRV2.CallbackList['netNetServicessss']"
@@ -237,7 +244,7 @@ def fetch_sina_fund_flow(
             主力净流入, 小单净流入, 中单净流入, 大单净流入, 超大单净流入,
             主力净占比, 小单净占比, 中单净占比, 大单净占比, 超大单净占比
     """
-    sym = _normalize_code(symbol, code)
+    sym = _require_symbol_code(symbol, code)
     try:
         secid = _em_secid(sym)
         url = "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get"

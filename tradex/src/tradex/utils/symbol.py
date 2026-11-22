@@ -272,3 +272,39 @@ def is_global_code(symbol: str) -> bool:
     各持一份私有定义（下划线名跨层 import），收拢 utils 公共家单点。
     """
     return symbol.startswith(("us", "hk", "kr", "wh", "int_", "hf_"))
+
+
+def normalize_code_with_prefix(code: str) -> str:
+    """把 6 位代码补成 sh/sz/bj 前缀格式（已带前缀原样保留）。
+
+    方向语义显名（QI-ARCH-13，2026-11-22）：原 eltdx_fetchers._normalize_code
+    与 eltdx_stream._normalize_code 两份逐字节复本——同名「normalize」但与
+    新浪版（不剥不补）方向相反，按名猜义必踩坑；收拢公共家单点后由名字
+    表达「补前缀」方向。
+
+    规则：sh: 60/68/90/11/13；sz: 00/30/20；bj: 8/43/92。
+    """
+    code = str(code).strip().lower()
+    if code.startswith(("sh", "sz", "bj")):
+        return code
+    if len(code) == 6 and code.isdigit():
+        if code.startswith(("60", "68", "90", "11", "13")):
+            return "sh" + code
+        if code.startswith(("00", "30", "20")):
+            return "sz" + code
+        if code.startswith(("8", "43", "92")):
+            return "bj" + code
+    return code
+
+
+def normalize_code_bare(code: str) -> str:
+    """剥去 sh/sz/bj 前缀，返回 6 位纯代码。
+
+    方向语义显名（QI-ARCH-13，2026-11-22）：原 eltdx_fetchers._strip_prefix
+    与 tools/eltdx_data._strip_prefix 两份逐字节复本，收拢公共家单点；
+    与 normalize_code_with_prefix 构成「补/剥」一对方向函数。
+    """
+    code = str(code).strip().lower()
+    if code.startswith(("sh", "sz", "bj")):
+        return code[2:]
+    return code

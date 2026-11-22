@@ -337,7 +337,7 @@ class TestAkshareFundFlowParamCompat:
         assert len(result["history"]) == 2
 
     def test_fetch_fund_flow_raises_on_empty_code(self):
-        """code/symbol 全空必须语义化报错（对齐 sina 源 _normalize_code 的
+        """code/symbol 全空必须语义化报错（对齐 sina 源 _require_symbol_code 的
         ValueError 约定），而不是拿空 secid="0." 去打接口再吞 NoneType。"""
         from tradex.data_sources import akshare_fetchers
 

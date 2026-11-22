@@ -214,8 +214,14 @@ def _get_client() -> TDXMCPClient:
     return _CLIENT
 
 
-def _normalize_symbol_code(symbol: str = "", code: str = "") -> str:
-    """归一化 symbol/code：SmartRouter 路由时两者可能混用，统一取非空者。"""
+def _resolve_symbol_code(symbol: str = "", code: str = "") -> str:
+    """从 symbol/code 双参数解出代码，取非空者（可为空串，不判空）。
+
+    QI-ARCH-13（2026-11-22）显名：原名 _normalize_symbol_code 与 eltdx 版
+    同名不同义（eltdx 版判空抛 RuntimeError + 补 sh/sz/bj 前缀，本版仅
+    取非空者、不清洗不归一）——空值校验由调用方负责（下方 fetch_fn 自行
+    raise TDXSourceUnavailable）。
+    """
     return symbol or code or ""
 
 
@@ -269,7 +275,7 @@ def _to_period_code(period: str) -> str:
 def fetch_realtime_quote(code: str = "", symbol: str = "", **kwargs) -> Any:
     """实时行情（平级第一梯队，与 eltdx 互为备份）。调用官方 tdx_quotes。"""
     cli = _get_client()
-    norm = _normalize_symbol_code(symbol, code)
+    norm = _resolve_symbol_code(symbol, code)
     if not norm:
         raise TDXSourceUnavailable("tdx_mcp: 缺少证券代码")
     setcode = kwargs.get("setcode") or _infer_setcode(norm)
@@ -287,7 +293,7 @@ def fetch_realtime_quote(code: str = "", symbol: str = "", **kwargs) -> Any:
 def fetch_historical_kline(code: str = "", symbol: str = "", period: str = "day", count: int = 120, **kwargs) -> Any:
     """历史 K 线（与 eltdx 互备）。官方 tdx_kline。"""
     cli = _get_client()
-    norm = _normalize_symbol_code(symbol, code)
+    norm = _resolve_symbol_code(symbol, code)
     if not norm:
         raise TDXSourceUnavailable("tdx_mcp: 缺少代码")
     setcode = kwargs.get("setcode") or _infer_setcode(norm)
@@ -304,7 +310,7 @@ def fetch_historical_kline(code: str = "", symbol: str = "", period: str = "day"
 def fetch_research_report(code: str = "", symbol: str = "", keyword: str = "", limit: int = 20, **kwargs) -> Any:
     """券商研报（纯增量类型）：调用 wenda_report_query。"""
     cli = _get_client()
-    norm = _normalize_symbol_code(symbol, code)
+    norm = _resolve_symbol_code(symbol, code)
     args: dict = {}
     if norm:
         args["symbol"] = norm

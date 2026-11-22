@@ -32,6 +32,7 @@ from mcp.server.fastmcp import FastMCP
 
 from ..data_sources import get_router
 from ..data_sources.eltdx_stream import get_stream_manager
+from ..utils.symbol import normalize_code_bare, normalize_code_with_prefix
 
 logger = logging.getLogger("tradex.eltdx")
 
@@ -93,27 +94,10 @@ def _no_data(reason: str = "no data") -> str:
     return json.dumps({"status": "no_data", "message": reason}, ensure_ascii=False)
 
 
-def _strip_prefix(code: str) -> str:
-    """去除 sh/sz/bj 前缀，返回 6 位纯代码。"""
-    code = code.strip().lower()
-    if code.startswith(("sh", "sz", "bj")):
-        return code[2:]
-    return code
-
-
-def _normalize_stream_code(code: str) -> str:
-    """6 位代码 → sh/sz/bj 前缀格式（与 eltdx_stream 归一化一致）。"""
-    code = code.strip().lower()
-    if code.startswith(("sh", "sz", "bj")):
-        return code
-    if len(code) == 6 and code.isdigit():
-        if code.startswith(("60", "68", "90", "11", "13")):
-            return "sh" + code
-        if code.startswith(("00", "30", "20")):
-            return "sz" + code
-        if code.startswith(("8", "43", "92")):
-            return "bj" + code
-    return code
+# QI-ARCH-13（2026-11-22）：原 _strip_prefix（剥前缀）/ _normalize_stream_code
+# （补前缀，与 eltdx_stream 逐字节复本）两份私有定义已收拢
+# utils/symbol 公共家显名真身（normalize_code_bare / normalize_code_with_prefix），
+# 本文件改 import 调真身。
 
 
 # ============================================================
@@ -144,7 +128,7 @@ def register(mcp: FastMCP):
                 return _no_data("no auction points")
 
             return _ok({
-                "code": _strip_prefix(code),
+                "code": normalize_code_bare(code),
                 "latency_ms": latency_ms,
                 "point_count": len(points),
                 "points": [
@@ -175,7 +159,7 @@ def register(mcp: FastMCP):
         """
         try:
             start = time.time()
-            tick_code = _strip_prefix(code)
+            tick_code = normalize_code_bare(code)
             norm_date = trading_date.replace("-", "").replace("/", "")
 
             # 缓存优先：同一天同一股票从 TickStore 读取
@@ -285,7 +269,7 @@ def register(mcp: FastMCP):
             profile_resp = result.get("profile_resp")
             topics_resp = result.get("topics_resp")
             diag_resp = result.get("diag_resp")
-            norm_code = result.get("code", _strip_prefix(code))
+            norm_code = result.get("code", normalize_code_bare(code))
 
             def _rows(resp):
                 if resp is None or not getattr(resp, "ok", False):
@@ -348,7 +332,7 @@ def register(mcp: FastMCP):
                 return _no_data("no minute points")
 
             return _ok({
-                "code": _strip_prefix(code),
+                "code": normalize_code_bare(code),
                 "latency_ms": latency_ms,
                 "point_count": len(points),
                 "points": points,
@@ -395,7 +379,7 @@ def register(mcp: FastMCP):
                 return _no_data(f"no kline bars for period={period}")
 
             return _ok({
-                "code": _strip_prefix(code),
+                "code": normalize_code_bare(code),
                 "period": period,
                 "latency_ms": latency_ms,
                 "bar_count": len(bars),
@@ -425,12 +409,12 @@ def register(mcp: FastMCP):
             snap = manager.snapshot([code])
             latency_ms = round((time.time() - start) * 1000, 1)
 
-            record = snap.get(_normalize_stream_code(code))
+            record = snap.get(normalize_code_with_prefix(code))
             if record is None:
                 return _no_data(f"no depth data for {code}")
 
             return _ok({
-                "code": _strip_prefix(code),
+                "code": normalize_code_bare(code),
                 "latency_ms": latency_ms,
                 "last_price": record.get("last_price"),
                 "pre_close": record.get("pre_close"),
@@ -540,7 +524,7 @@ def register(mcp: FastMCP):
                 })
 
             return _ok({
-                "code": _strip_prefix(code),
+                "code": normalize_code_bare(code),
                 "trading_date": trading_date,
                 "latency_ms": latency_ms,
                 "point_count": len(points),
@@ -578,7 +562,7 @@ def register(mcp: FastMCP):
                 })
 
             return _ok({
-                "code": _strip_prefix(code),
+                "code": normalize_code_bare(code),
                 "latency_ms": latency_ms,
                 "point_count": len(points),
                 "points": points,
@@ -619,7 +603,7 @@ def register(mcp: FastMCP):
                 })
 
             return _ok({
-                "code": _strip_prefix(code),
+                "code": normalize_code_bare(code),
                 "latency_ms": latency_ms,
                 "tick_count": len(ticks),
                 "ticks": ticks,
@@ -649,7 +633,7 @@ def register(mcp: FastMCP):
 
             row = df.iloc[0]
             return _ok({
-                "code": _strip_prefix(code),
+                "code": normalize_code_bare(code),
                 "latency_ms": latency_ms,
                 "time": str(row.get("时间", "")),
                 "open_price": float(row.get("价格", 0) or 0),
@@ -694,7 +678,7 @@ def register(mcp: FastMCP):
                 })
 
             return _ok({
-                "code": _strip_prefix(code),
+                "code": normalize_code_bare(code),
                 "period": period,
                 "latency_ms": latency_ms,
                 "bar_count": len(bars),
@@ -738,7 +722,7 @@ def register(mcp: FastMCP):
                 })
 
             return _ok({
-                "code": _strip_prefix(code),
+                "code": normalize_code_bare(code),
                 "period": period,
                 "adjust": adjust,
                 "latency_ms": latency_ms,
@@ -924,7 +908,7 @@ def register(mcp: FastMCP):
                 return _no_data(f"no finance report for {code}")
 
             return _ok({
-                "code": _strip_prefix(code),
+                "code": normalize_code_bare(code),
                 "report_type": report_type,
                 "latency_ms": latency_ms,
                 "columns": list(df.columns),
@@ -954,7 +938,7 @@ def register(mcp: FastMCP):
                 return _no_data(f"no dividend financing for {code}")
 
             return _ok({
-                "code": _strip_prefix(code),
+                "code": normalize_code_bare(code),
                 "latency_ms": latency_ms,
                 "columns": list(df.columns),
                 "row_count": len(df),
@@ -983,7 +967,7 @@ def register(mcp: FastMCP):
                 return _no_data(f"no company news for {code}")
 
             return _ok({
-                "code": _strip_prefix(code),
+                "code": normalize_code_bare(code),
                 "latency_ms": latency_ms,
                 "columns": list(df.columns),
                 "row_count": len(df),
@@ -1012,7 +996,7 @@ def register(mcp: FastMCP):
                 return _no_data(f"no northbound holding for {code}")
 
             return _ok({
-                "code": _strip_prefix(code),
+                "code": normalize_code_bare(code),
                 "latency_ms": latency_ms,
                 "columns": list(df.columns),
                 "row_count": len(df),
@@ -1049,7 +1033,7 @@ def register(mcp: FastMCP):
                 })
 
             return _ok({
-                "code": _strip_prefix(code),
+                "code": normalize_code_bare(code),
                 "latency_ms": latency_ms,
                 "count": len(topics),
                 "topics": topics,
@@ -1092,7 +1076,7 @@ def register(mcp: FastMCP):
                 })
 
             return _ok({
-                "seed_code": _strip_prefix(code),
+                "seed_code": normalize_code_bare(code),
                 "topic_name": topic_name,
                 "latency_ms": latency_ms,
                 "count": len(stocks),
@@ -1222,7 +1206,7 @@ def register(mcp: FastMCP):
 
             row = df.iloc[0]
             return _ok({
-                "code": _strip_prefix(code),
+                "code": normalize_code_bare(code),
                 "trading_date": trading_date,
                 "latency_ms": latency_ms,
                 "open_price": float(row.get("价格", 0) or 0),
@@ -1261,7 +1245,7 @@ def register(mcp: FastMCP):
                 })
 
             return _ok({
-                "code": _strip_prefix(code),
+                "code": normalize_code_bare(code),
                 "latency_ms": latency_ms,
                 "count": len(changes),
                 "changes": changes,
@@ -1331,7 +1315,7 @@ def register(mcp: FastMCP):
 
             return _ok({
                 "entry": entry,
-                "code": _strip_prefix(code),
+                "code": normalize_code_bare(code),
                 "latency_ms": latency_ms,
                 "columns": list(df.columns),
                 "row_count": len(df),
