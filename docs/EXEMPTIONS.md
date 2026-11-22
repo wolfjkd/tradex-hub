@@ -6,7 +6,7 @@
 
 ## 表一：mcp_serve 出口手写豁免（9 工具）
 
-> 背景：A①A② 全量推广后 MCP 出口收拢进 `tools/_mcp_serve.py` 单点；以下工具因形态不适配保留手写出口（149 走 mcp_serve + 9 手写 + tdx 自有骨架 5 + eltdx_data 待上提 = 192，以 06 门 AST 实测为准）。
+> 背景：A①A② 全量推广后 MCP 出口收拢进 `tools/_mcp_serve.py` 单点；以下工具因形态不适配保留手写出口（AST 实测账 **2026-11-22 06 门核对**：149 mcp_serve + 9 手写【本表，含 tdx_tq 组 2】+ 3 tdx_mcp 自有骨架 + 31 eltdx_data 批外待上提【QI-ARCH-17，票 07】= 192）。
 
 | 工具 | 文件 | 豁免理由 |
 |---|---|---|
@@ -44,3 +44,4 @@
 | 日期 | 变更 |
 |---|---|
 | 2026-11-22 | 初版（票 03，qc-20261122）：三张表登记 + 裁决②收紧范围落表三；composite/dividend/market_cap 三行标注「随裁决③收拢同步更新」 |
+| 2026-11-22 | 表一头注 AST 实测勘误（票 06，check_exit_shapes.py 挂门实测）：原式「9 手写 + tdx 自有骨架 5 + eltdx_data」重复计 tdx_tq 组 2（既在本表 9 行内又计入 5）；实测账 149 mcp_serve + 9 手写 + 3 tdx_mcp + 31 eltdx_data = 192，与 9 行表逐一对上、无 ±1 出入 |
