@@ -72,6 +72,9 @@ ws = [
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
+    # 全量门确定性护栏 scripts/check_pyflakes.py 的扫描引擎（F821 未定义名挂门，
+    # QI-RETRO-03；dev 组不进 requirements.txt，与 pytest 同款口径）
+    "pyflakes>=3.0.0",
 ]
 
 [tool.hatch.build.targets.wheel]

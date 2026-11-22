@@ -13,7 +13,10 @@ import functools
 import logging
 import threading
 import atexit
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
+
+if TYPE_CHECKING:  # 仅注解引用（_f10_rows_to_df 返回标注），运行时保持 pandas 惰性导入
+    import pandas as pd
 
 from ..utils.symbol import normalize_code_bare, normalize_code_with_prefix
 

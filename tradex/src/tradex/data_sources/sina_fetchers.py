@@ -23,6 +23,7 @@ import json
 import logging
 import re
 from datetime import datetime
+from typing import Any
 
 import pandas as pd
 from curl_cffi import requests as curl_requests

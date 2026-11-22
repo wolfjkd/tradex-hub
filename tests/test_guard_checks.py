@@ -7,6 +7,7 @@
 - check_readme_counts.main()        → 0 计数一致（MCP/REST/注册/类型）
 - check_changelog_claims.main()     → 0 措辞与 git log 一致
 - check_undeclared_imports.main()   → 0 import×声明比对全过（2026-11-14 Issue #2 护栏）
+- check_pyflakes.main()             → 0 全仓零 F821 未定义名（2026-11-22 QI-RETRO-03 护栏）
 - REST 端点数断言另见 tests/test_rest_count.py（独立更快）
 """
 
@@ -37,3 +38,8 @@ class TestGuardChecksMain:
         from check_undeclared_imports import main
 
         assert main() == 0, "存在 import 未声明的第三方包（传递依赖侥幸形态）——补声明双处或白名单注明降级依据"
+
+    def test_pyflakes_undefined_names(self):
+        from check_pyflakes import main
+
+        assert main() == 0, "存在 F821 未定义名（NameError 级编程错误，QI-BUG-01 教训）——补 import 或修正引用，不带病挂门"

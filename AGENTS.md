@@ -68,6 +68,7 @@
   跑 main() 断言）+ CLI 手动用法保留；无 GitHub Actions）：
   `scripts/check_dep_sync.py`（依赖双处）、
   `scripts/check_undeclared_imports.py`（import×声明比对，传递依赖侥幸防线，白名单=设计内可选依赖）、
+  `scripts/check_pyflakes.py`（pyflakes F821 未定义名全仓零告警，NameError 级缺陷防线）、
   `scripts/check_readme_counts.py`（README 计数 vs 实跑）、
   `scripts/check_changelog_claims.py`（CHANGELOG 措辞 vs git log，`--selftest` 自证）；
   REST 端点计数在 `tests/test_rest_count.py` 断言（改端点四处一体：断言/README badge/正文/CHANGELOG）。

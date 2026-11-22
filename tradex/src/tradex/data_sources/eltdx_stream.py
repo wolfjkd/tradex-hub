@@ -143,7 +143,6 @@ class EltdxStreamManager:
             # 初始化游标（已订阅的保留，新的从 0 开始）
             for code in norm_codes:
                 self._cursors.setdefault(code, 0)
-            cursors = {c: self._cursors[c] for c in norm_codes}
 
         result: dict = {}
         if snapshot:
