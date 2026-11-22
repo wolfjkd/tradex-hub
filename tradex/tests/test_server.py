@@ -9,17 +9,24 @@ class TestServerSetup:
     def test_server_name(self, mcp_server):
         assert mcp_server.name == "tradex"
 
-    def test_all_90_tools_registered(self, mcp_server):
+    def test_all_192_tools_registered(self, mcp_server):
         """2026-09-28 死源剥离: 176→166 tools.
         历史：129→132→165→176→166 (数据源扩充 T01-T33 → akshare_em 包装层 →
         死源剥离移除期权 2 + 指数 3 + 互动 2 + 宏观 3) → 186（2026-11-06
         vibe-astock 借鉴批次：短线元数据 1 + 大市值 1 + 成交额榜 1 + 读数 8 +
         落库 2 + 题材 4 + 字段漂移 1）→ 190（2026-11-07 KPL 批次 +4：
         limit_up/sentiment/boards/bidding）.
-        数量精确锁定，版本演进需同步更新本断言。"""
+        数量精确锁定，版本演进需同步更新本断言。
+        测试名 90→192 名实对齐（QI-ARCH-16，2026-11-22：断言早已 192，名沿旧账）。"""
         tools = mcp_server._tool_manager._tools
         assert len(tools) == 192, f"Expected 192 tools, got {len(tools)}"
 
+    # ── V0.1–V0.6 六批手抄清单（QI-ARCH-16 处置注记，2026-11-22）──────────
+    # 清单性质：按历史交付批次（V0.1–V0.6）逐批回归守卫——每批交付的工具必须
+    # 仍在册；与 visibility_catalog.GROUPS 的功能归组不同轴（GROUPS 无批次
+    # 维度），集合断言不能等价替代其「这 64 个历史工具永不消失」的承诺。
+    # 保守路径（票文预案）：名单保留原地不裁剪，是否退役待总控裁决；
+    # 漂移史与三处手抄同步问题见台账 .scratch/qc-20261122/ledger.md QI-ARCH-16。
     def test_v01_tools_present(self, mcp_server):
         """V0.1 company info + price data tools (8 tools)."""
         tools = mcp_server._tool_manager._tools
@@ -138,3 +145,37 @@ class TestServerSetup:
         防重复注册回归。版本演进需同步更新本断言。"""
         tools = mcp_server._tool_manager._tools
         assert len(tools) == 192
+
+    # ── QI-ARCH-16 集合断言（2026-11-22）：visibility_catalog.GROUPS ↔ 注册全集
+    #    对账单点化——GROUPS 是 mcp_profile/TradeX 看板共用分组数据（自称单一
+    #    真源），目录与注册表双向对齐后，加/删/改名工具只对 GROUPS 一处记账，
+    #    测试侧不再新增手抄名单。
+    def test_visibility_catalog_subset_of_registered(self, mcp_server):
+        """GROUPS 目录工具必须全部真实在册（目录 ⊆ 注册全集）。
+
+        目录漂移（注册侧改名/删除而目录未同步）在此红——lean 预设按目录
+        隐藏工具，目录含死名 = 隐藏动作空转、看板出死条目。"""
+        from tradex.tools.visibility_catalog import ALL_TOOLS
+        tools = mcp_server._tool_manager._tools
+        catalog = set(ALL_TOOLS)
+        missing = sorted(catalog - set(tools))
+        assert not missing, f"GROUPS 目录含未注册工具: {missing}"
+
+    def test_visibility_catalog_covers_registered(self, mcp_server):
+        """注册全集必须全部归组入目录（AGENTS.md 硬约定 8：加 MCP 工具后在此归组）。
+
+        新增工具不入 GROUPS = mcp_profile/TradeX 看板工具页缺席，此处红。"""
+        from tradex.tools.visibility_catalog import ALL_TOOLS
+        tools = mcp_server._tool_manager._tools
+        uncataloged = sorted(set(tools) - set(ALL_TOOLS))
+        assert not uncataloged, f"注册工具未归组入 visibility_catalog: {uncataloged}"
+
+    def test_visibility_catalog_counts(self, mcp_server):
+        """目录计数断言（2026-11-22 实跑口径）：26 组 / 192 项 / 目录无重复。
+
+        与 tests/test_dashboard_mcp.py::test_catalog_shape（dashboard 推导路径）
+        互为双保险；此处直测 GROUPS/ALL_TOOLS 数据本体。"""
+        from tradex.tools.visibility_catalog import ALL_TOOLS, GROUPS
+        assert len(GROUPS) == 26, f"GROUPS 组数漂移: {len(GROUPS)}"
+        assert len(ALL_TOOLS) == 192, f"GROUPS 目录工具项数漂移: {len(ALL_TOOLS)}"
+        assert len(set(ALL_TOOLS)) == len(ALL_TOOLS), "GROUPS 目录有重复工具名"

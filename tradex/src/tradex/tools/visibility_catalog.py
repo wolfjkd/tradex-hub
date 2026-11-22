@@ -1,7 +1,8 @@
 """MCP 工具可见性中文分组目录（单一真源，2026-11-08）。
 
-GROUPS：（中文名, 一句话说明, [工具名...])，26 组覆盖 190 工具——
-与 docs/MCP_TOOLS.md 全集 diff 对齐（有 CI 外的脚本核对）。
+GROUPS：（中文名, 一句话说明, [工具名...])，26 组覆盖 192 工具——
+与 docs/MCP_TOOLS.md 全集 diff 对齐（tests/test_server.py 集合断言双向对账，
+QI-ARCH-16 2026-11-22；原 docstring 计 190 为漂移旧账）。
 消费方：scripts/mcp_profile.py（一键 CLI）、TradeX 看板 MCP 工具页。
 
 预设：lean = 精简一档（禁宏观/转债ETF/备源/三表/基本面低频/事件低频/
