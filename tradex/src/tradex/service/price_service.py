@@ -389,3 +389,113 @@ def get_intraday_data(symbol: str) -> dict[str, Any]:
         }
 
     return cache.get_or_set(f"intraday:{code}", _factory, TTL_REALTIME)
+
+
+def get_market_capitalization(symbol: str) -> dict[str, Any] | pd.DataFrame | None:
+    """总市值/流通市值（双 Tier 降级编排，QI-ARCH-14 票 13 自 tools/price_data.py 上收）。
+
+    Tier 1：个股基本信息（company_info/individual_info），含「市值」键才命中；
+    Tier 2：全量行情快照（realtime_quote）按代码过滤后取市值相关列；
+    两 Tier 均失败 → None。
+
+    缓存语义（裁决③统一，2026-11-22）：get_or_set 对象缓存——factory 返回
+    对象直存（Tier1 dict / Tier2 DataFrame），None 不缓存（失败不冻结，与原
+    「兜底 error_response 不入缓存」等价）。两 Tier 产物类型不同（运行时判型
+    出口序列化），原「Tier1 dict_to_json / Tier2 df_to_json 混合串缓存」的
+    命中类型漂移面由对象缓存消除；TTL_REALTIME=30s 仅内存层，无历史串条目
+    还原面。出口判型序列化后与原串缓存逐路径等价（to_json_safe 幂等 +
+    df_to_json 确定性重放）。
+
+    Args:
+        symbol: 6 位股票代码。
+
+    Returns:
+        Tier1 命中：基本信息 dict（键含「市值」）；
+        Tier2 命中：市值相关列 DataFrame；
+        None：所有数据源均不可用（调用方重建错误态）。
+    """
+    symbol = normalize_symbol(symbol)
+
+    def _factory() -> dict[str, Any] | pd.DataFrame | None:
+        # === Tier 1: 个股基本信息（含市值） ===
+        try:
+            df, _src = _router.route(
+                "company_info", endpoint="individual_info", symbol=symbol
+            )
+            if df is not None and not df.empty:
+                info = {}
+                for _, row in df.iterrows():
+                    info[row.iloc[0]] = row.iloc[1]
+                if any("市值" in str(k) for k in info):
+                    return info
+        except Exception as exc:
+            logger.debug("市值 Tier1(实时快照) 失败(%s): %s", symbol, exc)
+
+        # === Tier 2: 全量行情快照 ===
+        try:
+            df, _src = _router.route("realtime_quote", symbol=symbol)
+            if df is not None and not df.empty:
+                code_col = find_code_col(df)
+                if len(df) > 1:
+                    row = df[df[code_col].astype(str).str.strip() == symbol]
+                else:
+                    row = df
+                if not row.empty:
+                    cap_keywords = ["代码", "名称", "最新价", "总市值", "流通市值",
+                                    "涨跌幅", "成交量", "成交额", "市盈率", "市净率",
+                                    "code", "name", "trade", "volume", "amount",
+                                    "changepercent", "settlement", "mktcap"]
+                    available_cols = [
+                        c for c in row.columns
+                        if any(k in c for k in cap_keywords)
+                    ]
+                    if not available_cols:
+                        available_cols = list(row.columns)
+                    return row[available_cols]
+        except Exception as exc:
+            logger.debug("市值 Tier2(全量行情) 失败(%s): %s", symbol, exc)
+
+        return None  # 所有源均不可用：不缓存（原态兜底 error_response 不入缓存）
+
+    return cache.get_or_set(f"market_cap:{symbol}", _factory, TTL_REALTIME)
+
+
+def get_stock_list(
+    min_market_cap: float = 0,
+    max_results: int = 50,
+) -> pd.DataFrame | None:
+    """A股完整股票列表（可按市值筛选，QI-ARCH-14 票 13 自 tools/price_data.py 上收）。
+
+    Args:
+        min_market_cap: 最低总市值过滤（单位：亿元），默认 0 不过滤。
+        max_results: 最大返回条数（仅参与缓存键与出口截断，factory 不消费——
+            键形状原样保留，保真优先）。
+
+    Returns:
+        瘦身排序后的 DataFrame（未截断，截断在出口 df_to_json(max_rows) 重放，
+        与原「先截断再缓存串」确定性等价）；None：数据源返回空数据（不缓存）。
+    """
+    def _factory() -> pd.DataFrame | None:
+        # symbol="" → eltdx 单股源会失败，SmartRouter 自动降级到 akshare 全量快照
+        df, _src = _router.route("realtime_quote", symbol="")
+        if df is None or df.empty:
+            return None
+
+        cap_col = None
+        for c in df.columns:
+            if "总市值" in c or "mktcap" in c.lower() or "market_cap" in c.lower():
+                cap_col = c
+                break
+
+        if min_market_cap > 0 and cap_col:
+            threshold = min_market_cap * 1e8
+            df = df[df[cap_col] >= threshold]
+
+        if cap_col:
+            df = df.sort_values(cap_col, ascending=False)
+
+        return slim_df(df)
+
+    return cache.get_or_set(
+        f"stock_list:{min_market_cap}:{max_results}", _factory, TTL_DAILY
+    )

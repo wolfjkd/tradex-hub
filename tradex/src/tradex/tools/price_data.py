@@ -18,32 +18,29 @@ Data source routing (via SmartRouter):
 v3.4.0 工单 04：get_realtime_quote / get_historical_price / get_intraday_data 三个
 核心工具的业务逻辑已抽到 service/price_service.py，本文件这三个工具改为薄包装
 （调 service + json.dumps 转 MCP 协议字符串）。
-get_market_capitalization / get_stock_list 暂未抽层（不在工单 04 范围），保留原逻辑。
+QI-ARCH-14 票 13（2026-11-22，裁决③缓存语义统一）：get_market_capitalization 双
+Tier 降级编排 / get_stock_list 过滤编排同批上收 price_service，本文件 5 工具全部
+薄包装（mcp_serve 单出口，表一手写豁免行退役）。
 """
 
 from __future__ import annotations
 
-import json
 import logging
 
+import pandas as pd
 from mcp.server.fastmcp import FastMCP
 
-from ..data_sources import get_router
-from ..utils.cache import TTL_DAILY, TTL_REALTIME, cache
-from ..utils.formatter import df_to_json, dict_to_json, error_response, slim_df
-from ..utils.symbol import format_with_exchange, normalize_symbol
+from ..utils.formatter import df_to_json, dict_to_json, error_response
 from ._mcp_serve import mcp_serve
 from ..service import price_service
 
 logger = logging.getLogger("tradex")
 
-_router = get_router()
 
-
-# （QI-ARCH-02 全量上提，2026-11-19：5 个工具体模块级化；3 svc 薄包装走
-# mcp_serve；get_market_capitalization 多 Tier 降级（每 Tier debug 吞异常 +
-# 末尾兜底显式 return）上提保持显式形态；get_stock_list 缓存+route 走
-# mcp_serve（dump=False）。）
+# （QI-ARCH-02 全量上提，2026-11-19：5 个工具体模块级化；QI-ARCH-14 票 13
+# （2026-11-22）：5 工具体全薄包装走 mcp_serve——market_capitalization 双 Tier
+# 编排与 stock_list 过滤编排上收 price_service（get_or_set 对象缓存 + 出口判型
+# 序列化），手写出口豁免行同步退役。）
 
 
 async def get_realtime_quote(symbol: str) -> str:
@@ -140,57 +137,20 @@ async def get_market_capitalization(symbol: str) -> str:
     Returns:
         市值数据 (JSON)，包含总市值、流通市值、最新价、成交量等关键字段。
     """
-    symbol = normalize_symbol(symbol)
-    cache_key = f"market_cap:{symbol}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        return cached
+    def _build() -> str:
+        obj = price_service.get_market_capitalization(symbol)
+        if obj is None:
+            return error_response(
+                f"获取市值数据失败 ({symbol}): 所有数据源均不可用",
+                "get_market_capitalization",
+            )
+        # 运行时判型出口：Tier1 dict → dict_to_json / Tier2 DataFrame → df_to_json
+        if isinstance(obj, pd.DataFrame):
+            return df_to_json(obj)
+        return dict_to_json(obj)
 
-    # === Tier 1: 个股基本信息（含市值） ===
-    try:
-        df, _src = _router.route(
-            "company_info", endpoint="individual_info", symbol=symbol
-        )
-        if df is not None and not df.empty:
-            info = {}
-            for _, row in df.iterrows():
-                info[row.iloc[0]] = row.iloc[1]
-            if any("市值" in str(k) for k in info):
-                result = dict_to_json(info)
-                cache.set(cache_key, result, TTL_REALTIME)
-                return result
-    except Exception as exc:
-        logger.debug("市值 Tier1(实时快照) 失败(%s): %s", symbol, exc)
-
-    # === Tier 2: 全量行情快照 ===
-    try:
-        df, _src = _router.route("realtime_quote", symbol=symbol)
-        if df is not None and not df.empty:
-            code_col = find_code_col(df)
-            if len(df) > 1:
-                row = df[df[code_col].astype(str).str.strip() == symbol]
-            else:
-                row = df
-            if not row.empty:
-                cap_keywords = ["代码", "名称", "最新价", "总市值", "流通市值",
-                                "涨跌幅", "成交量", "成交额", "市盈率", "市净率",
-                                "code", "name", "trade", "volume", "amount",
-                                "changepercent", "settlement", "mktcap"]
-                available_cols = [
-                    c for c in row.columns
-                    if any(k in c for k in cap_keywords)
-                ]
-                if not available_cols:
-                    available_cols = list(row.columns)
-                result = df_to_json(row[available_cols])
-                cache.set(cache_key, result, TTL_REALTIME)
-                return result
-    except Exception as exc:
-        logger.debug("市值 Tier2(全量行情) 失败(%s): %s", symbol, exc)
-
-    return error_response(
-        f"获取市值数据失败 ({symbol}): 所有数据源均不可用",
-        "get_market_capitalization",
+    return mcp_serve(
+        "get_market_capitalization", _build, "获取市值数据失败", dump=False
     )
 
 
@@ -209,36 +169,13 @@ async def get_stock_list(
         股票列表 (JSON)，包含代码、名称、最新价、涨跌幅、总市值、流通市值、
         成交量、成交额、市盈率、市净率等。
     """
-    cache_key = f"stock_list:{min_market_cap}:{max_results}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        return cached
-
     def _build() -> str:
-        # symbol="" → eltdx 单股源会失败，SmartRouter 自动降级到 akshare 全量快照
-        df, _src = _router.route("realtime_quote", symbol="")
-        if df is None or df.empty:
+        df = price_service.get_stock_list(min_market_cap, max_results)
+        if df is None:
             return error_response(
                 "获取股票列表失败: 数据源返回空数据", "get_stock_list"
             )
-
-        cap_col = None
-        for c in df.columns:
-            if "总市值" in c or "mktcap" in c.lower() or "market_cap" in c.lower():
-                cap_col = c
-                break
-
-        if min_market_cap > 0 and cap_col:
-            threshold = min_market_cap * 1e8
-            df = df[df[cap_col] >= threshold]
-
-        if cap_col:
-            df = df.sort_values(cap_col, ascending=False)
-
-        df = slim_df(df)
-        result = df_to_json(df, max_rows=max_results)
-        cache.set(cache_key, result, TTL_DAILY)
-        return result
+        return df_to_json(df, max_rows=max_results)
 
     return mcp_serve("get_stock_list", _build, "获取股票列表失败", dump=False)
 
@@ -247,7 +184,7 @@ def register(mcp: FastMCP):
     """Register price data tools with the MCP server.
 
     v3.4.0：三个核心工具改为 service 薄包装；QI-ARCH-02 全量上提
-    （2026-11-19）：5 工具体模块级，引用注册。"""
+    （2026-11-19）：5 工具体模块级；QI-ARCH-14 票 13（2026-11-22）：5 工具全薄包装。"""
     for _fn in (
         get_realtime_quote,
         get_historical_price,
@@ -256,9 +193,3 @@ def register(mcp: FastMCP):
         get_stock_list,
     ):
         mcp.tool()(_fn)
-
-
-# 副本函数已收敛 utils 真身（QI-ARCH-03/A⑤，2026-11-18：原 v3.4.0 两对
-# 「完全一致」隔缝结对副本；QI-ARCH-11，2026-11-22：再收拢 utils 公共家——
-# 判型/找列知识单点在 utils，私有名不出 service 模块接缝）。
-from ..utils.formatter import find_code_col

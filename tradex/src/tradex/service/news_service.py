@@ -19,7 +19,7 @@ import pandas as pd
 
 from ..data_sources import get_router
 from ..utils.cache import TTL_DAILY, TTL_REALTIME, cache
-from ..utils.formatter import df_to_json, df_to_records
+from ..utils.formatter import df_to_json, df_to_records, slim_df
 from ..utils.symbol import normalize_symbol
 
 logger = logging.getLogger(__name__)
@@ -242,3 +242,91 @@ def search_news(
     return cache.get_or_set(
         f"search_news:{keyword}:{symbol}:{num_results}", _factory, TTL_REALTIME
     )
+
+
+def get_financial_calendar(date: str = "") -> pd.DataFrame | None:
+    """财报披露时间表 + 百度经济数据日历（双源聚合编排，QI-ARCH-14 票 13
+    自 tools/news_events.py 上收；date_cols 关键词猜测过滤逻辑同批收进）。
+
+    双源：
+      Source 1: 财报披露时间（news_data/stock_report_disclosure，akshare 不传
+        period 避免格式错误）；
+      Source 2: 百度经济数据日历（baidu_economic_calendar）。
+    日期后过滤：各源独立过滤后合并（避免 2022 年旧数据拖垮百度经济日历）。
+
+    缓存语义（裁决③统一，2026-11-22）：get_or_set 对象缓存——factory 返回
+    合并后 DataFrame 直存（含空 df：与原「过滤后全丢弃 → set 空串」一致），
+    None（两源均无数据）不缓存，与原「早退空态先于 set」等价。出口
+    df_to_json(max_rows=50) 确定性重放，与原串缓存逐路径等价。
+
+    Args:
+        date: 查询日期，格式 "YYYYMMDD"。默认为空获取最新一期。
+
+    Returns:
+        合并过滤后的 DataFrame（可能为空 df）；None：两源均无数据（调用方
+        重建空态）。
+    """
+    def _factory() -> pd.DataFrame | None:
+        all_dfs: list[pd.DataFrame] = []
+        # Source 1: 财报披露时间（akshare 不传 period，避免格式错误）
+        try:
+            df1, _src1 = _router.route("news_data", endpoint="stock_report_disclosure")
+            if df1 is not None and not df1.empty:
+                all_dfs.append(df1)
+        except Exception as exc:
+            # em_news_direct 无 symbol 时会失败，自动降级到 akshare
+            logger.debug("财报披露源失败: %s", exc)
+        # Source 2: 百度经济数据日历（v3.3.0 新增）
+        try:
+            df2, _src2 = _router.route("baidu_economic_calendar", date=date)
+            if df2 is not None and not df2.empty:
+                all_dfs.append(df2)
+        except Exception as exc:
+            logger.debug("百度经济日历源失败: %s", exc)
+
+        if not all_dfs:
+            return None  # 两源均无数据：不缓存（原态早退空串先于 set）
+
+        # 日期后过滤：各源独立过滤后合并（避免2022年旧数据拖垮百度经济日历）
+        if date:
+            date_fmt = f"{date[:4]}-{date[4:6]}-{date[6:8]}"
+            filtered_dfs = []
+            for df in all_dfs:
+                date_cols = [
+                    c for c in df.columns
+                    if any(k in c for k in ["日期", "date", "Date", "时间", "披露", "预约", "变更", "首次", "实际"])
+                ]
+                matched = False
+                for col in date_cols:
+                    try:
+                        mask = df[col].astype(str).str.contains(date_fmt, na=False)
+                        if not mask.any():
+                            mask = df[col].astype(str).str.contains(date, na=False)
+                        if mask.any():
+                            filtered_dfs.append(df[mask])
+                            matched = True
+                            break
+                    except Exception:
+                        continue
+                # 如果该源没有匹配数据的列，全量保留（如百度经济日历的日期列不在 date_cols 里）
+                if not matched:
+                    # 尝试正则匹配所有列
+                    for col in df.columns:
+                        try:
+                            mask = df[col].astype(str).str.contains(date_fmt, na=False)
+                            if mask.any():
+                                filtered_dfs.append(df[mask])
+                                matched = True
+                                break
+                        except Exception:
+                            continue
+                    if not matched:
+                        pass  # 无匹配，丢弃该源
+            combined = pd.concat(filtered_dfs, ignore_index=True) if filtered_dfs else pd.DataFrame()
+        else:
+            combined = pd.concat(all_dfs, ignore_index=True)
+            combined = slim_df(combined)
+
+        return combined
+
+    return cache.get_or_set(f"fin_calendar:{date}", _factory, TTL_DAILY)

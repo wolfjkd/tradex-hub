@@ -43,8 +43,7 @@ import pandas as pd
 from ..data_sources import get_router
 from ..utils.cache import TTL_DAILY, TTL_REALTIME, cache
 from ._mcp_serve import mcp_serve
-from ..utils.formatter import df_to_json, error_response, slim_df
-from ..utils.symbol import normalize_symbol
+from ..utils.formatter import df_to_json, error_response
 from ..service import news_service
 
 logger = logging.getLogger(__name__)
@@ -62,6 +61,9 @@ _FUND_HOLD_ROUTE_TIMEOUT = 40.0
 # （rule 7 例外契约保留）/ financial_calendar 多源聚合逻辑原样保留。）
 # 「空数据 → df_to_json(pd.DataFrame())」的显式 return 保留在 _build 内
 # （dump=False 原样输出，文案/形状逐字节等价）。
+# QI-ARCH-14 票 13（2026-11-22，裁决③缓存语义统一）：financial_calendar 双源
+# 聚合 + date_cols 关键词猜测过滤编排上收 news_service（get_or_set 对象缓存），
+# 工具体薄包装；其余 10 处 df_to_json 串缓存仍留工具体（A 组豁免内，票 13 范围外）。
 
 
 async def get_stock_news(symbol: str) -> str:
@@ -92,72 +94,11 @@ async def get_financial_calendar(date: str = "") -> str:
         财报披露时间表和经济数据日历 (JSON)，包含股票代码、名称、预计披露日期、
         实际披露日期、报告类型、经济数据等。
     """
-    cache_key = f"fin_calendar:{date}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        return cached
-
     def _build() -> str:
-        all_dfs = []
-        # Source 1: 财报披露时间（akshare 不传 period，避免格式错误）
-        try:
-            df1, _src1 = _router.route("news_data", endpoint="stock_report_disclosure")
-            if df1 is not None and not df1.empty:
-                all_dfs.append(df1)
-        except Exception as exc:
-            # em_news_direct 无 symbol 时会失败，自动降级到 akshare
-            logger.debug("财报披露源失败: %s", exc)
-        # Source 2: 百度经济数据日历（v3.3.0 新增）
-        try:
-            df2, _src2 = _router.route("baidu_economic_calendar", date=date)
-            if df2 is not None and not df2.empty:
-                all_dfs.append(df2)
-        except Exception as exc:
-            logger.debug("百度经济日历源失败: %s", exc)
-
-        if not all_dfs:
+        combined = news_service.get_financial_calendar(date)
+        if combined is None:
             return df_to_json(pd.DataFrame())
-
-        # 日期后过滤：各源独立过滤后合并（避免2022年旧数据拖垮百度经济日历）
-        if date:
-            date_fmt = f"{date[:4]}-{date[4:6]}-{date[6:8]}"
-            filtered_dfs = []
-            for df in all_dfs:
-                date_cols = [c for c in df.columns if any(k in c for k in ["日期", "date", "Date", "时间", "披露", "预约", "变更", "首次", "实际"])]
-                matched = False
-                for col in date_cols:
-                    try:
-                        mask = df[col].astype(str).str.contains(date_fmt, na=False)
-                        if not mask.any():
-                            mask = df[col].astype(str).str.contains(date, na=False)
-                        if mask.any():
-                            filtered_dfs.append(df[mask])
-                            matched = True
-                            break
-                    except Exception:
-                        continue
-                # 如果该源没有匹配数据的列，全量保留（如百度经济日历的日期列不在 date_cols 里）
-                if not matched:
-                    # 尝试正则匹配所有列
-                    for col in df.columns:
-                        try:
-                            mask = df[col].astype(str).str.contains(date_fmt, na=False)
-                            if mask.any():
-                                filtered_dfs.append(df[mask])
-                                matched = True
-                                break
-                        except Exception:
-                            continue
-                    if not matched:
-                        pass  # 无匹配，丢弃该源
-            combined = pd.concat(filtered_dfs, ignore_index=True) if filtered_dfs else pd.DataFrame()
-        else:
-            combined = pd.concat(all_dfs, ignore_index=True)
-            combined = slim_df(combined)
-
-        result = df_to_json(combined, max_rows=50)
-        cache.set(cache_key, result, TTL_DAILY)
-        return result
+        return df_to_json(combined, max_rows=50)
 
     return mcp_serve("get_financial_calendar", _build, "获取财报披露日历失败", dump=False)
 
