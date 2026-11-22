@@ -38,7 +38,9 @@
 6. **哨兵用自定义异常**，禁止消息字符串匹配做控制流（`"空壳" in str(e)` 反例已清）；
    异常链禁止裸 `raise`（要 `raise ... from exc` 保留真因）。
 7. **缓存序列化边界**：对象缓存一律走 `cache.get_or_set(key, factory, ttl)`
-   （`tradex/utils/cache.py`）；tools 层 `df_to_json` 字符串缓存继续裸 get/set；
+   （`tradex/utils/cache.py`）；裸 get/set 豁免**收紧为仅限 tools 层 `df_to_json`
+   序列化字符串缓存**（2026-11-22 拍板，范围登记 `docs/EXEMPTIONS.md` 表三，
+   其余手写 get/set 一律迁移 get_or_set）；
    `None` 不缓存（失败/空值不冻结语义）。
 8. **visibility_catalog 手工归组**（`tradex/tools/visibility_catalog.py` 纯数据真源）：
    加 MCP 工具后在此归组，工具计数断言同步。
@@ -55,6 +57,7 @@
 
 ## 工具与文档指针
 
+- **设计内豁免唯一清单**：`docs/EXEMPTIONS.md`（mcp_serve 手写出口 / rule 5 空态 / rule 7 裸缓存三张表；改豁免先改那里并经老板确认，出口形态有门机械核验）。
 - MCP 工具清单：`docs/MCP_TOOLS.md`（发版时重生成，头部版本戳要随版本走）。
 - 版本管理：SemVer；发版 SOP 见真源 `2-独立规则/版本管理规则.md`（软件项目 6 处同步）。
 - CHANGELOG 措辞必须对照 git log 史实（v3.9.1「零代码」失实教训）；
