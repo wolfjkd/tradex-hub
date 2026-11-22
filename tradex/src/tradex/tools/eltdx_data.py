@@ -352,6 +352,145 @@ def _build_eltdx_get_kline(code: str, period: str = "day", count: int = 100) -> 
         return _err(f"kline query failed: {e}")
 
 
+def _build_eltdx_get_depth(code: str) -> str:
+    """构建 eltdx_get_depth 响应（原嵌套工具体上提，逻辑零改动）。"""
+    try:
+        start = time.time()
+        manager = get_stream_manager()
+        if not manager.start():
+            return _err("eltdx stream client not available")
+        snap = manager.snapshot([code])
+        latency_ms = round((time.time() - start) * 1000, 1)
+
+        record = snap.get(normalize_code_with_prefix(code))
+        if record is None:
+            return _no_data(f"no depth data for {code}")
+
+        return _ok({
+            "code": normalize_code_bare(code),
+            "latency_ms": latency_ms,
+            "last_price": record.get("last_price"),
+            "pre_close": record.get("pre_close"),
+            "open": record.get("open"),
+            "high": record.get("high"),
+            "low": record.get("low"),
+            "total_hand": record.get("total_hand"),
+            "amount": record.get("amount"),
+            "inside_dish": record.get("inside_dish"),
+            "outer_disc": record.get("outer_disc"),
+            "buy_levels": record.get("buy_levels"),
+            "sell_levels": record.get("sell_levels"),
+        })
+    except Exception as e:
+        logger.exception("eltdx_get_depth failed")
+        return _err(f"depth query failed: {e}")
+
+
+def _build_eltdx_stream_health() -> str:
+    """构建 eltdx_stream_health 响应（原嵌套工具体上提，逻辑零改动）。"""
+    try:
+        manager = get_stream_manager()
+        health = manager.health()
+        return _ok(health)
+    except Exception as e:
+        logger.exception("eltdx_stream_health failed")
+        return _err(f"stream health query failed: {e}")
+
+
+def _build_eltdx_get_security_codes(market: str = "all", category: str = "") -> str:
+    """构建 eltdx_get_security_codes 响应（原嵌套工具体上提，逻辑零改动）。"""
+    try:
+        start = time.time()
+        df, _src = _router.route("security_codes", market=market)
+        latency_ms = round((time.time() - start) * 1000, 1)
+
+        if df is None or df.empty:
+            return _no_data(f"no securities for market={market}")
+
+        if category:
+            df = df[df["类别"] == category]
+
+        items = []
+        for _, row in df.iterrows():
+            items.append({
+                "code": str(row.get("代码", "")),
+                "name": str(row.get("名称", "")),
+                "category": str(row.get("类别", "")),
+                "board": str(row.get("板块", "")),
+            })
+
+        return _ok({
+            "market": market,
+            "category": category,
+            "latency_ms": latency_ms,
+            "count": len(items),
+            "items": items,
+        })
+    except Exception as e:
+        logger.exception("eltdx_get_security_codes failed")
+        return _err(f"security codes query failed: {e}")
+
+
+def _build_eltdx_get_minute_history(code: str, trading_date: str) -> str:
+    """构建 eltdx_get_minute_history 响应（原嵌套工具体上提，逻辑零改动）。"""
+    try:
+        start = time.time()
+        df, _src = _router.route("minute_history", code=code, trading_date=trading_date)
+        latency_ms = round((time.time() - start) * 1000, 1)
+
+        if df is None or df.empty:
+            return _no_data(f"no minute history for {code} on {trading_date}")
+
+        points = []
+        for _, row in df.iterrows():
+            points.append({
+                "time": str(row.get("时间", "")),
+                "price": float(row.get("价格", 0) or 0),
+                "avg_price": float(row.get("均价", 0) or 0),
+                "volume": float(row.get("成交量", 0) or 0),
+            })
+
+        return _ok({
+            "code": normalize_code_bare(code),
+            "trading_date": trading_date,
+            "latency_ms": latency_ms,
+            "point_count": len(points),
+            "points": points,
+        })
+    except Exception as e:
+        logger.exception("eltdx_get_minute_history failed")
+        return _err(f"minute history query failed: {e}")
+
+
+def _build_eltdx_get_buy_sell_strength(code: str) -> str:
+    """构建 eltdx_get_buy_sell_strength 响应（原嵌套工具体上提，逻辑零改动）。"""
+    try:
+        start = time.time()
+        df, _src = _router.route("minute_aux", code=code, kind="buy_sell_strength")
+        latency_ms = round((time.time() - start) * 1000, 1)
+
+        if df is None or df.empty:
+            return _no_data(f"no buy/sell strength for {code}")
+
+        points = []
+        for _, row in df.iterrows():
+            points.append({
+                "time": str(row.get("时间", "")),
+                "buy": float(row.get("买盘", 0) or 0),
+                "sell": float(row.get("卖盘", 0) or 0),
+            })
+
+        return _ok({
+            "code": normalize_code_bare(code),
+            "latency_ms": latency_ms,
+            "point_count": len(points),
+            "points": points,
+        })
+    except Exception as e:
+        logger.exception("eltdx_get_buy_sell_strength failed")
+        return _err(f"buy/sell strength query failed: {e}")
+
+
 # ============================================================
 # MCP 工具注册
 # ============================================================
@@ -461,36 +600,12 @@ def register(mcp: FastMCP):
         Args:
             code: 股票代码，如 "000001" 或 "sh600170"
         """
-        try:
-            start = time.time()
-            manager = get_stream_manager()
-            if not manager.start():
-                return _err("eltdx stream client not available")
-            snap = manager.snapshot([code])
-            latency_ms = round((time.time() - start) * 1000, 1)
-
-            record = snap.get(normalize_code_with_prefix(code))
-            if record is None:
-                return _no_data(f"no depth data for {code}")
-
-            return _ok({
-                "code": normalize_code_bare(code),
-                "latency_ms": latency_ms,
-                "last_price": record.get("last_price"),
-                "pre_close": record.get("pre_close"),
-                "open": record.get("open"),
-                "high": record.get("high"),
-                "low": record.get("low"),
-                "total_hand": record.get("total_hand"),
-                "amount": record.get("amount"),
-                "inside_dish": record.get("inside_dish"),
-                "outer_disc": record.get("outer_disc"),
-                "buy_levels": record.get("buy_levels"),
-                "sell_levels": record.get("sell_levels"),
-            })
-        except Exception as e:
-            logger.exception("eltdx_get_depth failed")
-            return _err(f"depth query failed: {e}")
+        return mcp_serve(
+            "eltdx_get_depth",
+            lambda: _build_eltdx_get_depth(code),
+            "depth query failed",
+            dump=False,
+        )
 
     @mcp.tool()
     async def eltdx_stream_health() -> str:
@@ -503,13 +618,12 @@ def register(mcp: FastMCP):
         Args:
             无参数
         """
-        try:
-            manager = get_stream_manager()
-            health = manager.health()
-            return _ok(health)
-        except Exception as e:
-            logger.exception("eltdx_stream_health failed")
-            return _err(f"stream health query failed: {e}")
+        return mcp_serve(
+            "eltdx_stream_health",
+            _build_eltdx_stream_health,
+            "stream health query failed",
+            dump=False,
+        )
 
     @mcp.tool()
     async def eltdx_get_security_codes(market: str = "all", category: str = "") -> str:
@@ -523,36 +637,12 @@ def register(mcp: FastMCP):
             market: 市场，'sh' / 'sz' / 'bj' / 'all'（默认 all，沪深京三市场）
             category: 类别过滤，如 'a_share'（A股）、'etf'、'index'，空则不过滤
         """
-        try:
-            start = time.time()
-            df, _src = _router.route("security_codes", market=market)
-            latency_ms = round((time.time() - start) * 1000, 1)
-
-            if df is None or df.empty:
-                return _no_data(f"no securities for market={market}")
-
-            if category:
-                df = df[df["类别"] == category]
-
-            items = []
-            for _, row in df.iterrows():
-                items.append({
-                    "code": str(row.get("代码", "")),
-                    "name": str(row.get("名称", "")),
-                    "category": str(row.get("类别", "")),
-                    "board": str(row.get("板块", "")),
-                })
-
-            return _ok({
-                "market": market,
-                "category": category,
-                "latency_ms": latency_ms,
-                "count": len(items),
-                "items": items,
-            })
-        except Exception as e:
-            logger.exception("eltdx_get_security_codes failed")
-            return _err(f"security codes query failed: {e}")
+        return mcp_serve(
+            "eltdx_get_security_codes",
+            lambda: _build_eltdx_get_security_codes(market, category),
+            "security codes query failed",
+            dump=False,
+        )
 
     @mcp.tool()
     async def eltdx_get_minute_history(code: str, trading_date: str) -> str:
@@ -566,33 +656,12 @@ def register(mcp: FastMCP):
             code: 股票代码，如 "600170"
             trading_date: 交易日，格式 "20260813" 或 "2026-08-13"
         """
-        try:
-            start = time.time()
-            df, _src = _router.route("minute_history", code=code, trading_date=trading_date)
-            latency_ms = round((time.time() - start) * 1000, 1)
-
-            if df is None or df.empty:
-                return _no_data(f"no minute history for {code} on {trading_date}")
-
-            points = []
-            for _, row in df.iterrows():
-                points.append({
-                    "time": str(row.get("时间", "")),
-                    "price": float(row.get("价格", 0) or 0),
-                    "avg_price": float(row.get("均价", 0) or 0),
-                    "volume": float(row.get("成交量", 0) or 0),
-                })
-
-            return _ok({
-                "code": normalize_code_bare(code),
-                "trading_date": trading_date,
-                "latency_ms": latency_ms,
-                "point_count": len(points),
-                "points": points,
-            })
-        except Exception as e:
-            logger.exception("eltdx_get_minute_history failed")
-            return _err(f"minute history query failed: {e}")
+        return mcp_serve(
+            "eltdx_get_minute_history",
+            lambda: _build_eltdx_get_minute_history(code, trading_date),
+            "minute history query failed",
+            dump=False,
+        )
 
     @mcp.tool()
     async def eltdx_get_buy_sell_strength(code: str) -> str:
@@ -605,31 +674,12 @@ def register(mcp: FastMCP):
         Args:
             code: 股票代码，如 "600170"
         """
-        try:
-            start = time.time()
-            df, _src = _router.route("minute_aux", code=code, kind="buy_sell_strength")
-            latency_ms = round((time.time() - start) * 1000, 1)
-
-            if df is None or df.empty:
-                return _no_data(f"no buy/sell strength for {code}")
-
-            points = []
-            for _, row in df.iterrows():
-                points.append({
-                    "time": str(row.get("时间", "")),
-                    "buy": float(row.get("买盘", 0) or 0),
-                    "sell": float(row.get("卖盘", 0) or 0),
-                })
-
-            return _ok({
-                "code": normalize_code_bare(code),
-                "latency_ms": latency_ms,
-                "point_count": len(points),
-                "points": points,
-            })
-        except Exception as e:
-            logger.exception("eltdx_get_buy_sell_strength failed")
-            return _err(f"buy/sell strength query failed: {e}")
+        return mcp_serve(
+            "eltdx_get_buy_sell_strength",
+            lambda: _build_eltdx_get_buy_sell_strength(code),
+            "buy/sell strength query failed",
+            dump=False,
+        )
 
     @mcp.tool()
     async def eltdx_get_today_ticks(code: str, count: int = 1000) -> str:
