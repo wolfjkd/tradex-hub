@@ -15,52 +15,23 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from tradex.api.schemas import ERR_OK, ERR_BAD_REQUEST, ERR_DATA_SOURCE_UNREACHABLE
+from tradex.api.schemas import ERR_OK, ERR_BAD_REQUEST
 from tradex.utils.cache import cache
 
 
 def _build_min_app() -> FastAPI:
-    """构建最小测试 app，仅挂 diagnostic 路由，并配套 422→40001 中间件。"""
-    from tradex.api.routes import diagnostic as diag_routes
-    from tradex.api.schemas import (
-        ERR_BAD_REQUEST, ERR_DATA_SOURCE_UNREACHABLE, ERR_INTERNAL, envelope_err,
-    )
+    """构建最小测试 app（A⑦ 收敛 2026-11-22：薄壳调基座，挂全量 REST 路由）。
 
-    app = FastAPI()
-    app.include_router(diag_routes.router, prefix="/api/v1")
+    原手抄为工单 09 时代自建形态：仅挂 diagnostic 子路由 + 自建
+    RequestValidationError handler（422→400）+ he_handler 404→40040。生产实况核对：
+    生产无 RequestValidationError handler（422 由 middleware 包裹为 code=40001 且
+    状态码保持 422）、404→40401（40040 全 src 零命中）——属历史漂移非语义锁定；
+    本文件校验类用例只锁 code=40001，收敛零断言变化。路由聚合验证走
+    diag_routes.router 直检，不依赖 app 挂载面。
+    """
+    from tests._rest_test_base import build_min_test_app
 
-    from fastapi import HTTPException, Request
-    from fastapi.responses import JSONResponse
-    from fastapi.exceptions import RequestValidationError
-
-    @app.exception_handler(RequestValidationError)
-    async def ve_handler(request: Request, exc: RequestValidationError):
-        import json
-        try:
-            detail = json.dumps(exc.errors(), ensure_ascii=False)
-        except Exception:
-            detail = str(exc)
-        return JSONResponse(
-            status_code=400,
-            content=envelope_err(ERR_BAD_REQUEST, detail).model_dump(),
-        )
-
-    @app.exception_handler(HTTPException)
-    async def he_handler(request: Request, exc: HTTPException):
-        code_map = {
-            400: ERR_BAD_REQUEST,
-            404: 40040,
-            500: ERR_INTERNAL,
-            502: ERR_DATA_SOURCE_UNREACHABLE,
-            422: ERR_BAD_REQUEST,
-        }
-        code = code_map.get(exc.status_code, ERR_INTERNAL)
-        return JSONResponse(
-            status_code=exc.status_code,
-            content=envelope_err(code, str(exc.detail)).model_dump(),
-        )
-
-    return app
+    return build_min_test_app()
 
 
 def _clear_cache():

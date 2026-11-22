@@ -87,70 +87,14 @@ class TestSkeletonImportable:
 def _build_min_app():
     """构造一个最小 FastAPI app 用于测试（不带 MCP 子 app，避免依赖 FastMCP 实例）。
 
-    复用工单 01 的 REST 路由 + 异常处理器 + 响应包裹中间件逻辑，模拟生产 app 的 REST 行为。
+    A⑦ 收敛 2026-11-22：薄壳调基座 _rest_test_base。原手抄为工单 01 时代形态
+    （handler 无 X-ErrCode 优先 + middleware 缺 422 msg 分支 + 无类型注解，历史漂移
+    ——生产 5 处 route 抛 X-ErrCode headers、middleware 有 422 分支）；本文件断言面
+    仅 /ping、/nonexistent、_health，无 422/X-ErrCode 面，收敛零断言变化。
     """
-    import json
+    from tests._rest_test_base import build_min_test_app
 
-    from fastapi import FastAPI, HTTPException
-    from fastapi.responses import JSONResponse
-
-    from tradex.api import routes as rest_routes
-    from tradex.api.schemas import (
-        ERR_BAD_REQUEST,
-        ERR_INTERNAL,
-        ERR_NOT_FOUND,
-        envelope_err,
-        envelope_ok,
-    )
-
-    app = FastAPI()
-    app.include_router(rest_routes.router, prefix="/api/v1")
-
-    @app.exception_handler(HTTPException)
-    async def _h(request, exc):
-        path = request.url.path
-        if not path.startswith("/api/"):
-            return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
-        code_map = {400: ERR_BAD_REQUEST, 404: ERR_NOT_FOUND, 500: ERR_INTERNAL}
-        code = code_map.get(exc.status_code, ERR_INTERNAL)
-        return JSONResponse(
-            envelope_err(code, str(exc.detail)).model_dump(),
-            status_code=exc.status_code,
-        )
-
-    # 响应包裹中间件（与生产 build_app 一致）
-    @app.middleware("http")
-    async def _env(request, call_next):
-        response = await call_next(request)
-        path = request.url.path
-        if path.startswith("/api/") and response.status_code != 200:
-            try:
-                body_bytes = b""
-                async for chunk in response.body_iterator:
-                    body_bytes += chunk
-                try:
-                    body = json.loads(body_bytes)
-                except Exception:
-                    body = {"raw": body_bytes.decode(errors="replace")}
-                if isinstance(body, dict) and "code" in body:
-                    return JSONResponse(body, status_code=response.status_code)
-                code_map = {
-                    400: ERR_BAD_REQUEST,
-                    404: ERR_NOT_FOUND,
-                    422: ERR_BAD_REQUEST,
-                    500: ERR_INTERNAL,
-                }
-                code = code_map.get(response.status_code, ERR_INTERNAL)
-                msg = body.get("detail") if isinstance(body, dict) else str(body)
-                return JSONResponse(
-                    envelope_err(code, str(msg or "error")).model_dump(),
-                    status_code=response.status_code,
-                )
-            except Exception:
-                return response
-        return response
-
-    return app
+    return build_min_test_app()
 
 
 class TestPingEndpoint:

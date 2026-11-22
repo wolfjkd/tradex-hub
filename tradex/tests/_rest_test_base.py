@@ -6,7 +6,9 @@ Envelope 异常映射 + 兜底 middleware 的测试替身，原在 11 个 REST �
 
 用法：
     def _build_min_app_with_fund():
-        from tradex.tests._rest_test_base import build_min_test_app
+        # 注意：pytest 包根为 tradex/（tradex/tests 带 __init__.py，包名 tests），
+        # 正确导入形态是 from tests._rest_test_base import ...（tradex.tests.* 不可解析）。
+        from tests._rest_test_base import build_min_test_app
         return build_min_test_app()
 """
 

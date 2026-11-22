@@ -14,7 +14,6 @@
 
 from __future__ import annotations
 
-import json
 from unittest.mock import patch
 
 import pytest
@@ -33,72 +32,13 @@ from tradex.api.schemas import (
 def _build_min_app_with_market():
     """构造带异常处理 + market 路由的最小 FastAPI app（不依赖 FastMCP 实例）。
 
-    复用工单 01 测试中已验证的异常处理器 + 中间件骨架，挂上 market 子路由。
+    A⑦ 收敛 2026-11-22：薄壳调基座 _rest_test_base。原手抄 middleware 缺
+    422→40001 msg 构造分支（历史漂移——生产 http_server middleware 有该分支，
+    本文件 422 用例只锁 code=40001，msg 形态未断言，补齐零断言变化）。
     """
-    from fastapi import FastAPI, HTTPException, Request
-    from fastapi.responses import JSONResponse
+    from tests._rest_test_base import build_min_test_app
 
-    from tradex.api import routes as rest_routes
-    from tradex.api.schemas import (
-        ERR_BAD_REQUEST,
-        ERR_INTERNAL,
-        ERR_NOT_FOUND,
-        envelope_err,
-    )
-
-    app = FastAPI()
-    app.include_router(rest_routes.router, prefix="/api/v1")
-
-    @app.exception_handler(HTTPException)
-    async def _h(request: Request, exc: HTTPException) -> JSONResponse:
-        path = request.url.path
-        if not path.startswith("/api/"):
-            return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
-        # 端点抛出的 HTTPException 已带 X-ErrCode header 时优先用之
-        err_code = (
-            int(exc.headers.get("X-ErrCode"))
-            if exc.headers and exc.headers.get("X-ErrCode")
-            else {400: ERR_BAD_REQUEST, 404: ERR_NOT_FOUND, 500: ERR_INTERNAL}.get(
-                exc.status_code, ERR_INTERNAL
-            )
-        )
-        return JSONResponse(
-            envelope_err(err_code, str(exc.detail)).model_dump(),
-            status_code=exc.status_code,
-        )
-
-    @app.middleware("http")
-    async def _env(request: Request, call_next):
-        response = await call_next(request)
-        path = request.url.path
-        if path.startswith("/api/") and response.status_code != 200:
-            try:
-                body_bytes = b""
-                async for chunk in response.body_iterator:
-                    body_bytes += chunk
-                try:
-                    body = json.loads(body_bytes)
-                except Exception:
-                    body = {"raw": body_bytes.decode(errors="replace")}
-                if isinstance(body, dict) and "code" in body:
-                    return JSONResponse(body, status_code=response.status_code)
-                code_map = {
-                    400: ERR_BAD_REQUEST,
-                    404: ERR_NOT_FOUND,
-                    422: ERR_BAD_REQUEST,
-                    500: ERR_INTERNAL,
-                }
-                code = code_map.get(response.status_code, ERR_INTERNAL)
-                msg = body.get("detail") if isinstance(body, dict) else str(body)
-                return JSONResponse(
-                    envelope_err(code, str(msg or "error")).model_dump(),
-                    status_code=response.status_code,
-                )
-            except Exception:
-                return response
-        return response
-
-    return app
+    return build_min_test_app()
 
 
 # ---------- service 层单元测试 ----------
