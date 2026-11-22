@@ -491,6 +491,168 @@ def _build_eltdx_get_buy_sell_strength(code: str) -> str:
         return _err(f"buy/sell strength query failed: {e}")
 
 
+def _build_eltdx_get_today_ticks(code: str, count: int = 1000) -> str:
+    """构建 eltdx_get_today_ticks 响应（原嵌套工具体上提，逻辑零改动）。"""
+    try:
+        start = time.time()
+        df, _src = _router.route("today_ticks", code=code, count=count)
+        latency_ms = round((time.time() - start) * 1000, 1)
+
+        if df is None or df.empty:
+            return _no_data(f"no today ticks for {code}")
+
+        ticks = []
+        for _, row in df.iterrows():
+            ticks.append({
+                "time": str(row.get("时间", "")),
+                "price": float(row.get("价格", 0) or 0),
+                "volume": float(row.get("成交量", 0) or 0),
+                "amount": float(row.get("成交额", 0) or 0),
+                "side": str(row.get("方向", "")),
+                "is_opening_match": bool(row.get("是否开盘撮合", False)),
+            })
+
+        return _ok({
+            "code": normalize_code_bare(code),
+            "latency_ms": latency_ms,
+            "tick_count": len(ticks),
+            "ticks": ticks,
+        })
+    except Exception as e:
+        logger.exception("eltdx_get_today_ticks failed")
+        return _err(f"today ticks query failed: {e}")
+
+
+def _build_eltdx_get_opening_match(code: str) -> str:
+    """构建 eltdx_get_opening_match 响应（原嵌套工具体上提，逻辑零改动）。"""
+    try:
+        start = time.time()
+        df, _src = _router.route("opening_match", code=code)
+        latency_ms = round((time.time() - start) * 1000, 1)
+
+        if df is None or df.empty:
+            return _no_data(f"no opening match for {code}")
+
+        row = df.iloc[0]
+        return _ok({
+            "code": normalize_code_bare(code),
+            "latency_ms": latency_ms,
+            "time": str(row.get("时间", "")),
+            "open_price": float(row.get("价格", 0) or 0),
+            "open_volume": float(row.get("成交量", 0) or 0),
+            "open_amount": float(row.get("成交额", 0) or 0),
+            "side": str(row.get("方向", "")),
+        })
+    except Exception as e:
+        logger.exception("eltdx_get_opening_match failed")
+        return _err(f"opening match query failed: {e}")
+
+
+def _build_eltdx_get_full_kline(code: str, period: str = "day") -> str:
+    """构建 eltdx_get_full_kline 响应（原嵌套工具体上提，逻辑零改动）。"""
+    try:
+        start = time.time()
+        df, _src = _router.route("full_kline", code=code, period=period)
+        latency_ms = round((time.time() - start) * 1000, 1)
+
+        if df is None or df.empty:
+            return _no_data(f"no full kline for {code}")
+
+        bars = []
+        for _, row in df.iterrows():
+            bars.append({
+                "date": str(row.get("日期", "")),
+                "open": float(row.get("开盘", 0) or 0),
+                "high": float(row.get("最高", 0) or 0),
+                "low": float(row.get("最低", 0) or 0),
+                "close": float(row.get("收盘", 0) or 0),
+                "volume": float(row.get("成交量", 0) or 0),
+                "amount": float(row.get("成交额", 0) or 0),
+            })
+
+        return _ok({
+            "code": normalize_code_bare(code),
+            "period": period,
+            "latency_ms": latency_ms,
+            "bar_count": len(bars),
+            "bars": bars,
+        })
+    except Exception as e:
+        logger.exception("eltdx_get_full_kline failed")
+        return _err(f"full kline query failed: {e}")
+
+
+def _build_eltdx_get_adjusted_kline(code: str, period: str = "day", adjust: str = "qfq", count: int = 800) -> str:
+    """构建 eltdx_get_adjusted_kline 响应（原嵌套工具体上提，逻辑零改动）。"""
+    try:
+        start = time.time()
+        df, _src = _router.route("adjusted_kline", code=code, period=period, adjust=adjust, count=count)
+        latency_ms = round((time.time() - start) * 1000, 1)
+
+        if df is None or df.empty:
+            return _no_data(f"no adjusted kline for {code}")
+
+        bars = []
+        for _, row in df.iterrows():
+            bars.append({
+                "date": str(row.get("日期", "")),
+                "open": float(row.get("开盘", 0) or 0),
+                "high": float(row.get("最高", 0) or 0),
+                "low": float(row.get("最低", 0) or 0),
+                "close": float(row.get("收盘", 0) or 0),
+                "volume": float(row.get("成交量", 0) or 0),
+                "amount": float(row.get("成交额", 0) or 0),
+            })
+
+        return _ok({
+            "code": normalize_code_bare(code),
+            "period": period,
+            "adjust": adjust,
+            "latency_ms": latency_ms,
+            "bar_count": len(bars),
+            "bars": bars,
+        })
+    except Exception as e:
+        logger.exception("eltdx_get_adjusted_kline failed")
+        return _err(f"adjusted kline query failed: {e}")
+
+
+def _build_eltdx_get_stock_profile(codes: str) -> str:
+    """构建 eltdx_get_stock_profile 响应（原嵌套工具体上提，逻辑零改动）。"""
+    try:
+        start = time.time()
+        df, _src = _router.route("stock_profile", codes=codes)
+        latency_ms = round((time.time() - start) * 1000, 1)
+
+        if df is None or df.empty:
+            return _no_data(f"no stock profile for {codes}")
+
+        profiles = []
+        for _, row in df.iterrows():
+            profiles.append({
+                "code": str(row.get("代码", "")),
+                "name": str(row.get("名称", "")),
+                "last_price": row.get("最新价"),
+                "change_pct": row.get("涨跌幅"),
+                "turnover_rate": row.get("换手率"),
+                "total_market_value": row.get("总市值"),
+                "circulating_market_value": row.get("流通市值"),
+                "total_shares": row.get("总股本"),
+                "circulating_shares": row.get("流通股本"),
+                "eps": row.get("EPS"),
+                "board": str(row.get("板块", "")),
+            })
+
+        return _ok({
+            "latency_ms": latency_ms,
+            "count": len(profiles),
+            "profiles": profiles,
+        })
+    except Exception as e:
+        logger.exception("eltdx_get_stock_profile failed")
+        return _err(f"stock profile query failed: {e}")
+
+
 # ============================================================
 # MCP 工具注册
 # ============================================================
@@ -693,34 +855,12 @@ def register(mcp: FastMCP):
             code: 股票代码，如 "600170"
             count: 返回条数，默认 1000，上限 1800
         """
-        try:
-            start = time.time()
-            df, _src = _router.route("today_ticks", code=code, count=count)
-            latency_ms = round((time.time() - start) * 1000, 1)
-
-            if df is None or df.empty:
-                return _no_data(f"no today ticks for {code}")
-
-            ticks = []
-            for _, row in df.iterrows():
-                ticks.append({
-                    "time": str(row.get("时间", "")),
-                    "price": float(row.get("价格", 0) or 0),
-                    "volume": float(row.get("成交量", 0) or 0),
-                    "amount": float(row.get("成交额", 0) or 0),
-                    "side": str(row.get("方向", "")),
-                    "is_opening_match": bool(row.get("是否开盘撮合", False)),
-                })
-
-            return _ok({
-                "code": normalize_code_bare(code),
-                "latency_ms": latency_ms,
-                "tick_count": len(ticks),
-                "ticks": ticks,
-            })
-        except Exception as e:
-            logger.exception("eltdx_get_today_ticks failed")
-            return _err(f"today ticks query failed: {e}")
+        return mcp_serve(
+            "eltdx_get_today_ticks",
+            lambda: _build_eltdx_get_today_ticks(code, count),
+            "today ticks query failed",
+            dump=False,
+        )
 
     @mcp.tool()
     async def eltdx_get_opening_match(code: str) -> str:
@@ -733,27 +873,12 @@ def register(mcp: FastMCP):
         Args:
             code: 股票代码，如 "600170"
         """
-        try:
-            start = time.time()
-            df, _src = _router.route("opening_match", code=code)
-            latency_ms = round((time.time() - start) * 1000, 1)
-
-            if df is None or df.empty:
-                return _no_data(f"no opening match for {code}")
-
-            row = df.iloc[0]
-            return _ok({
-                "code": normalize_code_bare(code),
-                "latency_ms": latency_ms,
-                "time": str(row.get("时间", "")),
-                "open_price": float(row.get("价格", 0) or 0),
-                "open_volume": float(row.get("成交量", 0) or 0),
-                "open_amount": float(row.get("成交额", 0) or 0),
-                "side": str(row.get("方向", "")),
-            })
-        except Exception as e:
-            logger.exception("eltdx_get_opening_match failed")
-            return _err(f"opening match query failed: {e}")
+        return mcp_serve(
+            "eltdx_get_opening_match",
+            lambda: _build_eltdx_get_opening_match(code),
+            "opening match query failed",
+            dump=False,
+        )
 
     @mcp.tool()
     async def eltdx_get_full_kline(code: str, period: str = "day") -> str:
@@ -767,36 +892,12 @@ def register(mcp: FastMCP):
             code: 股票代码，如 "600170"
             period: 周期，"day" / "week" / "month"
         """
-        try:
-            start = time.time()
-            df, _src = _router.route("full_kline", code=code, period=period)
-            latency_ms = round((time.time() - start) * 1000, 1)
-
-            if df is None or df.empty:
-                return _no_data(f"no full kline for {code}")
-
-            bars = []
-            for _, row in df.iterrows():
-                bars.append({
-                    "date": str(row.get("日期", "")),
-                    "open": float(row.get("开盘", 0) or 0),
-                    "high": float(row.get("最高", 0) or 0),
-                    "low": float(row.get("最低", 0) or 0),
-                    "close": float(row.get("收盘", 0) or 0),
-                    "volume": float(row.get("成交量", 0) or 0),
-                    "amount": float(row.get("成交额", 0) or 0),
-                })
-
-            return _ok({
-                "code": normalize_code_bare(code),
-                "period": period,
-                "latency_ms": latency_ms,
-                "bar_count": len(bars),
-                "bars": bars,
-            })
-        except Exception as e:
-            logger.exception("eltdx_get_full_kline failed")
-            return _err(f"full kline query failed: {e}")
+        return mcp_serve(
+            "eltdx_get_full_kline",
+            lambda: _build_eltdx_get_full_kline(code, period),
+            "full kline query failed",
+            dump=False,
+        )
 
     @mcp.tool()
     async def eltdx_get_adjusted_kline(code: str, period: str = "day", adjust: str = "qfq", count: int = 800) -> str:
@@ -811,37 +912,12 @@ def register(mcp: FastMCP):
             adjust: 复权方式，"qfq"（前复权，默认）/ "hfq"（后复权）
             count: 返回根数，默认 800
         """
-        try:
-            start = time.time()
-            df, _src = _router.route("adjusted_kline", code=code, period=period, adjust=adjust, count=count)
-            latency_ms = round((time.time() - start) * 1000, 1)
-
-            if df is None or df.empty:
-                return _no_data(f"no adjusted kline for {code}")
-
-            bars = []
-            for _, row in df.iterrows():
-                bars.append({
-                    "date": str(row.get("日期", "")),
-                    "open": float(row.get("开盘", 0) or 0),
-                    "high": float(row.get("最高", 0) or 0),
-                    "low": float(row.get("最低", 0) or 0),
-                    "close": float(row.get("收盘", 0) or 0),
-                    "volume": float(row.get("成交量", 0) or 0),
-                    "amount": float(row.get("成交额", 0) or 0),
-                })
-
-            return _ok({
-                "code": normalize_code_bare(code),
-                "period": period,
-                "adjust": adjust,
-                "latency_ms": latency_ms,
-                "bar_count": len(bars),
-                "bars": bars,
-            })
-        except Exception as e:
-            logger.exception("eltdx_get_adjusted_kline failed")
-            return _err(f"adjusted kline query failed: {e}")
+        return mcp_serve(
+            "eltdx_get_adjusted_kline",
+            lambda: _build_eltdx_get_adjusted_kline(code, period, adjust, count),
+            "adjusted kline query failed",
+            dump=False,
+        )
 
     @mcp.tool()
     async def eltdx_get_stock_profile(codes: str) -> str:
@@ -854,38 +930,12 @@ def register(mcp: FastMCP):
         Args:
             codes: 股票代码，支持逗号分隔多只，如 "600170,000001"
         """
-        try:
-            start = time.time()
-            df, _src = _router.route("stock_profile", codes=codes)
-            latency_ms = round((time.time() - start) * 1000, 1)
-
-            if df is None or df.empty:
-                return _no_data(f"no stock profile for {codes}")
-
-            profiles = []
-            for _, row in df.iterrows():
-                profiles.append({
-                    "code": str(row.get("代码", "")),
-                    "name": str(row.get("名称", "")),
-                    "last_price": row.get("最新价"),
-                    "change_pct": row.get("涨跌幅"),
-                    "turnover_rate": row.get("换手率"),
-                    "total_market_value": row.get("总市值"),
-                    "circulating_market_value": row.get("流通市值"),
-                    "total_shares": row.get("总股本"),
-                    "circulating_shares": row.get("流通股本"),
-                    "eps": row.get("EPS"),
-                    "board": str(row.get("板块", "")),
-                })
-
-            return _ok({
-                "latency_ms": latency_ms,
-                "count": len(profiles),
-                "profiles": profiles,
-            })
-        except Exception as e:
-            logger.exception("eltdx_get_stock_profile failed")
-            return _err(f"stock profile query failed: {e}")
+        return mcp_serve(
+            "eltdx_get_stock_profile",
+            lambda: _build_eltdx_get_stock_profile(codes),
+            "stock profile query failed",
+            dump=False,
+        )
 
     @mcp.tool()
     async def eltdx_get_shortline_indicators(codes: str) -> str:
