@@ -20,7 +20,11 @@ from tradex.data_sources.akshare_fetchers import (
     fetch_historical_kline,
     fetch_industry_data_ths,
 )
-from tradex.data_sources.eltdx_fetchers import _bar_sort_key, fetch_valuation_eltdx
+from tradex.data_sources.eltdx_fetchers import (
+    _bar_sort_key,
+    _normalize_period,
+    fetch_valuation_eltdx,
+)
 
 
 # ============================================================
@@ -70,6 +74,78 @@ class TestAksharePeriodNormalization:
         with patch("akshare.stock_zh_a_hist", side_effect=fake_hist):
             fetch_historical_kline(code="600000", period="weekly")
         assert captured["period"] == "weekly"
+
+
+# ============================================================
+# QI-ARCH-15: period 双向翻译镜像契约（成对断言钉版，2026-11-22）
+# ============================================================
+
+# 期望值独立事实源 = 书面契约原文，非实现字典（禁同义反复）：
+#   - akshare_fetchers.py「K 线周期归一化（v3.3.14 新增）」契约块：
+#     SmartRouter 把同一 period 参数**原样转发**给主源(eltdx)与备源(akshare)，
+#     两源值域不同——eltdx 认 day/week/month，akshare 认 daily/weekly/monthly，
+#     各源内部归一化使 period 语义对齐；
+#   - eltdx_fetchers._normalize_period docstring + ValueError 文案：
+#     supported 别名清单 day/daily/d/1d, week/weekly/w/1w, month/monthly/m/1m，
+#     非法周期直接抛错（上层可见，防静默降级绕过主源）；
+#   - akshare_common._normalize_ak_period docstring：eltdx 风格 → akshare 风格，
+#     已是 akshare 风格保持不变，未识别原样透传（报错交 akshare 自行）。
+# 注：票面/台账所引「registry.py:71-74 契约注释」为漂移锚点——registry.py 从无
+# period 注释（git log -S 零命中），契约唯一书面记载实为上述三处。
+_MIRROR_PERIOD_CASES = [
+    # (输入, eltdx 侧归一值, akshare 侧归一值)——值域字面量取自契约块原文
+    ("day", "day", "daily"),
+    ("daily", "day", "daily"),
+    ("d", "day", "daily"),
+    ("1d", "day", "daily"),
+    ("week", "week", "weekly"),
+    ("weekly", "week", "weekly"),
+    ("w", "week", "weekly"),
+    ("1w", "week", "weekly"),
+    ("month", "month", "monthly"),
+    ("monthly", "month", "monthly"),
+    ("m", "month", "monthly"),
+    ("1m", "month", "monthly"),
+]
+
+
+class TestPeriodMirrorContract:
+    """period 双向翻译镜像契约成对断言（QI-ARCH-15）。
+
+    同一输入在两侧各自的归一值成对钉住：任一侧值域/别名口径单独漂移
+    （只改 eltdx 字典或只改 akshare 字典）都会被另一侧的成对断言抓住。
+    此前覆盖：eltdx 侧仅 v3.3.11 B16（tests/test_p2_cleanup_regression.py），
+    akshare 侧仅上方 P1-a——两侧互为镜像的成对性质与双向互逆组合此前无断言，
+    本类补齐，不与既有单侧测试重复造。
+    """
+
+    @pytest.mark.parametrize("raw, eltdx_expected, ak_expected", _MIRROR_PERIOD_CASES)
+    def test_mirror_pair(self, raw, eltdx_expected, ak_expected):
+        """同一输入两侧成对归一：值域各自（day|week|month ↔ daily|weekly|monthly），语义对齐。"""
+        assert _normalize_period(raw) == eltdx_expected
+        assert _normalize_ak_period(raw) == ak_expected
+
+    @pytest.mark.parametrize("raw, eltdx_expected, ak_expected", _MIRROR_PERIOD_CASES)
+    def test_composition_ak_after_eltdx(self, raw, eltdx_expected, ak_expected):
+        """正向组合互逆：eltdx 归一产物（eltdx 风格名）再进 akshare 侧 = akshare 规范值。"""
+        assert _normalize_ak_period(_normalize_period(raw)) == ak_expected
+
+    @pytest.mark.parametrize("raw, eltdx_expected, ak_expected", _MIRROR_PERIOD_CASES)
+    def test_composition_eltdx_after_ak(self, raw, eltdx_expected, ak_expected):
+        """反向组合互逆：akshare 归一产物（akshare 风格名）再进 eltdx 侧 = eltdx 规范值。"""
+        assert _normalize_period(_normalize_ak_period(raw)) == eltdx_expected
+
+    def test_undocumented_value_asymmetric_by_design(self):
+        """契约外值的不对称语义按两侧 docstring 各自成文，成对钉住：
+        eltdx 侧快速抛错（上层可见）；akshare 侧原样透传（报错交 akshare 自行）。"""
+        with pytest.raises(ValueError):
+            _normalize_period("year")
+        assert _normalize_ak_period("year") == "year"
+
+    def test_case_and_whitespace_mirror(self):
+        """大小写/首尾空白两侧同口径（B16「 Daily 」与 P1-a「  DAY 」单侧行为的成对钉版）。"""
+        assert _normalize_period("  Weekly ") == "week"
+        assert _normalize_ak_period("  Weekly ") == "weekly"
 
 
 # ============================================================
