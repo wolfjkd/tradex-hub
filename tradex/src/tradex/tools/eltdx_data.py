@@ -653,6 +653,136 @@ def _build_eltdx_get_stock_profile(codes: str) -> str:
         return _err(f"stock profile query failed: {e}")
 
 
+def _build_eltdx_get_shortline_indicators(codes: str) -> str:
+    """构建 eltdx_get_shortline_indicators 响应（原嵌套工具体上提，逻辑零改动）。"""
+    try:
+        start = time.time()
+        df, _src = _router.route("shortline_indicators", codes=codes)
+        latency_ms = round((time.time() - start) * 1000, 1)
+
+        if df is None or df.empty:
+            return _no_data(f"no shortline indicators for {codes}")
+
+        indicators = []
+        for _, row in df.iterrows():
+            indicators.append({str(k): row.get(k) for k in df.columns})
+
+        return _ok({
+            "latency_ms": latency_ms,
+            "count": len(indicators),
+            "indicators": indicators,
+        })
+    except Exception as e:
+        logger.exception("eltdx_get_shortline_indicators failed")
+        return _err(f"shortline indicators query failed: {e}")
+
+
+def _build_eltdx_get_finance_batch(codes: str) -> str:
+    """构建 eltdx_get_finance_batch 响应（原嵌套工具体上提，逻辑零改动）。"""
+    try:
+        start = time.time()
+        df, _src = _router.route("finance_batch", codes=codes)
+        latency_ms = round((time.time() - start) * 1000, 1)
+
+        if df is None or df.empty:
+            return _no_data(f"no finance data for {codes}")
+
+        finances = []
+        for _, row in df.iterrows():
+            finances.append({
+                "code": str(row.get("代码", "")),
+                "total_shares": row.get("总股本"),
+                "circulating_shares": row.get("流通股本"),
+                "total_assets": row.get("总资产"),
+                "net_profit": row.get("净利润"),
+                "eps": row.get("每股收益"),
+                "industry": str(row.get("行业", "")),
+                "ipo_date": str(row.get("上市日期", "")),
+            })
+
+        return _ok({
+            "latency_ms": latency_ms,
+            "count": len(finances),
+            "finances": finances,
+        })
+    except Exception as e:
+        logger.exception("eltdx_get_finance_batch failed")
+        return _err(f"finance batch query failed: {e}")
+
+
+def _build_eltdx_get_special_limits() -> str:
+    """构建 eltdx_get_special_limits 响应（原嵌套工具体上提，逻辑零改动）。"""
+    try:
+        start = time.time()
+        df, _src = _router.route("special_limits")
+        latency_ms = round((time.time() - start) * 1000, 1)
+
+        if df is None or df.empty:
+            return _no_data("no special limits")
+
+        limits = []
+        for _, row in df.iterrows():
+            limits.append({
+                "code": str(row.get("代码", "")),
+                "limit_up_price": row.get("涨停价"),
+                "limit_down_price": row.get("跌停价"),
+            })
+
+        return _ok({
+            "latency_ms": latency_ms,
+            "count": len(limits),
+            "limits": limits,
+        })
+    except Exception as e:
+        logger.exception("eltdx_get_special_limits failed")
+        return _err(f"special limits query failed: {e}")
+
+
+def _build_eltdx_get_finance_report(code: str, report_type: str = "zcfzb") -> str:
+    """构建 eltdx_get_finance_report 响应（原嵌套工具体上提，逻辑零改动）。"""
+    try:
+        start = time.time()
+        df, _src = _router.route("finance_report", code=code, report_type=report_type)
+        latency_ms = round((time.time() - start) * 1000, 1)
+
+        if df is None or df.empty:
+            return _no_data(f"no finance report for {code}")
+
+        return _ok({
+            "code": normalize_code_bare(code),
+            "report_type": report_type,
+            "latency_ms": latency_ms,
+            "columns": list(df.columns),
+            "row_count": len(df),
+            "rows": df.head(20).to_dict(orient="records"),
+        })
+    except Exception as e:
+        logger.exception("eltdx_get_finance_report failed")
+        return _err(f"finance report query failed: {e}")
+
+
+def _build_eltdx_get_dividend_financing(code: str) -> str:
+    """构建 eltdx_get_dividend_financing 响应（原嵌套工具体上提，逻辑零改动）。"""
+    try:
+        start = time.time()
+        df, _src = _router.route("dividend_financing", code=code)
+        latency_ms = round((time.time() - start) * 1000, 1)
+
+        if df is None or df.empty:
+            return _no_data(f"no dividend financing for {code}")
+
+        return _ok({
+            "code": normalize_code_bare(code),
+            "latency_ms": latency_ms,
+            "columns": list(df.columns),
+            "row_count": len(df),
+            "rows": df.head(20).to_dict(orient="records"),
+        })
+    except Exception as e:
+        logger.exception("eltdx_get_dividend_financing failed")
+        return _err(f"dividend financing query failed: {e}")
+
+
 # ============================================================
 # MCP 工具注册
 # ============================================================
@@ -948,26 +1078,12 @@ def register(mcp: FastMCP):
         Args:
             codes: 股票代码，支持逗号分隔多只，如 "600170,000001"
         """
-        try:
-            start = time.time()
-            df, _src = _router.route("shortline_indicators", codes=codes)
-            latency_ms = round((time.time() - start) * 1000, 1)
-
-            if df is None or df.empty:
-                return _no_data(f"no shortline indicators for {codes}")
-
-            indicators = []
-            for _, row in df.iterrows():
-                indicators.append({str(k): row.get(k) for k in df.columns})
-
-            return _ok({
-                "latency_ms": latency_ms,
-                "count": len(indicators),
-                "indicators": indicators,
-            })
-        except Exception as e:
-            logger.exception("eltdx_get_shortline_indicators failed")
-            return _err(f"shortline indicators query failed: {e}")
+        return mcp_serve(
+            "eltdx_get_shortline_indicators",
+            lambda: _build_eltdx_get_shortline_indicators(codes),
+            "shortline indicators query failed",
+            dump=False,
+        )
 
     @mcp.tool()
     async def eltdx_get_finance_batch(codes: str) -> str:
@@ -980,35 +1096,12 @@ def register(mcp: FastMCP):
         Args:
             codes: 股票代码，支持逗号分隔多只，如 "600170,000001"
         """
-        try:
-            start = time.time()
-            df, _src = _router.route("finance_batch", codes=codes)
-            latency_ms = round((time.time() - start) * 1000, 1)
-
-            if df is None or df.empty:
-                return _no_data(f"no finance data for {codes}")
-
-            finances = []
-            for _, row in df.iterrows():
-                finances.append({
-                    "code": str(row.get("代码", "")),
-                    "total_shares": row.get("总股本"),
-                    "circulating_shares": row.get("流通股本"),
-                    "total_assets": row.get("总资产"),
-                    "net_profit": row.get("净利润"),
-                    "eps": row.get("每股收益"),
-                    "industry": str(row.get("行业", "")),
-                    "ipo_date": str(row.get("上市日期", "")),
-                })
-
-            return _ok({
-                "latency_ms": latency_ms,
-                "count": len(finances),
-                "finances": finances,
-            })
-        except Exception as e:
-            logger.exception("eltdx_get_finance_batch failed")
-            return _err(f"finance batch query failed: {e}")
+        return mcp_serve(
+            "eltdx_get_finance_batch",
+            lambda: _build_eltdx_get_finance_batch(codes),
+            "finance batch query failed",
+            dump=False,
+        )
 
     @mcp.tool()
     async def eltdx_get_special_limits() -> str:
@@ -1021,30 +1114,12 @@ def register(mcp: FastMCP):
         Args:
             无参数
         """
-        try:
-            start = time.time()
-            df, _src = _router.route("special_limits")
-            latency_ms = round((time.time() - start) * 1000, 1)
-
-            if df is None or df.empty:
-                return _no_data("no special limits")
-
-            limits = []
-            for _, row in df.iterrows():
-                limits.append({
-                    "code": str(row.get("代码", "")),
-                    "limit_up_price": row.get("涨停价"),
-                    "limit_down_price": row.get("跌停价"),
-                })
-
-            return _ok({
-                "latency_ms": latency_ms,
-                "count": len(limits),
-                "limits": limits,
-            })
-        except Exception as e:
-            logger.exception("eltdx_get_special_limits failed")
-            return _err(f"special limits query failed: {e}")
+        return mcp_serve(
+            "eltdx_get_special_limits",
+            _build_eltdx_get_special_limits,
+            "special limits query failed",
+            dump=False,
+        )
 
     @mcp.tool()
     async def eltdx_get_finance_report(code: str, report_type: str = "zcfzb") -> str:
@@ -1059,25 +1134,12 @@ def register(mcp: FastMCP):
             code: 股票代码，如 "600170"
             report_type: 报表类型，默认 zcfzb（资产负债表）
         """
-        try:
-            start = time.time()
-            df, _src = _router.route("finance_report", code=code, report_type=report_type)
-            latency_ms = round((time.time() - start) * 1000, 1)
-
-            if df is None or df.empty:
-                return _no_data(f"no finance report for {code}")
-
-            return _ok({
-                "code": normalize_code_bare(code),
-                "report_type": report_type,
-                "latency_ms": latency_ms,
-                "columns": list(df.columns),
-                "row_count": len(df),
-                "rows": df.head(20).to_dict(orient="records"),
-            })
-        except Exception as e:
-            logger.exception("eltdx_get_finance_report failed")
-            return _err(f"finance report query failed: {e}")
+        return mcp_serve(
+            "eltdx_get_finance_report",
+            lambda: _build_eltdx_get_finance_report(code, report_type),
+            "finance report query failed",
+            dump=False,
+        )
 
     @mcp.tool()
     async def eltdx_get_dividend_financing(code: str) -> str:
@@ -1089,24 +1151,12 @@ def register(mcp: FastMCP):
         Args:
             code: 股票代码，如 "600170"
         """
-        try:
-            start = time.time()
-            df, _src = _router.route("dividend_financing", code=code)
-            latency_ms = round((time.time() - start) * 1000, 1)
-
-            if df is None or df.empty:
-                return _no_data(f"no dividend financing for {code}")
-
-            return _ok({
-                "code": normalize_code_bare(code),
-                "latency_ms": latency_ms,
-                "columns": list(df.columns),
-                "row_count": len(df),
-                "rows": df.head(20).to_dict(orient="records"),
-            })
-        except Exception as e:
-            logger.exception("eltdx_get_dividend_financing failed")
-            return _err(f"dividend financing query failed: {e}")
+        return mcp_serve(
+            "eltdx_get_dividend_financing",
+            lambda: _build_eltdx_get_dividend_financing(code),
+            "dividend financing query failed",
+            dump=False,
+        )
 
     @mcp.tool()
     async def eltdx_get_company_news(code: str) -> str:
