@@ -28,6 +28,28 @@
 | fetch_sina_world_index（新浪 znb） | data_sources/sina_fetchers.py | 同上；一旦注册进 SmartRouter 本豁免即失效，必须改抛出语义 |
 | fetch_global_index_spot（东财 spot） | data_sources/akshare_em.py | 同上；代码内注明豁免口径（akshare_em.py 空态段） |
 
+### 表二注记：已注册源空态语义盘点——合法空结果保留点（QI-STD-26，2026-11-22 工单 17）
+
+> 背景：rule 11 注册门槛②（2026-11-18 拍板②）空态语义统一批（工单 17）对全 data_sources 已注册源 AST 盘点 74 处静默空态折叠点，**37 处改抛出**（变化清单见台账「工单 17 施工记录」），下列 **37 处保留为合法空结果**（「查询天然无数据」语义交叠处，逐组书面豁免；行号为改后现行）。此注记为点级语义豁免登记，与上表 fetcher 级豁免（未注册）性质不同：保留点所在 fetcher 均已注册，其硬失败（HTTP/JSON/解析炸）仍由外层 except 抛出走降级链。
+
+| 组 | 位置（处数） | 保留理由 |
+|---|---|---|
+| 查询天然无数据（per-stock 记录型） | event_driven_fetchers.py 六函数 raw 空分支（6） | 业绩预告/调研/增减持/回购/质押/IPO 按股查询，无记录=常态答案；单源 pri=999 无降级目标 |
+| 镜像死分支（防御不可达） | event_driven 六函数 `if not rows`（6）＋ chinabond :218、wscn lives :111、wencai_news :337、szse 交易日历 :448、sse 两融 :334（5） | rows 与 raw 一一镜像无过滤，raw 空已先行处理 |
+| 查询天然无数据（公告） | news_fetchers.py cninfo :287/:319、exchange_official_fetchers.py szse 公告 :500（3） | per-stock 公告查询，无公告股票合法空 |
+| 接口设计日期过滤 | exchange_official_fetchers.py sse 龙虎榜 :205、szse 龙虎榜 :262（2） | 数据未发布/该日无榜=合法暂态（代码注释自证） |
+| 查询天然无数据（两融） | exchange_official_fetchers.py sse :321、szse :371（2） | 按日期查询，非交易日/未发布合法空 |
+| 查询天然无数据 | sw_industry_fetchers.py as-of subset.empty :131（1） | as-of 区间无记录=查询答案（history.empty 毒缓存断源面已改抛出，见 QI-STD-27） |
+| 查询天然无数据 | baostock_fetchers.py 退市日期 :195（1） | 存续股无退市日期=该工具正常答案 |
+| 能力边界 | baostock_fetchers.py :106/:175（2） | bs_code None = 不支持该市场（北交所），「此源无此码数据」诚实 |
+| 查询天然无数据 | baostock_fetchers.py 估值 :140（1） | 日期窗零行合法；下游 PE>0 过滤把空当合法消费 |
+| 搜索无结果 | wencai_fetchers.py :246/:324（2） | 问财「无匹配」一等答案；shortline_service 显式消费空表=触发同花顺兜底信号 |
+| 输入校验（非源状态） | wencai_fetchers.py :203/:286（2） | 空 query/keyword = 调用方空参，非断源/错码/无数据三类 |
+| 本地数据态 | tdx_local.py :136/:216（2） | 单票本地无 .day/.lc5 文件=「本地无该票数据」诚实答案（源态 tdxdir 缺失已改抛出） |
+| 过滤后空=查询答案 | wallstreetcn_fetchers.py 宏观日历 :186（1） | min_importance 过滤后空=「该时段无该级别事件」 |
+
+（合计 6+6+3+2+2+1+1+2+1+2+2+2+5+1 = 37 ✓；新增保留点须先在此登记并经老板确认，同表一纪律。）
+
 ## 表三：rule 7 裸 get/set 缓存豁免（范围：df_to_json 序列化场景）
 
 > 背景：裁决②（2026-11-22 老板拍板）——rule 7 收紧，裸 get/set 豁免范围**仅限 tools 层 `df_to_json` 序列化字符串缓存**；其余一切手写 get/set 一律迁移 `cache.get_or_set`（迁移施工 = 工单 09 试点 → 10 全量）。
@@ -89,3 +111,4 @@
 | 2026-11-22 | 表三注记（票 09/10，QI-ARCH-10）：全仓实测 68 处 × 20 文件盘点落档——A 组 df_to_json 豁免 28 保留；B 组非 df_to_json 串缓存 22 保留待裁决（双重编码组 16 = QI-BUG-03 + 类型依赖/多级 6）；C 组 async 编排体 5 保留待裁决；D 组迁移 13（试点 market_service 7 + 全量批 6） |
 | 2026-11-22 | 票 13（QI-ARCH-14，裁决③缓存语义统一）：表一退役 get_market_capitalization 手写豁免行（编排上收 price_service 后归 mcp_serve 单点，9→8 行，实测账 150+8+3+31=192 不变）；composite 行注记更新（A⑤ route 收敛不改 async 形态，豁免理由仍成立）；表三注记 A 组 28→26、B 组 market_capitalization 行迁出（get_or_set 对象缓存保真）、D 组续记编排随迁 3 处 |
 | 2026-11-22 | 票 07（QI-ARCH-17，裁决①不豁免走分支 B 上提）：eltdx_data 31 工具工具体上提模块级 + mcp_serve 出口收拢（dump=False 直返自有 _ok/_no_data/_err 三态信封，逐字节保真），表一头注实测账 150+8+3+31=192 → **181+8+3=192，eltdx_data 批外清零**；豁免零新增（31 工具全部迁入 mcp_serve，无 async/异构豁免项）；契约快照 tests/test_eltdx_mcp_serve_compat.py 92 用例锁定；check_exit_shapes.py 白名单同步摘除 eltdx_data.py 批外项 |
+| 2026-11-22 | 票 17（QI-STD-26，rule 11 拍板②空态语义统一批）：**表二新增注记**「已注册源合法空结果保留点」37 处（14 组逐组理由）——rule 5 空态批对全注册源盘点 74 折叠点，37 改抛出（commits 973038d/462b5b7/f85e009）+ 37 保留点书面化于此；上表 3 fetcher 级豁免原样不动（未注册，不在改造范围）；降级链验证 tests/test_empty_state_unify.py 9 用例，全量门 1453P/0F（gate-batchB6.txt） |
