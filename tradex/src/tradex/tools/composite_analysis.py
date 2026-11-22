@@ -30,6 +30,7 @@ from ..data_sources import get_router
 from ..utils.cache import cache, TTL_REALTIME, TTL_DAILY
 from ..utils.formatter import dict_to_json, error_response, df_to_json, slim_df
 from ..utils.symbol import normalize_symbol
+from ..service import price_service
 
 logger = logging.getLogger(__name__)
 
@@ -84,34 +85,34 @@ async def _safe_call(func, *args, timeout: float = 30.0, **kwargs) -> dict:
 
 
 def _get_realtime_quote_sync(symbol: str) -> dict:
-    """同步获取实时行情（内部函数，via SmartRouter）。"""
-    df, _src = _router.route("realtime_quote", symbol=symbol)
-    if df is None or df.empty:
-        raise ValueError(f"未找到股票 {symbol} 的实时行情")
-    # akshare 返回全量需过滤；eltdx 返回单行
-    code_col = "代码" if "代码" in df.columns else df.columns[0]
-    if len(df) > 1:
-        row = df[df[code_col].astype(str).str.strip() == symbol]
-        if row.empty:
-            raise ValueError(f"未找到股票 {symbol} 的实时行情")
-    else:
-        row = df
-    r = row.iloc[0]
+    """同步获取实时行情（A⑤ route 收敛，2026-11-22：改调 price_service.get_realtime_quote）。
+
+    原 SmartRouter 直查副本实现退役（QI-ARCH-03 挂账，裁决③统一缓存语义）——
+    与 MCP get_realtime_quote / REST /price/quote 共享 realtime_quote:{symbol}
+    TTL_REALTIME 缓存（三层单实现）。service 内部含估值补取副作用
+    （市盈率/市净率缺失时腾讯按日补一次），本维度映射不消费该两键，输出形状
+    与原实现一致（英文键维度 dict，下游可见形状不变）。
+
+    Raises:
+        ValueError: 行情未找到（原态同，由 _safe_call 捕获转维度失败）。
+    """
+    data = price_service.get_realtime_quote(symbol)
+    q = data.get("quote", {})
     return {
-        "code": str(r.get("代码", "")),
-        "name": str(r.get("名称", "")),
-        "price": float(r.get("最新价", 0) or 0),
-        "change_pct": float(r.get("涨跌幅", 0) or 0),
-        "change_amount": float(r.get("涨跌额", 0) or 0),
-        "volume": float(r.get("成交量", 0) or 0),
-        "turnover": float(r.get("成交额", 0) or 0),
-        "high": float(r.get("最高", 0) or 0),
-        "low": float(r.get("最低", 0) or 0),
-        "open": float(r.get("今开", 0) or 0),
-        "prev_close": float(r.get("昨收", 0) or 0),
-        "turnover_rate": float(r.get("换手率", 0) or 0),
-        "pe_ratio": float(r.get("市盈率-动态", 0) or 0),
-        "total_market_cap": float(r.get("总市值", 0) or 0),
+        "code": str(q.get("代码", "")),
+        "name": str(q.get("名称", "")),
+        "price": float(q.get("最新价", 0) or 0),
+        "change_pct": float(q.get("涨跌幅", 0) or 0),
+        "change_amount": float(q.get("涨跌额", 0) or 0),
+        "volume": float(q.get("成交量", 0) or 0),
+        "turnover": float(q.get("成交额", 0) or 0),
+        "high": float(q.get("最高", 0) or 0),
+        "low": float(q.get("最低", 0) or 0),
+        "open": float(q.get("今开", 0) or 0),
+        "prev_close": float(q.get("昨收", 0) or 0),
+        "turnover_rate": float(q.get("换手率", 0) or 0),
+        "pe_ratio": float(q.get("市盈率-动态", 0) or 0),
+        "total_market_cap": float(q.get("总市值", 0) or 0),
     }
 
 
@@ -229,6 +230,11 @@ def _get_limit_up_down_sync() -> dict:
 # 多分支显式 error_response 的容错降级语义原样保留（mcp_serve 同步 build
 # 不适配 async 的已知例外，与 diagnostics.list_all_tools 同款，记交接）；
 # 上提主目标达成：_get_*_sync 内部函数行为测试可直接 import 打桩。）
+# A⑤ route 收敛（QI-ARCH-14 票 13，裁决③缓存语义统一，2026-11-22）：
+# _get_realtime_quote_sync 改调 price_service.get_realtime_quote（三层单实现，
+# quote 维度与 MCP/REST 出口共享 realtime_quote:{symbol} TTL_REALTIME 缓存，
+# 原直查副本退役）；其余 _get_*_sync 仍直连 SmartRouter（C 组 async 编排体
+# get_or_set 不适配保留，EXEMPTIONS 表三注记）。
 
 
 
