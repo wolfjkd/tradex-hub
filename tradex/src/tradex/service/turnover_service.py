@@ -145,82 +145,94 @@ def get_turnover_top(date: str = "", limit: int = 20, kind: str = "auto") -> dic
     # 降级实时榜
     decision = resolve_cache("live_15s", partial=True)
     key = cache_key(ENDPOINT_ID, kind="realtime")
-    cached = cache.get(key)
-    if cached is not None:
-        result = dict(cached)
-        result["cache_hit"] = True
-        return _slice(result, limit_n)
 
-    df, source = _router.route(
-        "category_quotes", sort_by="成交额", count=max(_MAX_CACHE_ROWS, limit_n), timeout=20
+    def _factory():
+        df, source = _router.route(
+            "category_quotes", sort_by="成交额", count=max(_MAX_CACHE_ROWS, limit_n), timeout=20
+        )
+        result = {
+            "endpoint": ENDPOINT_ID,
+            "date": None,
+            "kind": "realtime",
+            "as_of": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "source": f"{source}（此刻榜）",
+            "source_note": "实时成交额榜按此刻成交额排序，非当日定稿；盘中读数会继续变化",
+            "compliance": _COMPLIANCE,
+            "count": None,
+            "stocks": _rank_realtime(df, _MAX_CACHE_ROWS),
+            "degradation": {
+                "from": "history",
+                "to": "realtime",
+                "reason": str(degradation_reason),
+            },
+            "cache_hit": False,
+            "cache": {"policy": "live_15s", "ttl_seconds": decision.ttl_seconds},
+        }
+        result["count"] = len(result["stocks"])
+        return result
+
+    out: dict = {}
+    result = cache.get_or_set(
+        key,
+        _factory,
+        decision.ttl_seconds,
+        store=lambda v: (decision.enabled, decision.ttl_seconds),  # 原样：decision.enabled 才落缓存
+        out=out,
     )
-    result = {
-        "endpoint": ENDPOINT_ID,
-        "date": None,
-        "kind": "realtime",
-        "as_of": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "source": f"{source}（此刻榜）",
-        "source_note": "实时成交额榜按此刻成交额排序，非当日定稿；盘中读数会继续变化",
-        "compliance": _COMPLIANCE,
-        "count": None,
-        "stocks": _rank_realtime(df, _MAX_CACHE_ROWS),
-        "degradation": {
-            "from": "history",
-            "to": "realtime",
-            "reason": str(degradation_reason),
-        },
-        "cache_hit": False,
-        "cache": {"policy": "live_15s", "ttl_seconds": decision.ttl_seconds},
-    }
-    result["count"] = len(result["stocks"])
-    if decision.enabled:
-        # 缓存全量榜单副本：_slice 会截断 result["stocks"]，
-        # 直接缓存同一 dict 会让后续更大的 limit 拿不到全量。
-        cache.set(key, {**result, "stocks": list(result["stocks"])}, decision.ttl_seconds)
+    # 浅拷贝后改写：_slice 只重赋值 stocks/returned 键，缓存对象不被污染
+    # （原 dict(cached) + 全量名单副本同款防御，拷贝职责移到调用侧）
+    result = dict(result)
+    result["cache_hit"] = bool(out.get("cache_hit"))
     return _slice(result, limit_n)
 
 
 def _try_history(date: str, meta) -> dict | str | None:
     """尝试走盘后包；成功返回结果 dict，失败返回字符串原因（不抛）。"""
     key = cache_key(ENDPOINT_ID, date=(date or "").replace("-", "") or "latest")
-    cached = cache.get(key)
-    if cached is not None:
-        result = dict(cached)
-        result["cache_hit"] = True
-        return result
-
     decision = resolve_cache(meta.cache_policy, partial=False)
-    try:
-        payload, source = _router.route("tdx_daily_package", date=date, timeout=120)
-    except Exception as exc:  # noqa: BLE001 - 包未发布/下载失败一律走实时降级
-        logger.warning("turnover_top: 盘后包不可用（%s），降级实时榜", exc)
-        return f"盘后包不可用：{exc}"
 
-    if not isinstance(payload, dict) or not isinstance(payload.get("rows"), list):
-        return f"盘后包返回结构异常（source={source}）"
+    def _factory():
+        try:
+            payload, source = _router.route("tdx_daily_package", date=date, timeout=120)
+        except Exception as exc:  # noqa: BLE001 - 包未发布/下载失败一律走实时降级
+            logger.warning("turnover_top: 盘后包不可用（%s），降级实时榜", exc)
+            return f"盘后包不可用：{exc}"  # 降级原因串，store 闸门拒存（原样不入缓存）
 
-    stocks = rank_rows(payload["rows"], _MAX_CACHE_ROWS)
-    result = {
-        "endpoint": ENDPOINT_ID,
-        "date": payload.get("date"),
-        "kind": "history",
-        "as_of": payload.get("as_of"),
-        "source": payload.get("source") or source,
-        "source_url": payload.get("source_url"),
-        "source_note": (
-            "通达信官网盘后包（g4day，17:00 后发布）全市场日线；"
-            "amount 原始单位元，已换算亿元；仅保留 A 股个股"
-        ),
-        "compliance": _COMPLIANCE,
-        "count": len(stocks),
-        "stocks": stocks,
-        "degradation": None,
-        "cache_hit": False,
-        "cache": {"policy": meta.cache_policy, "ttl_seconds": decision.ttl_seconds},
-    }
-    if decision.enabled:
-        # 同上：缓存副本，避免第一次调用的 limit 把缓存榜单截断
-        cache.set(key, {**result, "stocks": list(result["stocks"])}, decision.ttl_seconds)
+        if not isinstance(payload, dict) or not isinstance(payload.get("rows"), list):
+            return f"盘后包返回结构异常（source={source}）"  # 同上不入缓存
+
+        stocks = rank_rows(payload["rows"], _MAX_CACHE_ROWS)
+        return {
+            "endpoint": ENDPOINT_ID,
+            "date": payload.get("date"),
+            "kind": "history",
+            "as_of": payload.get("as_of"),
+            "source": payload.get("source") or source,
+            "source_url": payload.get("source_url"),
+            "source_note": (
+                "通达信官网盘后包（g4day，17:00 后发布）全市场日线；"
+                "amount 原始单位元，已换算亿元；仅保留 A 股个股"
+            ),
+            "compliance": _COMPLIANCE,
+            "count": len(stocks),
+            "stocks": stocks,
+            "degradation": None,
+            "cache_hit": False,
+            "cache": {"policy": meta.cache_policy, "ttl_seconds": decision.ttl_seconds},
+        }
+
+    def _store(value):
+        # dict = 可缓存结果；str = 降级原因串，不缓存（原样：早退 return 先于 cache.set）
+        return (isinstance(value, dict), decision.ttl_seconds)
+
+    out: dict = {}
+    value = cache.get_or_set(
+        key, _factory, decision.ttl_seconds, store=_store, out=out
+    )
+    if not isinstance(value, dict):
+        return value
+    result = dict(value)
+    result["cache_hit"] = bool(out.get("cache_hit"))
     return result
 
 

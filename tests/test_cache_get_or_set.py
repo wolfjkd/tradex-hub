@@ -58,6 +58,19 @@ class TestGetOrSet:
             c.get_or_set("e", factory, ttl=60)
         assert c.get("e") is None
 
+    def test_ttl_expiry_recomputes(self, c):
+        """TTL 过期后重算（QI-ARCH-10 四语义点之 TTL 过期，此前无覆盖）。"""
+        calls = []
+
+        def factory():
+            calls.append(1)
+            return {"n": len(calls)}
+
+        # ttl=0 → expires_at=now，读取时刻 now' >= now 即过期（严格小于判定）
+        assert c.get_or_set("t", factory, ttl=0) == {"n": 1}
+        assert c.get_or_set("t", factory, ttl=0) == {"n": 2}
+        assert len(calls) == 2  # 过期条目不返回旧值，factory 重算
+
     def test_object_write_survives_file_roundtrip(self, c, tmp_path):
         """对象直存 → 文件层 JSON 落盘 → 新实例读回同对象（持久化等价）。"""
         payload = {"list": [1, 2, 3], "s": "值"}

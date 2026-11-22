@@ -37,41 +37,41 @@ def get_bigcaps(min_mktcap_yi: float = 500, limit: int = 0) -> dict:
     decision = resolve_cache(meta.cache_policy, partial=False)
     key = cache_key(ENDPOINT_ID, threshold=threshold_yi)
 
-    cached = cache.get(key)
-    if cached is not None:
-        result = dict(cached)
-        result["cache_hit"] = True
-        return _apply_limit(result, limit)
+    def _factory():
+        payload, source = _router.route("bigcaps", min_mktcap_yi=threshold_yi, timeout=25)
+        if not isinstance(payload, dict) or not isinstance(payload.get("stocks"), list):
+            raise RuntimeError(f"bigcaps 数据源返回结构异常（source={source}）")
 
-    payload, source = _router.route("bigcaps", min_mktcap_yi=threshold_yi, timeout=25)
-    if not isinstance(payload, dict) or not isinstance(payload.get("stocks"), list):
-        raise RuntimeError(f"bigcaps 数据源返回结构异常（source={source}）")
+        return {
+            "endpoint": ENDPOINT_ID,
+            "as_of": payload.get("as_of"),
+            "source": payload.get("source") or source,
+            "source_route": source,
+            "source_note": payload.get("source_note", ""),
+            "compliance": _COMPLIANCE,
+            "threshold_yi": payload.get("threshold_yi", threshold_yi),
+            "count": len(payload["stocks"]),
+            "stocks": payload["stocks"],
+            "unpriced": payload.get("unpriced", []),
+            "cache_hit": False,
+            "cache": {
+                "policy": meta.cache_policy,
+                "ttl_seconds": decision.ttl_seconds,
+            },
+        }
 
-    result = {
-        "endpoint": ENDPOINT_ID,
-        "as_of": payload.get("as_of"),
-        "source": payload.get("source") or source,
-        "source_route": source,
-        "source_note": payload.get("source_note", ""),
-        "compliance": _COMPLIANCE,
-        "threshold_yi": payload.get("threshold_yi", threshold_yi),
-        "count": len(payload["stocks"]),
-        "stocks": payload["stocks"],
-        "unpriced": payload.get("unpriced", []),
-        "cache_hit": False,
-        "cache": {
-            "policy": meta.cache_policy,
-            "ttl_seconds": decision.ttl_seconds,
-        },
-    }
-    if decision.enabled:
-        # 缓存全量名单副本：_apply_limit 会改 result 的 stocks/returned，
-        # 若直接缓存同一个 dict，内存缓存里的名单会被第一次调用的 limit 截断。
-        cache.set(
-            key,
-            {**result, "stocks": list(result["stocks"])},
-            decision.ttl_seconds,
-        )
+    out: dict = {}
+    result = cache.get_or_set(
+        key,
+        _factory,
+        decision.ttl_seconds,
+        store=lambda v: (decision.enabled, decision.ttl_seconds),  # 原样：decision.enabled 才落缓存
+        out=out,
+    )
+    # 浅拷贝后改写：_apply_limit 只重赋值 stocks/returned 键，缓存对象不被污染
+    # （原 dict(cached) 同款防御；get_or_set 直存 factory 产物，拷贝职责移到调用侧）
+    result = dict(result)
+    result["cache_hit"] = bool(out.get("cache_hit"))
     return _apply_limit(result, limit)
 
 

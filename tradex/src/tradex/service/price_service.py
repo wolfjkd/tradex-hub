@@ -169,29 +169,27 @@ def _fetch_valuation_snapshot(symbol: str) -> dict[str, float | None]:
     取不到就留 None —— 绝不填 0，0 会被当成「PE=0 极度低估」这种假信号。
     """
     cache_key = f"valuation_snapshot:{symbol}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        return cached
 
-    snapshot: dict[str, float | None] = {"市盈率": None, "市净率": None}
-    try:
-        df, _src = _router.route(
-            "realtime_quote", source_name="tencent_http", symbol=symbol
-        )
-        if df is not None and not df.empty:
-            row = df.iloc[0]
-            for field in ("市盈率", "市净率"):
-                value = row.get(field)
-                if value is None or pd.isna(value):
-                    continue
-                numeric = float(value)
-                # 上游空字段在该适配器里被写成 0，0 视为缺失而非真实估值
-                snapshot[field] = numeric if numeric != 0 else None
-    except Exception as exc:  # noqa: BLE001 - 估值补取失败不影响行情主流程
-        logger.debug("估值补取失败(%s): %s", symbol, exc)
+    def _factory() -> dict[str, float | None]:
+        snapshot: dict[str, float | None] = {"市盈率": None, "市净率": None}
+        try:
+            df, _src = _router.route(
+                "realtime_quote", source_name="tencent_http", symbol=symbol
+            )
+            if df is not None and not df.empty:
+                row = df.iloc[0]
+                for field in ("市盈率", "市净率"):
+                    value = row.get(field)
+                    if value is None or pd.isna(value):
+                        continue
+                    numeric = float(value)
+                    # 上游空字段在该适配器里被写成 0，0 视为缺失而非真实估值
+                    snapshot[field] = numeric if numeric != 0 else None
+        except Exception as exc:  # noqa: BLE001 - 估值补取失败不影响行情主流程
+            logger.debug("估值补取失败(%s): %s", symbol, exc)
+        return snapshot  # 部分快照也缓存（原样：cache.set 在 try 外无条件执行）
 
-    cache.set(cache_key, snapshot, TTL_DAILY)
-    return snapshot
+    return cache.get_or_set(cache_key, _factory, TTL_DAILY)
 
 
 def get_realtime_quote(symbol: str) -> dict[str, Any]:

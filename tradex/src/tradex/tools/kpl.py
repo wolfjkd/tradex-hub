@@ -67,15 +67,13 @@ async def get_kpl_sentiment() -> str:
         情绪读数 JSON dict。
     """
     cache_key = "kpl_sentiment"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        return cached
+
+    def _factory():
+        payload, _src = _router.route("kpl_sentiment")
+        return payload  # 对象入缓存（QI-ARCH-10），出口统一 dict_to_json 序列化
 
     def _build() -> str:
-        payload, _src = _router.route("kpl_sentiment")
-        result = dict_to_json(payload)
-        cache.set(cache_key, result, TTL_REALTIME)
-        return result
+        return dict_to_json(cache.get_or_set(cache_key, _factory, TTL_REALTIME))
 
     return mcp_serve("get_kpl_sentiment", _build, "获取KPL情绪读数失败", dump=False)
 

@@ -147,23 +147,25 @@ def analyze_technical(symbol: str, look_back_days: int = 30) -> dict:
         )
 
     cache_key = f"analyze_technical:{symbol}:{look_back_days}"
-    cached = cache.get(cache_key)
-    if cached is not None and isinstance(cached, dict):
-        return cached
 
-    try:
+    def _factory():
         df = _load_ohlcv(symbol, look_back_days)
         if df is None or df.empty:
-            return _err_dict(
-                f"无法获取 {symbol} 的 OHLCV 数据",
-                "analyze_technical",
-            )
+            return None  # 空 OHLCV 不入缓存（原样：_err_dict 早退先于 cache.set）
         engine = AnalysisEngine(df, symbol=symbol)
         result = engine.analyze_all()
         if isinstance(result.get("data_points"), int):
             result["data_points"] = min(result["data_points"], look_back_days)
-        cache.set(cache_key, result, TTL_DAILY)
         return result
+
+    try:
+        result = cache.get_or_set(cache_key, _factory, TTL_DAILY)
     except Exception as e:
         logger.warning("service.analyze_technical 失败 %s: %s", symbol, e)
         return _err_dict(f"技术分析失败: {e}", "analyze_technical")
+    if result is None:
+        return _err_dict(
+            f"无法获取 {symbol} 的 OHLCV 数据",
+            "analyze_technical",
+        )
+    return result
