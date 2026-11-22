@@ -143,6 +143,21 @@ def slim_financial_df(
     return pd.DataFrame(result)
 
 
+def find_code_col(df: pd.DataFrame) -> str:
+    """Find the stock code column in a DataFrame (varies by data source).
+
+    QI-ARCH-11（2026-11-22）：原 service/price_service.py 与
+    service/company_service.py 各持一份私有复本（同名同义），收拢
+    utils 公共家单点，三消费点同源。
+    """
+    for c in df.columns:
+        if c in ("代码", "code", "symbol"):
+            return c
+        if "代码" in c or "code" in c.lower() or "symbol" in c.lower():
+            return c
+    return df.columns[0]
+
+
 def slim_df(df: pd.DataFrame) -> pd.DataFrame:
     """
     General-purpose cleanup for any DataFrame before sending to LLM.

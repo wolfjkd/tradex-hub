@@ -24,9 +24,10 @@ import pandas as pd
 from ..data_sources import get_router
 from ..data_sources._column_adapter import MINUTE_EN, rename_present
 from ..utils.cache import TTL_DAILY, TTL_REALTIME, cache
-from ..utils.formatter import df_to_json, df_to_records, dict_to_json, slim_df
+from ..utils.formatter import df_to_json, df_to_records, dict_to_json, find_code_col, slim_df
 from ..utils.symbol import (
     format_with_exchange,
+    is_global_code,
     is_index_code,
     normalize_symbol,
 )
@@ -38,27 +39,6 @@ _router = get_router()
 _MAX_BARS = 1000
 # 返回给调用方的最大根数（防止长区间把响应撑爆）
 _RESPONSE_BAR_CAP = 500
-
-
-def _is_global_code(symbol: str) -> bool:
-    """检测是否为全球行情代码（非A股6位数字代码）。
-
-    与原 tools/price_data.py 的 _is_global_code 完全一致（契约保持）。
-    """
-    return symbol.startswith(("us", "hk", "kr", "wh", "int_", "hf_"))
-
-
-def _find_code_col(df) -> str:
-    """Find the stock code column in a DataFrame (varies by data source).
-
-    与原 tools/price_data.py 的 _find_code_col 完全一致。
-    """
-    for c in df.columns:
-        if c in ("代码", "code", "symbol"):
-            return c
-        if "代码" in c or "code" in c.lower() or "symbol" in c.lower():
-            return c
-    return df.columns[0]
 
 
 def _resolve_symbol(symbol: str) -> tuple[str, bool]:
@@ -227,7 +207,7 @@ def get_realtime_quote(symbol: str) -> dict[str, Any]:
         Exception: 数据源异常时向上抛。
     """
     # 全球代码分支
-    if _is_global_code(symbol):
+    if is_global_code(symbol):
         def _global_factory() -> dict[str, Any]:
             df, _src = _router.route("global_market_quote")
             if df is None or df.empty:
@@ -248,7 +228,7 @@ def get_realtime_quote(symbol: str) -> dict[str, Any]:
         df, _src = _router.route("realtime_quote", symbol=symbol)
         if df is None or df.empty:
             raise ValueError(f"获取实时行情失败 ({symbol}): 数据源返回空数据")
-        code_col = _find_code_col(df)
+        code_col = find_code_col(df)
         if len(df) > 1:
             # 数据源回填的代码可能不带交易所前缀，两种形态都要认
             wanted = {symbol, normalize_symbol(symbol)}

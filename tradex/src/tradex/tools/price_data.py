@@ -166,7 +166,7 @@ async def get_market_capitalization(symbol: str) -> str:
     try:
         df, _src = _router.route("realtime_quote", symbol=symbol)
         if df is not None and not df.empty:
-            code_col = _find_code_col(df)
+            code_col = find_code_col(df)
             if len(df) > 1:
                 row = df[df[code_col].astype(str).str.strip() == symbol]
             else:
@@ -258,6 +258,7 @@ def register(mcp: FastMCP):
         mcp.tool()(_fn)
 
 
-# 副本函数已收敛 service 真身（QI-ARCH-03/A⑤，2026-11-18：原 v3.4.0 两对
-# 「完全一致」隔缝结对副本——改 import 单点，判型行为零变化）。
-from ..service.price_service import _find_code_col, _is_global_code
+# 副本函数已收敛 utils 真身（QI-ARCH-03/A⑤，2026-11-18：原 v3.4.0 两对
+# 「完全一致」隔缝结对副本；QI-ARCH-11，2026-11-22：再收拢 utils 公共家——
+# 判型/找列知识单点在 utils，私有名不出 service 模块接缝）。
+from ..utils.formatter import find_code_col

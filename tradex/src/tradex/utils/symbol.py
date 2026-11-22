@@ -263,3 +263,12 @@ def is_valid_a_share_code(code: str) -> bool:
         "4", "8",                     # BSE
     )
     return code.startswith(valid_prefixes)
+
+
+def is_global_code(symbol: str) -> bool:
+    """检测是否为全球行情代码（非A股6位数字代码）。
+
+    QI-ARCH-11（2026-11-22）：原 service/price_service.py 与 tools/price_data.py
+    各持一份私有定义（下划线名跨层 import），收拢 utils 公共家单点。
+    """
+    return symbol.startswith(("us", "hk", "kr", "wh", "int_", "hf_"))
