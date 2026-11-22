@@ -783,6 +783,139 @@ def _build_eltdx_get_dividend_financing(code: str) -> str:
         return _err(f"dividend financing query failed: {e}")
 
 
+def _build_eltdx_get_company_news(code: str) -> str:
+    """构建 eltdx_get_company_news 响应（原嵌套工具体上提，逻辑零改动）。"""
+    try:
+        start = time.time()
+        df, _src = _router.route("company_news", code=code)
+        latency_ms = round((time.time() - start) * 1000, 1)
+
+        if df is None or df.empty:
+            return _no_data(f"no company news for {code}")
+
+        return _ok({
+            "code": normalize_code_bare(code),
+            "latency_ms": latency_ms,
+            "columns": list(df.columns),
+            "row_count": len(df),
+            "rows": df.head(20).to_dict(orient="records"),
+        })
+    except Exception as e:
+        logger.exception("eltdx_get_company_news failed")
+        return _err(f"company news query failed: {e}")
+
+
+def _build_eltdx_get_northbound_holding(code: str) -> str:
+    """构建 eltdx_get_northbound_holding 响应（原嵌套工具体上提，逻辑零改动）。"""
+    try:
+        start = time.time()
+        df, _src = _router.route("northbound_holding", code=code)
+        latency_ms = round((time.time() - start) * 1000, 1)
+
+        if df is None or df.empty:
+            return _no_data(f"no northbound holding for {code}")
+
+        return _ok({
+            "code": normalize_code_bare(code),
+            "latency_ms": latency_ms,
+            "columns": list(df.columns),
+            "row_count": len(df),
+            "rows": df.head(20).to_dict(orient="records"),
+        })
+    except Exception as e:
+        logger.exception("eltdx_get_northbound_holding failed")
+        return _err(f"northbound holding query failed: {e}")
+
+
+def _build_eltdx_get_stock_topics(code: str) -> str:
+    """构建 eltdx_get_stock_topics 响应（原嵌套工具体上提，逻辑零改动）。"""
+    try:
+        start = time.time()
+        df, _src = _router.route("stock_topics", code=code)
+        latency_ms = round((time.time() - start) * 1000, 1)
+
+        if df is None or df.empty:
+            return _no_data(f"no topics for {code}")
+
+        topics = []
+        for _, row in df.iterrows():
+            topics.append({
+                "topic_name": str(row.get("题材名", "")),
+                "relation_level": row.get("关联度"),
+                "reason": str(row.get("入选理由", "")),
+            })
+
+        return _ok({
+            "code": normalize_code_bare(code),
+            "latency_ms": latency_ms,
+            "count": len(topics),
+            "topics": topics,
+        })
+    except Exception as e:
+        logger.exception("eltdx_get_stock_topics failed")
+        return _err(f"stock topics query failed: {e}")
+
+
+def _build_eltdx_get_topic_stocks(code: str, topic_name: str = "") -> str:
+    """构建 eltdx_get_topic_stocks 响应（原嵌套工具体上提，逻辑零改动）。"""
+    try:
+        start = time.time()
+        df, _src = _router.route("topic_stocks", code=code, topic_name=topic_name)
+        latency_ms = round((time.time() - start) * 1000, 1)
+
+        if df is None or df.empty:
+            return _no_data(f"no topic stocks for {code}")
+
+        stocks = []
+        for _, row in df.iterrows():
+            stocks.append({
+                "code": str(row.get("代码", "")),
+                "name": str(row.get("名称", "")),
+                "rank": row.get("排名"),
+                "change_pct": row.get("涨跌幅"),
+                "change_pct_3d": row.get("3日涨跌幅"),
+                "change_pct_5d": row.get("5日涨跌幅"),
+                "change_pct_20d": row.get("20日涨跌幅"),
+                "change_pct_60d": row.get("60日涨跌幅"),
+            })
+
+        return _ok({
+            "seed_code": normalize_code_bare(code),
+            "topic_name": topic_name,
+            "latency_ms": latency_ms,
+            "count": len(stocks),
+            "stocks": stocks,
+        })
+    except Exception as e:
+        logger.exception("eltdx_get_topic_stocks failed")
+        return _err(f"topic stocks query failed: {e}")
+
+
+def _build_eltdx_get_auction_data(code: str) -> str:
+    """构建 eltdx_get_auction_data 响应（原嵌套工具体上提，逻辑零改动）。"""
+    try:
+        start = time.time()
+        df, _src = _router.route("auction_data", code=code)
+        latency_ms = round((time.time() - start) * 1000, 1)
+
+        if df is None or df.empty:
+            return _no_data(f"no auction data for {code}")
+
+        row = df.iloc[0]
+        return _ok({
+            "code": str(row.get("代码", "")),
+            "latency_ms": latency_ms,
+            "open_price": row.get("开盘价"),
+            "open_volume": row.get("开盘量"),
+            "open_amount": row.get("开盘额"),
+            "open_change_pct": row.get("开盘涨跌幅"),
+            "pre_close": row.get("昨收"),
+        })
+    except Exception as e:
+        logger.exception("eltdx_get_auction_data failed")
+        return _err(f"auction data query failed: {e}")
+
+
 # ============================================================
 # MCP 工具注册
 # ============================================================
@@ -1168,24 +1301,12 @@ def register(mcp: FastMCP):
         Args:
             code: 股票代码，如 "600170"
         """
-        try:
-            start = time.time()
-            df, _src = _router.route("company_news", code=code)
-            latency_ms = round((time.time() - start) * 1000, 1)
-
-            if df is None or df.empty:
-                return _no_data(f"no company news for {code}")
-
-            return _ok({
-                "code": normalize_code_bare(code),
-                "latency_ms": latency_ms,
-                "columns": list(df.columns),
-                "row_count": len(df),
-                "rows": df.head(20).to_dict(orient="records"),
-            })
-        except Exception as e:
-            logger.exception("eltdx_get_company_news failed")
-            return _err(f"company news query failed: {e}")
+        return mcp_serve(
+            "eltdx_get_company_news",
+            lambda: _build_eltdx_get_company_news(code),
+            "company news query failed",
+            dump=False,
+        )
 
     @mcp.tool()
     async def eltdx_get_northbound_holding(code: str) -> str:
@@ -1197,24 +1318,12 @@ def register(mcp: FastMCP):
         Args:
             code: 股票代码，如 "600170"
         """
-        try:
-            start = time.time()
-            df, _src = _router.route("northbound_holding", code=code)
-            latency_ms = round((time.time() - start) * 1000, 1)
-
-            if df is None or df.empty:
-                return _no_data(f"no northbound holding for {code}")
-
-            return _ok({
-                "code": normalize_code_bare(code),
-                "latency_ms": latency_ms,
-                "columns": list(df.columns),
-                "row_count": len(df),
-                "rows": df.head(20).to_dict(orient="records"),
-            })
-        except Exception as e:
-            logger.exception("eltdx_get_northbound_holding failed")
-            return _err(f"northbound holding query failed: {e}")
+        return mcp_serve(
+            "eltdx_get_northbound_holding",
+            lambda: _build_eltdx_get_northbound_holding(code),
+            "northbound holding query failed",
+            dump=False,
+        )
 
     @mcp.tool()
     async def eltdx_get_stock_topics(code: str) -> str:
@@ -1226,31 +1335,12 @@ def register(mcp: FastMCP):
         Args:
             code: 股票代码，如 "600170"
         """
-        try:
-            start = time.time()
-            df, _src = _router.route("stock_topics", code=code)
-            latency_ms = round((time.time() - start) * 1000, 1)
-
-            if df is None or df.empty:
-                return _no_data(f"no topics for {code}")
-
-            topics = []
-            for _, row in df.iterrows():
-                topics.append({
-                    "topic_name": str(row.get("题材名", "")),
-                    "relation_level": row.get("关联度"),
-                    "reason": str(row.get("入选理由", "")),
-                })
-
-            return _ok({
-                "code": normalize_code_bare(code),
-                "latency_ms": latency_ms,
-                "count": len(topics),
-                "topics": topics,
-            })
-        except Exception as e:
-            logger.exception("eltdx_get_stock_topics failed")
-            return _err(f"stock topics query failed: {e}")
+        return mcp_serve(
+            "eltdx_get_stock_topics",
+            lambda: _build_eltdx_get_stock_topics(code),
+            "stock topics query failed",
+            dump=False,
+        )
 
     @mcp.tool()
     async def eltdx_get_topic_stocks(code: str, topic_name: str = "") -> str:
@@ -1264,37 +1354,12 @@ def register(mcp: FastMCP):
             code: 种子股票代码，如 "600170"
             topic_name: 题材名，如 "节能环保"，空则用首个题材
         """
-        try:
-            start = time.time()
-            df, _src = _router.route("topic_stocks", code=code, topic_name=topic_name)
-            latency_ms = round((time.time() - start) * 1000, 1)
-
-            if df is None or df.empty:
-                return _no_data(f"no topic stocks for {code}")
-
-            stocks = []
-            for _, row in df.iterrows():
-                stocks.append({
-                    "code": str(row.get("代码", "")),
-                    "name": str(row.get("名称", "")),
-                    "rank": row.get("排名"),
-                    "change_pct": row.get("涨跌幅"),
-                    "change_pct_3d": row.get("3日涨跌幅"),
-                    "change_pct_5d": row.get("5日涨跌幅"),
-                    "change_pct_20d": row.get("20日涨跌幅"),
-                    "change_pct_60d": row.get("60日涨跌幅"),
-                })
-
-            return _ok({
-                "seed_code": normalize_code_bare(code),
-                "topic_name": topic_name,
-                "latency_ms": latency_ms,
-                "count": len(stocks),
-                "stocks": stocks,
-            })
-        except Exception as e:
-            logger.exception("eltdx_get_topic_stocks failed")
-            return _err(f"topic stocks query failed: {e}")
+        return mcp_serve(
+            "eltdx_get_topic_stocks",
+            lambda: _build_eltdx_get_topic_stocks(code, topic_name),
+            "topic stocks query failed",
+            dump=False,
+        )
 
     @mcp.tool()
     async def eltdx_get_auction_data(code: str) -> str:
@@ -1307,27 +1372,12 @@ def register(mcp: FastMCP):
         Args:
             code: 股票代码，如 "600170"
         """
-        try:
-            start = time.time()
-            df, _src = _router.route("auction_data", code=code)
-            latency_ms = round((time.time() - start) * 1000, 1)
-
-            if df is None or df.empty:
-                return _no_data(f"no auction data for {code}")
-
-            row = df.iloc[0]
-            return _ok({
-                "code": str(row.get("代码", "")),
-                "latency_ms": latency_ms,
-                "open_price": row.get("开盘价"),
-                "open_volume": row.get("开盘量"),
-                "open_amount": row.get("开盘额"),
-                "open_change_pct": row.get("开盘涨跌幅"),
-                "pre_close": row.get("昨收"),
-            })
-        except Exception as e:
-            logger.exception("eltdx_get_auction_data failed")
-            return _err(f"auction data query failed: {e}")
+        return mcp_serve(
+            "eltdx_get_auction_data",
+            lambda: _build_eltdx_get_auction_data(code),
+            "auction data query failed",
+            dump=False,
+        )
 
     @mcp.tool()
     async def eltdx_get_category_quotes(category: str = "沪深a股", sort_by: str = "涨幅", count: int = 80) -> str:
