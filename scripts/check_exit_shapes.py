@@ -20,9 +20,8 @@ docs/EXEMPTIONS.md 表一（唯一真源，运行时解析 MD 行）比对，漂
     或「组 N 工具」行计数相等），否则红（新增手写未登记）；
   - 表一 → AST：登记的单工具名必须实况存在且仍为手写，组行计数必须与
     实况手写数相等，否则红（漂移 → 提示清理豁免行）；
-  - 已知批外类（表一头部口径注释承载）：eltdx_data.py（31 工具未上提，
-    QI-ARCH-17，票 07 施工后必须过本门）、tdx_mcp.py（自有骨架 3 工具）——
-    门内白名单只落指针；动这两处先改表一头部再改这里。
+  - 已知批外类（表一头部口径注释承载）：tdx_mcp.py（自有骨架 3 工具）——
+    门内白名单只落指针；动这里先改表一头部再改这里。
 
 用法：python scripts/check_exit_shapes.py [--list]  →  退出码 0 一致 / 1 漂移
   --list  打印全量工具三列清单（工具名 / 出口形态 / 所在文件:行号）后仍按
@@ -43,8 +42,9 @@ TOOLS_DIR = ROOT / "tradex" / "src" / "tradex" / "tools"
 EXEMPTIONS_MD = ROOT / "docs" / "EXEMPTIONS.md"
 
 # 已知批外类（唯一真源 = EXEMPTIONS.md 表一头部口径注释；这里只落指针）
+# 票 07（QI-ARCH-17，2026-11-22）：eltdx_data.py 31 工具已上提 mcp_serve 单点，
+# 批外清零，白名单项摘除；此后该文件新增手写出口按一般纪律登记表一。
 KNOWN_BATCH_EXEMPT = {
-    "eltdx_data.py": "QI-ARCH-17：31 工具未上提，票 07 施工后必须过本门",
     "tdx_mcp.py": "tdx_mcp 自有骨架 3 工具（表一头部口径）",
 }
 

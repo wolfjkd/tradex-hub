@@ -6,7 +6,7 @@
 
 ## 表一：mcp_serve 出口手写豁免（9 工具）
 
-> 背景：A①A② 全量推广后 MCP 出口收拢进 `tools/_mcp_serve.py` 单点；以下工具因形态不适配保留手写出口（AST 实测账 **2026-11-22 票 13 后核对**：150 mcp_serve + 8 手写【本表，含 tdx_tq 组 2】+ 3 tdx_mcp 自有骨架 + 31 eltdx_data 批外待上提【QI-ARCH-17，票 07】= 192）。
+> 背景：A①A② 全量推广后 MCP 出口收拢进 `tools/_mcp_serve.py` 单点；以下工具因形态不适配保留手写出口（AST 实测账 **2026-11-22 票 07 后核对**：181 mcp_serve + 8 手写【本表，含 tdx_tq 组 2】+ 3 tdx_mcp 自有骨架 = 192；eltdx_data 31 工具已上提归 mcp_serve 单点、批外清零，QI-ARCH-17 闭环）。
 
 | 工具 | 文件 | 豁免理由 |
 |---|---|---|
@@ -88,3 +88,4 @@
 | 2026-11-22 | 表一头注 AST 实测勘误（票 06，check_exit_shapes.py 挂门实测）：原式「9 手写 + tdx 自有骨架 5 + eltdx_data」重复计 tdx_tq 组 2（既在本表 9 行内又计入 5）；实测账 149 mcp_serve + 9 手写 + 3 tdx_mcp + 31 eltdx_data = 192，与 9 行表逐一对上、无 ±1 出入 |
 | 2026-11-22 | 表三注记（票 09/10，QI-ARCH-10）：全仓实测 68 处 × 20 文件盘点落档——A 组 df_to_json 豁免 28 保留；B 组非 df_to_json 串缓存 22 保留待裁决（双重编码组 16 = QI-BUG-03 + 类型依赖/多级 6）；C 组 async 编排体 5 保留待裁决；D 组迁移 13（试点 market_service 7 + 全量批 6） |
 | 2026-11-22 | 票 13（QI-ARCH-14，裁决③缓存语义统一）：表一退役 get_market_capitalization 手写豁免行（编排上收 price_service 后归 mcp_serve 单点，9→8 行，实测账 150+8+3+31=192 不变）；composite 行注记更新（A⑤ route 收敛不改 async 形态，豁免理由仍成立）；表三注记 A 组 28→26、B 组 market_capitalization 行迁出（get_or_set 对象缓存保真）、D 组续记编排随迁 3 处 |
+| 2026-11-22 | 票 07（QI-ARCH-17，裁决①不豁免走分支 B 上提）：eltdx_data 31 工具工具体上提模块级 + mcp_serve 出口收拢（dump=False 直返自有 _ok/_no_data/_err 三态信封，逐字节保真），表一头注实测账 150+8+3+31=192 → **181+8+3=192，eltdx_data 批外清零**；豁免零新增（31 工具全部迁入 mcp_serve，无 async/异构豁免项）；契约快照 tests/test_eltdx_mcp_serve_compat.py 92 用例锁定；check_exit_shapes.py 白名单同步摘除 eltdx_data.py 批外项 |
