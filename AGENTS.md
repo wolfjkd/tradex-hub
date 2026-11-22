@@ -6,7 +6,9 @@
 ## 环境与命令
 
 - **venv 口径**：pytest 在 `tradex/.venv`（仓库根 `.venv` 无 pytest；`tradex/venv` 不存在）。
-- **全量回归**（两层，`tests` + `tradex/tests` 各自 conftest）：
+- **跑门优先用包装脚本**：`python scripts/run_gate.py`（QI-RETRO-04）——输出落
+  `.scratch/gate-<时间戳>.txt`、超时守护（默认 300s）、总结行已出即按日志判定
+  退出（挂住 flaky 不干等）、打印总结行与可靠退出码。原始命令保留为底层形态：
   `./tradex/.venv/Scripts/python.exe -m pytest tests tradex/tests -m "not network" -q`
   基线 **1235 passed / 5 skipped / 36 deselected**（2026-11-14，+test_undeclared_imports 挂载 + fund_flow 参数兼容四用例）。
   ⚠️ 基线溯源：对应 commit `32070ff`（v3.9.4 后、qc-20261117 整改前）｜ 基线测试机 **HOME-WOLFJKD**——多机以本机实跑为准（2026-11-18 注记）。
