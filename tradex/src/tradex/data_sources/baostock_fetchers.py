@@ -234,7 +234,9 @@ def fetch_baostock_st_list(**kwargs) -> pd.DataFrame:
                         "上市日期": row[2] if len(row) > 2 else "",
                     })
         if not rows:
-            return pd.DataFrame()
+            # QI-STD-26（工单 17）：全市场股票清单过滤 ST 恒有命中（A 股常年有 ST 票），
+            # 零命中 = 上游结构变化/数据缺失，不再折叠空表。
+            raise RuntimeError("baostock ST 名单零命中（结构变化或数据缺失）")
         return pd.DataFrame(rows)
 
     except Exception as e:

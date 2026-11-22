@@ -91,8 +91,10 @@ def fetch_baidu_kline_with_ma(
         resp.raise_for_status()
         data = resp.json()
         klines = (data.get("result") or {}).get("data", [])
+        # QI-STD-26（工单 17）：上市股票 K 线正常必有数据，空载荷 = 断源/结构变化，
+        # 不再折叠空表（与 eltdx 同型 "no kline bars" 抛出纪律一致）。
         if not klines:
-            return pd.DataFrame()
+            raise RuntimeError(f"百度 K 线返回空载荷（断源或结构变化）: {sym}")
 
         rows = []
         for k in klines:
@@ -130,7 +132,8 @@ def fetch_baidu_kline_with_ma(
                 continue
 
         if not rows:
-            return pd.DataFrame()
+            # QI-STD-26（工单 17）：有 klines 载荷但解析零行 = 字段格式变化。
+            raise RuntimeError(f"百度 K 线解析零行（字段格式可能已变）: {sym}")
 
         df = pd.DataFrame(rows).sort_values("日期").reset_index(drop=True)
 

@@ -102,7 +102,9 @@ def fetch_nbs_pmi(**kwargs) -> pd.DataFrame:
         except ValueError:
             raise  # 解析失败属源故障，抛出由 SmartRouter 记账降级
         if not tables:
-            return pd.DataFrame()
+            # QI-STD-26（工单 17）：PMI 月度数据正常必有表，零表格 = 断源/结构变化，
+            # 不再折叠空表（与上方 ValueError 抛出纪律同向）。
+            raise RuntimeError("NBS PMI 页面零表格（断源或结构变化）")
         return tables[0].head(20)
 
     except Exception as e:
@@ -200,7 +202,11 @@ def fetch_chinabond_yield_curve(
 
         items = data.get("data") or []
         if not items:
-            return pd.DataFrame()
+            # QI-STD-26（工单 17）：json 成功但 data 空 = 空壳家族（同 :193 HTML 兜底
+            # 与下方全零壳守卫的抛出纪律），不再静默折叠空表。
+            raise ChinabondEmptyShellError(
+                f"中债收益率曲线应答 data 为空（接口疑似改版），curve={curve}"
+            )
 
         rows = []
         for it in items:

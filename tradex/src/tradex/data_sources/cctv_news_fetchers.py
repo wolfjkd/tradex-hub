@@ -115,7 +115,11 @@ def fetch_cctv_news(
             rows.append(row)
 
         if not rows:
-            return pd.DataFrame()
+            # QI-STD-26（工单 17）：新闻联播每日播出、日历正常必有内容，HTML+JSON
+            # 双路解析均零条目 = 断源/结构变化（查询未来日期等无数据态一并如实报错）。
+            raise RuntimeError(
+                f"央视新闻联播零条目（断源/结构变化或该日期无播出）: {date or 'latest'}"
+            )
         return pd.DataFrame(rows)
 
     except Exception as e:

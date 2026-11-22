@@ -81,8 +81,9 @@ def fetch_wallstreetcn_lives(
         resp.raise_for_status()
         data = resp.json()
         items = (data.get("data") or {}).get("items") or []
+        # QI-STD-26（工单 17）：7×24 快讯流正常永不为空，空载荷 = 断源/结构变化。
         if not items:
-            return pd.DataFrame()
+            raise RuntimeError(f"华尔街见闻快讯返回空载荷（断源或结构变化）: {channel}")
 
         rows = []
         from datetime import datetime, timezone
@@ -161,8 +162,10 @@ def fetch_macro_calendar(
         resp.raise_for_status()
         data = resp.json()
         items = (data.get("data") or {}).get("items") or []
+        # QI-STD-26（工单 17）：全球宏观日历正常每天均有事件，空载荷 = 断源/结构变化；
+        # （min_importance 过滤后为空 = 合法查询答案「该时段无该级别事件」，保留原样）
         if not items:
-            return pd.DataFrame()
+            raise RuntimeError("华尔街见闻宏观日历返回空载荷（断源或结构变化）")
 
         importance_map = {1: "低", 2: "中", 3: "高"}
         rows = []

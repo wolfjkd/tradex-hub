@@ -202,7 +202,10 @@ def fetch_local_minute(code: str, period: int = 5, tdxdir: Path | None = None, *
     """
     tdxdir = tdxdir or detect_tdx_dir()
     if tdxdir is None:
-        return pd.DataFrame()
+        # QI-STD-26（工单 17）：本地源不可用（未检出通达信目录）不再折叠空表，
+        # 同 tq/tdx_mcp 客户端缺失抛出先例（fetch_local_minute 源态；单票无文件
+        # 的数据态空表 :213 保留原样，见台账盘点账）。
+        raise RuntimeError("未检测到通达信安装目录（tdx_local 源不可用）")
     code = str(code).split(".")[0].split("_")[0].zfill(6)
     market = _market(code)
     sub_market = "sh" if market == "bj" else market

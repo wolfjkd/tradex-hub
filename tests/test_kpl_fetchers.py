@@ -167,15 +167,17 @@ class TestFetchKplLimitUp:
         assert m_get.call_count == 5
         assert sorted(df["ladder"].tolist()) == [1, 2, 3, 5]
 
-    def test_all_empty_returns_empty_df(self):
+    def test_all_empty_raises(self):
+        """QI-STD-26（工单 17）：全部板位零数据不再折叠空表——独占源无降级目标，
+        假「今日无涨停」对情绪看板是危险误读，改抛出（原 test_all_empty_returns_empty_df）。"""
         from tradex.data_sources.kpl_fetchers import fetch_kpl_limit_up
 
         with patch(
             "tradex.data_sources.kpl_fetchers._kpl_get",
             return_value={"errcode": "0", "info": [[]]},
         ):
-            df = fetch_kpl_limit_up(date="20261106")
-        assert df.empty
+            with pytest.raises(RuntimeError, match="零数据"):
+                fetch_kpl_limit_up(date="20261106")
 
 
 class TestFetchKplSentiment:

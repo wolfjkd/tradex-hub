@@ -456,7 +456,12 @@ def fetch_industry_data(
                 "涨跌股数比": item.get("f205", 0),
             })
         if not _rows:
-            return pd.DataFrame()
+            # QI-STD-26（工单 17）：行业板块全量列表（feed 型）空 = push2 断源/结构
+            # 变化（push2 域名族在封禁名单），不再折叠空表，抛出由 SmartRouter
+            # 降级到 ths 备源。
+            raise RuntimeError(
+                f"东财行业板块列表返回空（push2 断源或结构变化）: endpoint={endpoint}"
+            )
         return pd.DataFrame(_rows)
     if endpoint == "board_industry_hist_em":
         kw: dict = {"symbol": industry, "period": period}
@@ -984,8 +989,11 @@ def fetch_baidu_economic_calendar(date: str = "", **kwargs) -> pd.DataFrame:
     try:
         df = ak.news_economic_baidu(date=date)
         if df is None or df.empty:
-            logger.debug("fetch_baidu_economic_calendar(%s): empty", date)
-            return pd.DataFrame()
+            # QI-STD-26（工单 17）：akshare 空表主因是上游风控/断源，不再折叠空表
+            # （与下方 except 的 v3.3.15 不吞异常纪律同向）。
+            raise RuntimeError(
+                f"百度财报日历返回空表（akshare 上游可能风控/断源）: {date or 'default'}"
+            )
         return df
     except Exception as e:
         logger.warning("fetch_baidu_economic_calendar(%s) failed: %s", date, e)
@@ -1026,8 +1034,10 @@ def fetch_baidu_trade_notify(endpoint: str = "suspend", date: str = "", **kwargs
         else:
             raise ValueError(f"Unknown baidu_trade_notify endpoint: {endpoint}")
         if df is None or df.empty:
-            logger.debug("fetch_baidu_trade_notify(%s, %s): empty", endpoint, date)
-            return pd.DataFrame()
+            # QI-STD-26（工单 17）：空表不再折叠（交易提示 feed 型，主因=上游断源）。
+            raise RuntimeError(
+                f"百度交易提示返回空表（akshare 上游可能风控/断源）: {endpoint}/{date or 'default'}"
+            )
         return df
     except Exception as e:
         logger.warning("fetch_baidu_trade_notify(%s, %s) failed: %s", endpoint, date, e)
@@ -1079,8 +1089,10 @@ def fetch_futures_news(symbol: str = "全部", **kwargs) -> pd.DataFrame:
     try:
         df = ak.futures_news_shmet(symbol=symbol)
         if df is None or df.empty:
-            logger.debug("fetch_futures_news(%s): empty", symbol)
-            return pd.DataFrame()
+            # QI-STD-26（工单 17）：上海有色新闻 feed 空表 = 断源，不再折叠。
+            raise RuntimeError(
+                f"期货新闻(上海有色)返回空表（akshare 上游可能风控/断源）: {symbol}"
+            )
         return df
     except Exception as e:
         logger.warning("fetch_futures_news(%s) failed: %s", symbol, e)
@@ -1111,8 +1123,11 @@ def fetch_hot_search_baidu(symbol: str = "A股", date: str = "", time: str = "�
     try:
         df = ak.stock_hot_search_baidu(symbol=symbol, date=date, time=time)
         if df is None or df.empty:
-            logger.debug("fetch_hot_search_baidu(%s): empty", symbol)
-            return pd.DataFrame()
+            # QI-STD-26（工单 17）：热搜 feed 空表 = 断源（同下方 except 注：
+            # 吞掉会伪装成"无热搜"），不再折叠，让位备源 ths_hot 并计健康度。
+            raise RuntimeError(
+                f"百度热搜返回空表（akshare 上游可能风控/断源）: {symbol or 'all'}"
+            )
         return df
     except Exception as e:
         logger.warning("fetch_hot_search_baidu(%s) failed: %s", symbol, e)
@@ -1162,8 +1177,11 @@ def fetch_hot_rank_data(endpoint: str = "rank", symbol: str = "", **kwargs) -> p
         else:
             raise ValueError(f"Unknown hot_rank_data endpoint: {endpoint}")
         if df is None or df.empty:
-            logger.debug("fetch_hot_rank_data(%s): empty", endpoint)
-            return pd.DataFrame()
+            # QI-STD-26（工单 17）：人气榜走 push2 族空表多因 RST（同 except 注：
+            # 伪装成"人气榜为空"既不让位备源也让健康度虚高），不再折叠。
+            raise RuntimeError(
+                f"东财人气榜返回空表（akshare 上游可能风控/断源）: {endpoint}"
+            )
         return df
     except Exception as e:
         logger.warning("fetch_hot_rank_data(%s) failed: %s", endpoint, e)
@@ -1202,8 +1220,10 @@ def fetch_xueqiu_hot(endpoint: str = "follow", symbol: str = "最热门", **kwar
         else:
             raise ValueError(f"Unknown xueqiu_hot endpoint: {endpoint}")
         if df is None or df.empty:
-            logger.debug("fetch_xueqiu_hot(%s): empty", endpoint)
-            return pd.DataFrame()
+            # QI-STD-26（工单 17）：雪球热度 feed 空表 = 断源，不再折叠。
+            raise RuntimeError(
+                f"雪球热度返回空表（akshare 上游可能风控/断源）: {endpoint}"
+            )
         return df
     except Exception as e:
         logger.warning("fetch_xueqiu_hot(%s) failed: %s", endpoint, e)
@@ -1258,8 +1278,11 @@ def fetch_fund_hold_data(endpoint: str = "hold", symbol: str = "基金持仓", d
         else:
             raise ValueError(f"Unknown fund_hold_data endpoint: {endpoint}")
         if df is None or df.empty:
-            logger.debug("fetch_fund_hold_data(%s, %s): empty", endpoint, symbol)
-            return pd.DataFrame()
+            # QI-STD-26（工单 17）：本源（detail 分支）空表多因上游断源；无持仓股票
+            # 的合法空由 em_zlsj 直取源兜底给出（抛出后降级可达），不再折叠。
+            raise RuntimeError(
+                f"基金持仓返回空表（akshare 上游可能风控/断源）: {endpoint}/{symbol or 'all'}"
+            )
         return df
     except Exception as e:
         logger.warning("fetch_fund_hold_data(%s, %s) failed: %s", endpoint, symbol, e)

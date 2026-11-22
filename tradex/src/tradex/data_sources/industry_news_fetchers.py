@@ -272,7 +272,11 @@ def fetch_industry_news(
             count += 1
 
     if not rows:
-        return pd.DataFrame()
+        # QI-STD-26（工单 17）：106 源 × 12 赛道聚合 feed 全空 = 全部上游失败
+        # （或时间窗病态），不再折叠空表，抛出如实暴露。
+        raise RuntimeError(
+            f"产业链资讯聚合零条目（全部上游失败或时间窗内无内容）: track={track}"
+        )
 
     df = pd.DataFrame(rows)
     # 按 发布时间 倒序

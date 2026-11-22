@@ -286,11 +286,12 @@ def fetch_wencai_news(
         return pd.DataFrame()
 
     if not IWENCAI_API_KEY:
-        logger.warning(
-            "IWENCAI_API_KEY 未设置，无法使用 iwencai OpenAPI。"
-            "请设置环境变量 IWENCAI_API_KEY"
+        # QI-STD-26（工单 17）：凭据缺失 = 源不可用，不再折叠空表
+        # （同 tdx_mcp/tq 凭据缺失抛出先例），如实报错提示配置。
+        raise RuntimeError(
+            "IWENCAI_API_KEY 未设置，iwencai OpenAPI 源不可用"
+            "（请设置环境变量 IWENCAI_API_KEY）"
         )
-        return pd.DataFrame()
 
     try:
         import json

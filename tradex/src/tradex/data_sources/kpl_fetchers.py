@@ -210,8 +210,12 @@ def fetch_kpl_limit_up(
     frames = [one(p) for p in pids]
     frames = [f for f in frames if not f.empty]
     if not frames:
-        logger.debug("fetch_kpl_limit_up(date=%s): empty", date or "realtime")
-        return pd.DataFrame()
+        # QI-STD-26（工单 17）：全部板位零数据不再折叠空表——独占源无降级目标，
+        # 假「今日无涨停」对情绪看板是危险误读，如实报错（含非交易日可能）。
+        raise RuntimeError(
+            "KPL 涨停池全部板位零数据（可能为非交易日或接口结构变化）: "
+            f"date={date or 'realtime'}"
+        )
     return pd.concat(frames, ignore_index=True)
 
 

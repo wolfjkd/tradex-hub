@@ -93,8 +93,10 @@ def fetch_em_news_direct(symbol: str = "", code: str = "", **kwargs) -> pd.DataF
         data = json.loads(text)
 
         articles_raw = data.get("result", {}).get("cmsArticleWebOld", [])
+        # QI-STD-26（工单 17）：空载荷不再折叠空表（个股新闻流正常必有条目），
+        # 抛出由 SmartRouter 记账降级。
         if not articles_raw:
-            return pd.DataFrame()
+            raise RuntimeError(f"东财个股新闻返回空载荷（断源或结构变化）: {sym}")
 
         articles = []
         for item in articles_raw:
@@ -114,7 +116,8 @@ def fetch_em_news_direct(symbol: str = "", code: str = "", **kwargs) -> pd.DataF
             })
 
         if not articles:
-            return pd.DataFrame()
+            # QI-STD-26（工单 17）：有载荷但全部无标题 = 结构异常，不再折叠空表。
+            raise RuntimeError(f"东财个股新闻载荷全部无标题（结构异常）: {sym}")
 
         return pd.DataFrame(articles)
 
@@ -180,8 +183,10 @@ def fetch_cls_telegraph(num_results: int = 20, **kwargs) -> pd.DataFrame:
 
         data = resp.json()
         roll_data = (data.get("data") or {}).get("roll_data") or []
+        # QI-STD-26（工单 17）：7×24 电报流正常永不为空，空载荷 = 断源/结构变化，
+        # 不再折叠空表，抛出由 SmartRouter 记账降级。
         if not roll_data:
-            return pd.DataFrame()
+            raise RuntimeError("财联社电报返回空 roll_data（断源或结构变化）")
 
         items = []
         for item in roll_data:
@@ -199,7 +204,8 @@ def fetch_cls_telegraph(num_results: int = 20, **kwargs) -> pd.DataFrame:
             })
 
         if not items:
-            return pd.DataFrame()
+            # QI-STD-26（工单 17）：有载荷但全部无标题/内容 = 结构异常。
+            raise RuntimeError("财联社电报载荷全部空标题/内容（结构异常）")
 
         df = pd.DataFrame(items)
         return df.head(rn)
@@ -299,7 +305,9 @@ def fetch_cninfo_direct(
             })
 
         if not items:
-            return pd.DataFrame()
+            # QI-STD-26（工单 17）：有公告载荷但全部无标题 = 结构异常，不再折叠空表。
+            # （announcements 为空的合法空查询语义保留原样，见台账 QI-STD-26 盘点账）
+            raise RuntimeError(f"巨潮公告载荷全部无标题（结构异常）: {sym or 'all'}")
 
         df = pd.DataFrame(items)
 
@@ -396,8 +404,9 @@ def fetch_sina_finance_news(num_results: int = 20, **kwargs) -> pd.DataFrame:
         data = resp.json()
         result = data.get("result", {})
         items_data = result.get("data", []) or []
+        # QI-STD-26（工单 17）：全市场新闻 feed 正常永不为空，空载荷 = 断源/结构变化。
         if not items_data:
-            return pd.DataFrame()
+            raise RuntimeError("新浪财经新闻返回空载荷（断源或结构变化）")
 
         articles = []
         for item in items_data:
@@ -419,7 +428,8 @@ def fetch_sina_finance_news(num_results: int = 20, **kwargs) -> pd.DataFrame:
             })
 
         if not articles:
-            return pd.DataFrame()
+            # QI-STD-26（工单 17）：有载荷但全部无标题 = 结构异常，不再折叠空表。
+            raise RuntimeError("新浪财经新闻载荷全部无标题（结构异常）")
 
         df = pd.DataFrame(articles)
         return df.head(num)

@@ -197,14 +197,17 @@ def fetch_sse_dragon_tiger(
         # dateTx 形如 "2026/09/28" —— 以文件自身标注日期为准（非交易日返回最近一期）
         file_date = str(data.get("dateTx") or "").replace("/", "-")
         if not lines or not file_date:
-            return pd.DataFrame()
+            # QI-STD-26（工单 17）：应答缺文件内容/日期 = 断源或结构变化，不再折叠空表。
+            raise RuntimeError("上交所龙虎榜公共文件应答空（断源或结构变化）")
+        # 请求日 ≠ 文件日（数据未发布/非交易日）= 接口设计的日期过滤语义，保留空表
         if date and date.replace("-", "") != file_date.replace("-", ""):
             logger.info("fetch_sse_dragon_tiger: 最新文件日期 %s 与请求日期 %s 不符，返回空", file_date, date)
             return pd.DataFrame()
 
         rows = _parse_sse_trade_public(lines)
         if not rows:
-            return pd.DataFrame()
+            # QI-STD-26（工单 17）：文件有内容但解析零行 = 结构异常，不再折叠。
+            raise RuntimeError("上交所龙虎榜文件解析零行（结构异常）")
         df = pd.DataFrame(rows)
         df["日期"] = file_date
         return df[df["代码"] != ""].reset_index(drop=True)
@@ -273,7 +276,10 @@ def fetch_szse_dragon_tiger(
                 "日期": date,
             })
         if not rows:
-            return pd.DataFrame()
+            # QI-STD-26（工单 17）：有公告载荷但全部无 secCode = 结构异常，不再折叠空表。
+            # （该日无公告的合法空查询语义保留原样，见台账 QI-STD-26 盘点账）
+            raise RuntimeError(f"深交所龙虎榜公告载荷全部无代码（结构异常）: {date}")
+
         return pd.DataFrame(rows)
 
     except Exception as e:
@@ -424,7 +430,10 @@ def fetch_szse_trading_calendar(
         data = resp.json()
         rows_raw = data.get("data", [])
         if not rows_raw:
-            return pd.DataFrame()
+            # QI-STD-26（工单 17）：按年月查日历正常必有数据，空载荷 = 断源/结构变化。
+            raise RuntimeError(
+                f"深交所交易日历应答空（断源或结构变化）: {year}-{month}"
+            )
 
         rows = []
         for it in rows_raw:
