@@ -5,7 +5,9 @@ README badge / 正文宣称的 MCP 工具数、REST 端点数、注册表类型/
 badge REST-81 漏改、v3.9.1 计数笔误均为本脚本靶子）。
 
 实跑口径：
-  - MCP 工具数：AST 统计 tools/ 下 @mcp.tool 装饰器（同 tests/test_tools_total_count.py）
+  - MCP 工具数：注册过程衍生（实例化 FastMCP 走真实注册路径数 _tools，
+    同 tests/test_tools_total_count.py；QI-ARCH-02/06，2026-11-18——工具体
+    上提模块级后无装饰器可数，AST 账本已退役）
   - REST 端点数：FastAPI include 后 OpenAPI schema /api/v1 路径数（同 tests/test_rest_count.py）
   - 注册表：register_all_sources() 后 _sources 类型数 / 注册总数
 

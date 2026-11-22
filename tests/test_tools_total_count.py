@@ -8,8 +8,9 @@ FastMCP + ToolRegistry.discover_and_register 走真实注册路径，数
 _tool_manager._tools 实际注册数（与 tradex/tests/test_server.py 同口径，
 清单数据源单点）。
 
-tdx_mcp/tdx_tq 两文件的「恰好贡献 N 个」断言保留 AST 口径（该两文件
-工具体尚未上提，AST 数与注册数一一对应；全量上提时一并退役）。
+tdx_mcp 的「恰好贡献 3 个」断言保留 AST 口径（工具体尚未上提，AST 数
+与注册数一一对应；全量上提时一并退役）；tdx_tq 工具体已上提，断言改为
+注册衍生口径（见 test_tdx_tq_contributes_exactly_two，AST 数装饰器退役）。
 """
 
 import ast
