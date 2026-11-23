@@ -78,17 +78,17 @@
 
 | 文件 | 处数 | 不适配理由 |
 |---|---|---|
-| tools/signal_data_base.py | 5 | dict_to_json/json.dumps 串缓存 + miss 路线经 `mcp_serve(dump=dict_to_json)`/默认 dump 双重编码、hit 路线单编码直返（**原态 hit/miss 线上格式不一致**，QI-BUG-03 待裁决）；其中 2 处另有内容条件缓存 |
-| tools/signal_data_etf.py | 2 | 同上双重编码不对称 + 条件缓存 |
-| tools/signal_data_board.py | 3 | 同上 + get_limit_up_board 条件缓存含 WsServer 推送副作用 |
-| tools/signal_data_cb.py | 2 | 同上双重编码不对称 + 条件缓存 |
-| tools/signal_data_flow.py | 3 | 同上双重编码不对称（get_fund_flow_signal / get_dragon_tiger_signal / get_industry_comparison_signal） |
-| tools/analysis_engine.py | 1 | analyze_technical 同上双重编码不对称 |
+| tools/signal_data_base.py | 5 | dict_to_json/json.dumps 串缓存（原态 hit/miss 双重编码不对称**已修齐**——QI-BUG-03 2026-11-23 老板拍板，mcp_serve 改 `dump=False` 统一单编码，串缓存形态保留）；其中 2 处另有内容条件缓存 |
+| tools/signal_data_etf.py | 2 | 同上（QI-BUG-03 已修齐单编码）+ 条件缓存 |
+| tools/signal_data_board.py | 3 | 同上（QI-BUG-03 已修齐单编码）+ get_limit_up_board 条件缓存含 WsServer 推送副作用 |
+| tools/signal_data_cb.py | 2 | 同上（QI-BUG-03 已修齐单编码）+ 条件缓存 |
+| tools/signal_data_flow.py | 3 | 同上（QI-BUG-03 已修齐单编码；get_fund_flow_signal / get_dragon_tiger_signal / get_industry_comparison_signal） |
+| tools/analysis_engine.py | 1 | analyze_technical **已迁 get_or_set 对象缓存**（QI-BUG-03 形态②：与 REST diagnostic_service 共键统一存 dict + 出口单次序列化，D 组形态），脱离串缓存清单 |
 | tools/signal_data_flow.py（get_northbound_flow_signal） | 1 | 运行时类型依赖序列化器（dict→dict_to_json / DataFrame→df_to_json 双分支），命中丢类型信息不可保真迁移 |
 | tools/tdx_tq.py | 1 | `_route_to_json` 骨架按运行时类型选 df_to_json/dict_to_json，命中丢类型信息不可保真迁移 |
 | tools/tdx_mcp.py | 3 | 同上骨架（`_router_route_cached`）+ 3 工具体前置 get |
 
-> B 组小计 22 = 双重编码组 16（signal_data_base 5 + etf 2 + board 3 + cb 2 + flow 3 + analysis_engine 1，QI-BUG-03）+ 类型依赖/多级编排组 6（flow.northbound 1 + market_capitalization 1 + tdx_tq 1 + tdx_mcp 3）。**票 13 更新（2026-11-22）**：market_capitalization 1 处已随编排迁 service（price_service.get_market_capitalization，get_or_set 对象缓存 + 出口运行时判型序列化，TTL_REALTIME 仅内存层无历史串还原面），脱离本组实况清单——**票 13 后实况小计 21**（类型依赖/多级编排组余 5），实况 grep 判零以本行注记为准。
+> B 组小计 22 = 双重编码组 16（signal_data_base 5 + etf 2 + board 3 + cb 2 + flow 3 + analysis_engine 1，QI-BUG-03）+ 类型依赖/多级编排组 6（flow.northbound 1 + market_capitalization 1 + tdx_tq 1 + tdx_mcp 3）。**票 13 更新（2026-11-22）**：market_capitalization 1 处已随编排迁 service（price_service.get_market_capitalization，get_or_set 对象缓存 + 出口运行时判型序列化，TTL_REALTIME 仅内存层无历史串还原面），脱离本组实况清单——**票 13 后实况小计 21**（类型依赖/多级编排组余 5），实况 grep 判零以本行注记为准。**QI-BUG-03 修齐更新（2026-11-23，commit 5a41b12，老板拍板）**：双重编码组 16 处统一单编码——15 处 mcp_serve 改 `dump=False`（hit/miss 逐字节一致，串缓存形态保留本组豁免）；analyze_technical 1 处迁 get_or_set 对象缓存（与 REST diagnostic_service 共键，脱离本组同 D 组形态）；锁定测试 tests/test_qi_bug03_cache_format_parity.py 7 例（修前 7 红）。**修后实况小计 20**（双重编码组余 15 = 已修齐保留形态 + 类型依赖组余 5），实况 grep 判零以本行注记为准。
 
 **C 组｜dict 对象缓存但 get_or_set 同步 factory 契约不适配（保留待裁决，5 处）**
 
@@ -112,3 +112,4 @@
 | 2026-11-22 | 票 13（QI-ARCH-14，裁决③缓存语义统一）：表一退役 get_market_capitalization 手写豁免行（编排上收 price_service 后归 mcp_serve 单点，9→8 行，实测账 150+8+3+31=192 不变）；composite 行注记更新（A⑤ route 收敛不改 async 形态，豁免理由仍成立）；表三注记 A 组 28→26、B 组 market_capitalization 行迁出（get_or_set 对象缓存保真）、D 组续记编排随迁 3 处 |
 | 2026-11-22 | 票 07（QI-ARCH-17，裁决①不豁免走分支 B 上提）：eltdx_data 31 工具工具体上提模块级 + mcp_serve 出口收拢（dump=False 直返自有 _ok/_no_data/_err 三态信封，逐字节保真），表一头注实测账 150+8+3+31=192 → **181+8+3=192，eltdx_data 批外清零**；豁免零新增（31 工具全部迁入 mcp_serve，无 async/异构豁免项）；契约快照 tests/test_eltdx_mcp_serve_compat.py 92 用例锁定；check_exit_shapes.py 白名单同步摘除 eltdx_data.py 批外项 |
 | 2026-11-22 | 票 17（QI-STD-26，rule 11 拍板②空态语义统一批）：**表二新增注记**「已注册源合法空结果保留点」37 处（14 组逐组理由）——rule 5 空态批对全注册源盘点 74 折叠点，37 改抛出（commits 973038d/462b5b7/f85e009）+ 37 保留点书面化于此；上表 3 fetcher 级豁免原样不动（未注册，不在改造范围）；降级链验证 tests/test_empty_state_unify.py 9 用例，全量门 1453P/0F（gate-batchB6.txt） |
+| 2026-11-23 | QI-BUG-03 修齐（老板拍板，commit 5a41b12）：表三 B 组双重编码组 16 处线上格式统一单编码——15 处 mcp_serve 改 dump=False（串缓存形态保留）、analyze_technical 迁 get_or_set 对象缓存（与 REST diagnostic_service 共键统一存 dict）；修后 B 组实况小计 20；锁定测试 7 例（tests/test_qi_bug03_cache_format_parity.py） |
