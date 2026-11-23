@@ -15,7 +15,7 @@
   <img src="https://img.shields.io/badge/Tools-192-orange.svg" alt="MCP Tools"/>
   <img src="https://img.shields.io/badge/Endpoints-83-blue.svg" alt="REST Endpoints"/>
   <img src="https://img.shields.io/badge/License-Apache--2.0-yellow.svg" alt="License"/>
-  <img src="https://img.shields.io/badge/Version-3.9.5-blue.svg" alt="Version"/>
+  <img src="https://img.shields.io/badge/Version-3.9.6-blue.svg" alt="Version"/>
 </p>
 
 ---
@@ -547,6 +547,8 @@ cat VERSION                    # 最简：发布版本号单一真源
 
 | 版本 | 日期 | 关键里程碑 |
 |------|------|-----------|
+| **v3.9.6** | 2026-11-23 | 质检工单全量施工（qc-20261122 十七票）+ 缓存缺陷修复：① **A①A② MCP 出口收拢全量收官**（全仓工具体上提 + mcp_serve 单点，AST 账本退役）；② eltdx_data 31 工具上提（出口账 181+8+3=192）；③ **37 处已注册源静默空态改抛出**（rule 11 合规化 + 37 处合法空保留点书面化）；④ 缓存出口收拢 get_or_set（试点 7 + 全量 6）+ 三段编排搬 service；⑤ 三新护栏：`run_gate.py` 验证门包装 / pyflakes F821 挂门 / MCP 出口形态机械核验 + `docs/EXEMPTIONS.md` 单一真源；⑥ **QI-BUG-03** 16 处缓存 hit/miss 线上格式统一单编码（TradeX 零消费实证）+ **QI-STD-27** sw_industry 毒缓存修复；⑦ A⑦测试基座收敛 + 双树合并 + A⑧短线 17 端点收拢 + A⑨ akshare 六上游拆分。测试 1285→1463 |
+| **v3.9.5** | 2026-11-19 | 质检整改 qc-20261117 全量处置（32 条，16 commits，1283 passed）：北交所 920 段 secid 回归修复 + znb 载荷形状校验 + 数据正确性 D 组五项（dzh 契约 / 全球指数频控 / 中证成分表头 / 交易日历缓存收拢）+ 护栏三件（README 计数扩捕 / CHANGELOG 双向核验 / teardown flake）+ 架构深化 A 组 6/9（MCP 出口收拢试点 / service 接缝 / 列名翻译下沉 / 副本收敛）。当时 tag/Release 未触发，随 v3.9.6 补发 |
 | **v3.9.4** | 2026-11-14 | 审计批次 D 环境护栏（D2 挂载进回归门自动核验）：确定性检查五件套（依赖双处对比——实抓修复 fastapi 漏声明 / README 计数对齐 / REST 端点计数断言 / CHANGELOG 措辞 vs git log 核验 / import×声明比对护栏）；Issue #2 依赖审计补记：httpx+curl_cffi 补双处声明（传递依赖侥幸防线），基线 1231 |
 | **v3.9.3** | 2026-11-11 | 审计批次 C 架构深化五候选全做（纯重构行为不变）：shortline 信封收拢单点 / registry 注册表数据化（160 注册快照等价）/ lockup 字段映射单点（文本版假 0 顺带修复）/ 缓存序列化边界 get_or_set（Top，9 文件 35 处收敛 + 交易日缓存并入）/ REST 错误样板 _helpers 双入口（41 处收敛） |
 | **v3.9.2** | 2026-11-11 | 审计批次 B 防御加固：news_data ArrowInvalid 转调兜底（akshare 库内 bug × pyarrow 环境）+ index_constituents 复活（中证 OSS cons 文件，calamine 引擎，三坑处理，真机 000300 300 行验收）；注册 159→160、类型 114→115 |

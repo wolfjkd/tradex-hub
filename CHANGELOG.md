@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ---
 
+## [3.9.6] - 2026-11-23（质检工单全量施工 qc-20261122 + 缓存缺陷修复）
+
+> 依据 [[质检报告-20261122]] 十七票全量施工 + [[19-v3.9.5-质检qc20261122工单全量施工交接文档]]（老板 2026-11-23 五项「按建议」拍板）。区间 f6700a3 → 本版收口 62 commits。批次收尾门：**1463 passed / 0 failed / 5 skipped / 36 deselected**（基线 1285P，净增 178 测试）。台账逐票回写 `.scratch/qc-20261122/ledger.md`。
+
+### Fixed（批次 C 缓存缺陷，老板拍板）
+- **缓存 hit/miss 线上格式统一单编码**（QI-BUG-03，5a41b12）：16 处 `mcp_serve(dump=dict_to_json)` 对预序列化 str 双重编码、缓存命中路径单编码直返——同一工具首次调用与命中返回格式漂移。15 处改 `dump=False`（build 产出即单编码 str，缓存存取同形）；analyze_technical 迁 get_or_set 对象缓存（施工中新发现与 REST diagnostic_service 跨层共键 MCP 存 str / REST 存 dict 互踩，一并统一存 dict）。TradeX 全仓 16 工具全文件类型 grep 零消费、无兼容面（TradeX 零改动）；锁定测试 7 例（修前 7/7 红）
+- **sw_industry 下载失败毒缓存修复**（QI-STD-27，cca9e18）：`_load_history` 失败路径不再写空 df 进模块全局 `_history_df`（一次失败即进程内永久假空），改为保持 None 下次重试；成功路径语义不动；测试 3 例
+- **前瞻估值六字段恢复**（QI-BUG-01，0eef719）：`fetch_profit_forecast` 内 `_prefixed_code` 未定义 → NameError 被吞为 valuation_note，六字段永不产出且备源不接管；补前缀拼腾讯 URL，回归先红后绿（2 例）
+- **既有 pyflakes 未定义名/未用变量 4 处清理**（QI-BUG-02，28be5af）：eltdx_fetchers `pd` / sina_fetchers `Any` 补导入，eltdx_stream 死变量删除
+- **shortline 双重 dict_to_json 编码**（411545c）+ **_build 闭包参数赋值 UnboundLocalError ×6**（f658803，AST 精判续批实抓）
+
+### Added（确定性护栏 + 契约快照）
+- **验证门包装 `scripts/run_gate.py`**（QI-RETRO-04，cdf29bc）：实时落盘 / 300s 超时杀进程树 / 「总结行已出挂住」与「无总结行」双形态判定，门命令一条干净可复跑
+- **pyflakes F821 挂门**（QI-RETRO-03，28be5af）+ **MCP 出口形态机械核验 `scripts/check_exit_shapes.py`**（QI-RETRO-02，ba65489）：EXEMPTIONS 表一 AST 枚举比对，漂移即门红
+- **`docs/EXEMPTIONS.md` 设计内豁免单一真源**（QI-RETRO-01，97e42f3）：表一出口手写豁免 8 工具 + 表二空态豁免 3 fetcher + 表三缓存形态盘点注记
+- **契约快照**：eltdx 31 工具出口逐字节快照 92 例（93b8482，先于上提写入收拢后不改仍绿）+ period 双向翻译镜像 38 例（ee05f38）+ QI-BUG-03/STD-27 锁定测试 10 例
+- 全量门净增 178 测试（1285 → 1463）
+
+### Changed（空态语义 + 缓存语义）
+- **37 处已注册源静默空态改抛出**（QI-STD-26，973038d/462b5b7/f85e009）：断源 / 错码 / 凭据缺失不再折叠成空表，如实抛出让 SmartRouter 记账降级（rule 11 合规化）；37 处合法空结果保留点逐组理由书面化（ddeabad）+ 降级链验证 9 例（c60be3f）
+- **缓存出口收拢 get_or_set**（QI-ARCH-10，78a1d46 试点 7 处 + d4b5ec0 全量批 6 处）：不可迁点按形态落 EXEMPTIONS 表三（A 组 df_to_json 豁免 / B 组类型依赖 / C 组 async 编排）
+- **三段编排搬 service + 缓存语义统一**（QI-ARCH-14，8b02f82）：quote 维度改调 price_service（a54b826，composite async 形态不变）
+- **rule 7 收紧 df_to_json 场景**（97e42f3）：df_to_json 串缓存一律豁免不迁，防「为迁而迁」错迁
+
+### Refactor（架构深化）
+- **A①A② MCP 出口收拢全量收官**（QI-ARCH-01/02，批 1–21 + 批 19 修）：全仓工具体上提模块级 + mcp_serve 单点出口，AST 账本退役改注册过程衍生
+- **eltdx_data 31 工具上提**（QI-ARCH-17，批 1–6/6，15e0cb3..fdb7e00）：出口账 181 mcp_serve + 8 手写 + 3 tdx_mcp = 192（ab5b40f）
+- **A⑦ 测试基座收敛 + 双树合并单 conftest**（QI-ARCH-08/12，520c4fb/bf444f4/1c1146d）：异形副本 6 份逐份核对收敛薄壳化
+- **A⑧ 短线 17 端点收拢**（3f028e6）+ **A⑨ akshare_fetchers 六上游拆分**（ef81cac + 576a768 patch 目标随迁）
+- **代码归一化变体收进 utils/symbol**（QI-ARCH-13，b53321c）+ 判型函数收拢公共家（QI-ARCH-11，af83790）+ 味道三清（80c870e）
+
+### 验证
+- 全量门 `scripts/run_gate.py`：**1463 passed / 0 failed / 5 skipped / 36 deselected**（`.scratch/qc-20261122/gate-final2.txt`）；第一次 1 failed 经基线 commit 检出对照实跑实证为 live 源环境级 flaky（非本批引入），重跑全绿，未改码凑绿
+- 跨仓消费核查：TradeX HEAD ec0c932 全仓 16 工具零消费（精确名 + 子串模糊双查），QI-BUG-03 修复无兼容面
+
+---
+
 ## [3.9.5] - 2026-11-19（质检整改 qc-20261117 全量处置，无人值守施工）
 
 > 依据 [[质检报告-20261117]]（32 条全量处置，老板 2026-11-18 五拍板）+ [[无人值守施工单-tradex-hub]] v1.1。施工机 wolfjkd-9950X，基线 32070ff → 本批 16 commits。批次收尾门：**1283 passed / 0 failed / 5 skipped / 36 deselected（80.6s）**（基线 2F+1237P 全清 + 净增 46 测试）。台账 32 条逐条回写 [[质检台账-20261117]]。
