@@ -10,7 +10,7 @@
 
 | 工具 | 文件 | 豁免理由 |
 |---|---|---|
-| composite_analysis 组 3 工具 | composite_analysis.py | async gather + 多分支容错降级语义，mcp_serve 同步 build 不适配（代码注释自证；A⑤ route 收敛（票 13，裁决③）只统一 quote 维度取数口径（改调 price_service.get_realtime_quote），工具体 async 形态不变，本行豁免理由仍成立） |
+| composite_analysis 组 3 工具 | composite_analysis.py | async gather + 多分支容错降级语义，mcp_serve 同步 build 不适配（代码注释自证；A⑤ route 收敛（票 13，裁决③）只统一 quote 维度取数口径（改调 price_service.get_realtime_quote），工具体 async 形态不变，本行豁免理由仍成立；**豁免理由已追认（老板 2026-11-23）**） |
 | get_dividend_data | valuation.py | 多级缓存降级编排，build 单函数不适配（票 13 裁决③后若搬 service，本行同步更新） |
 | list_all_tools | diagnostics.py | 内部 await list_tools 协程，同步 build 不适配 |
 | health_check | diagnostics.py | 多段 try 诊断语义，逐段独立报健康态 |
@@ -113,3 +113,4 @@
 | 2026-11-22 | 票 07（QI-ARCH-17，裁决①不豁免走分支 B 上提）：eltdx_data 31 工具工具体上提模块级 + mcp_serve 出口收拢（dump=False 直返自有 _ok/_no_data/_err 三态信封，逐字节保真），表一头注实测账 150+8+3+31=192 → **181+8+3=192，eltdx_data 批外清零**；豁免零新增（31 工具全部迁入 mcp_serve，无 async/异构豁免项）；契约快照 tests/test_eltdx_mcp_serve_compat.py 92 用例锁定；check_exit_shapes.py 白名单同步摘除 eltdx_data.py 批外项 |
 | 2026-11-22 | 票 17（QI-STD-26，rule 11 拍板②空态语义统一批）：**表二新增注记**「已注册源合法空结果保留点」37 处（14 组逐组理由）——rule 5 空态批对全注册源盘点 74 折叠点，37 改抛出（commits 973038d/462b5b7/f85e009）+ 37 保留点书面化于此；上表 3 fetcher 级豁免原样不动（未注册，不在改造范围）；降级链验证 tests/test_empty_state_unify.py 9 用例，全量门 1453P/0F（gate-batchB6.txt） |
 | 2026-11-23 | QI-BUG-03 修齐（老板拍板，commit 5a41b12）：表三 B 组双重编码组 16 处线上格式统一单编码——15 处 mcp_serve 改 dump=False（串缓存形态保留）、analyze_technical 迁 get_or_set 对象缓存（与 REST diagnostic_service 共键统一存 dict）；修后 B 组实况小计 20；锁定测试 7 例（tests/test_qi_bug03_cache_format_parity.py） |
+| 2026-11-23 | 表一 composite_analysis 组 3 工具豁免理由**已追认**（老板 2026-11-23，QI-ARCH-19 闭环）：async gather + 多分支容错降级形态沿用不变，理由补注追认标记；表一 8 行无增减 |
