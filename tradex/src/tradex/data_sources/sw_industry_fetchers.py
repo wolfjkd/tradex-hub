@@ -58,8 +58,11 @@ def _load_history() -> pd.DataFrame:
             return df
         except Exception as e:
             logger.warning("load sw_industry_history failed: %s", e)
-            _history_df = pd.DataFrame()
-            return _history_df
+            # QI-STD-27（老板 2026-11-23 拍板修复）：失败不写入模块全局——
+            # 原 `_history_df = pd.DataFrame()` 把空 df 毒缓存进全局，一次
+            # 失败进程内永久假空不可自愈；保持 None 让下次调用重试下载。
+            # 本次调用按原契约返回空 df 不抛异常（成功路径语义不动）。
+            return pd.DataFrame()
 
 
 def fetch_sw_industry_history(
