@@ -53,6 +53,9 @@ def _try_push_limit_up_signal(board_type: str, count: int) -> None:
 # （QI-ARCH-02 全量上提，2026-11-19：3 个工具体模块级化 + mcp_serve 出口收拢；
 # _try_push_limit_up_signal 辅助函数保持模块级原样。）
 
+# （QI-BUG-03 修齐，2026-11-23 老板拍板：串缓存工具 mcp_serve 改 dump=False——
+#  _build 产出即单编码 str，出口不再套 dict_to_json，hit/miss 线上格式逐字节一致。）
+
 
 async def get_limit_up_board(board_type: str = "zt", date: str = "") -> str:
     """
@@ -92,7 +95,7 @@ async def get_limit_up_board(board_type: str = "zt", date: str = "") -> str:
                 _try_push_limit_up_signal(board_type, len(result["data"]))
         return output
 
-    return mcp_serve("get_limit_up_board", _build, "获取涨停板数据失败", dump=dict_to_json)
+    return mcp_serve("get_limit_up_board", _build, "获取涨停板数据失败", dump=False)
 
 
 async def get_board_sentiment(date: str = "") -> str:
@@ -124,7 +127,7 @@ async def get_board_sentiment(date: str = "") -> str:
             cache.set(cache_key, output, TTL_REALTIME)
         return output
 
-    return mcp_serve("get_board_sentiment", _build, "获取打板情绪数据失败", dump=dict_to_json)
+    return mcp_serve("get_board_sentiment", _build, "获取打板情绪数据失败", dump=False)
 
 
 async def get_limit_up_insight(code: str = "") -> str:
@@ -152,7 +155,7 @@ async def get_limit_up_insight(code: str = "") -> str:
             cache.set(cache_key, output, TTL_DAILY)
         return output
 
-    return mcp_serve("get_limit_up_insight", _build, "获取涨停揭秘数据失败", dump=dict_to_json)
+    return mcp_serve("get_limit_up_insight", _build, "获取涨停揭秘数据失败", dump=False)
 
 
 def register(mcp: FastMCP):

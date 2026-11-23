@@ -40,6 +40,9 @@ _router = get_router()
 # （QI-ARCH-02 全量上提，2026-11-19：6 个工具体模块级化 + mcp_serve 出口
 # 收拢；工具级字符串缓存裸 get/set 保留（rule 7 例外契约）。）
 
+# （QI-BUG-03 修齐，2026-11-23 老板拍板：串缓存工具 mcp_serve 改 dump=False——
+#  _build 产出即单编码 str，出口不再套 dict_to_json，hit/miss 线上格式逐字节一致。）
+
 
 async def get_hot_stocks(date: str = "") -> str:
     """
@@ -70,7 +73,7 @@ async def get_hot_stocks(date: str = "") -> str:
 
         return output
 
-    return mcp_serve("get_hot_stocks", _build, "获取涨停归因数据失败", dump=dict_to_json)
+    return mcp_serve("get_hot_stocks", _build, "获取涨停归因数据失败", dump=False)
 
 
 async def get_lockup_expiry(
@@ -111,7 +114,7 @@ async def get_lockup_expiry(
         cache.set(cache_key, output, TTL_DAILY)
         return output
 
-    return mcp_serve("get_lockup_expiry", _build, "获取解禁日历失败", dump=dict_to_json)
+    return mcp_serve("get_lockup_expiry", _build, "获取解禁日历失败", dump=False)
 
 
 async def get_concept_attribution(symbol: str) -> str:
@@ -140,7 +143,7 @@ async def get_concept_attribution(symbol: str) -> str:
             cache.set(cache_key, output, TTL_DAILY)
         return output
 
-    return mcp_serve("get_concept_attribution", _build, "获取概念归属失败", dump=dict_to_json)
+    return mcp_serve("get_concept_attribution", _build, "获取概念归属失败", dump=False)
 
 
 async def get_profit_forecast(symbol: str) -> str:
@@ -171,7 +174,7 @@ async def get_profit_forecast(symbol: str) -> str:
         cache.set(cache_key, output, TTL_DAILY)
         return output
 
-    return mcp_serve("get_profit_forecast", _build, "获取一致预期失败", dump=dict_to_json)
+    return mcp_serve("get_profit_forecast", _build, "获取一致预期失败", dump=False)
 
 
 async def get_technical_indicator(
@@ -281,7 +284,8 @@ async def get_technical_indicator(
         cache.set(cache_key, output, TTL_DAILY)
         return output
 
-    return mcp_serve("get_technical_indicator", _build, "计算技术指标失败")
+    # QI-BUG-03：原默认 dump=True 对 _build 预序列化 str 再套 json.dumps = 双重编码
+    return mcp_serve("get_technical_indicator", _build, "计算技术指标失败", dump=False)
 
 
 async def list_technical_indicators() -> str:

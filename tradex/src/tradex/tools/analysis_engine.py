@@ -734,7 +734,9 @@ def _load_ohlcv(code: str, look_back_days: int) -> pd.DataFrame:
 
 
 # （QI-ARCH-02 全量上提，2026-11-19：工具体模块级化 + mcp_serve 出口收拢
-# （dump=dict_to_json）；显式参数校验与「数据为空」显式 return 保留原样。）
+# （dump=dict_to_json）；显式参数校验与「数据为空」显式 return 保留原样。
+#  QI-BUG-03 修齐（2026-11-23 老板拍板）：analyze_technical 改对象缓存形态②，
+#  见函数内注记。）
 
 
 async def analyze_technical(
@@ -767,28 +769,33 @@ async def analyze_technical(
         )
 
     cache_key = f"analyze_technical:{symbol}:{look_back_days}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        return cached
 
-    def _build() -> str:
+    def _factory():
         df = _load_ohlcv(symbol, look_back_days)
         if df is None or df.empty:
-            return error_response(
-                f"无法获取 {symbol} 的 OHLCV 数据",
-                "analyze_technical",
-            )
-
+            return None  # 空 OHLCV 不入缓存（与 REST diagnostic_service 同键同语义）
         engine = AnalysisEngine(df, symbol=symbol)
         result = engine.analyze_all()
         # df 含 +60 预热缓冲(供 MA60/筹码计算),对外 data_points 口径只报回溯窗口
         if isinstance(result.get("data_points"), int):
             result["data_points"] = min(result["data_points"], look_back_days)
-        output = dict_to_json(result)
-        cache.set(cache_key, output, TTL_DAILY)
-        return output
+        return result
 
-    return mcp_serve("analyze_technical", _build, "技术分析失败", dump=dict_to_json)
+    def _build() -> str:
+        # QI-BUG-03 修齐（老板 2026-11-23 拍板，形态②对象缓存）：本键与 REST
+        # diagnostic_service.analyze_technical 共用（统一网关同进程共享 cache
+        # 单例），两层统一存 dict、出口 dict_to_json 单次序列化，hit/miss
+        # 逐字节一致；原 miss 经 dump=dict_to_json 对预序列化 str 再套一层
+        # = 双重编码，hit 工具层直出 = 单编码（线上格式随缓存状态漂移）。
+        result = cache.get_or_set(cache_key, _factory, TTL_DAILY)
+        if result is None:
+            return error_response(
+                f"无法获取 {symbol} 的 OHLCV 数据",
+                "analyze_technical",
+            )
+        return dict_to_json(result)
+
+    return mcp_serve("analyze_technical", _build, "技术分析失败", dump=False)
 
 
 def register(mcp: FastMCP) -> None:

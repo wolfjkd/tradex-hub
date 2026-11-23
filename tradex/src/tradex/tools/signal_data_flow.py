@@ -39,6 +39,9 @@ _router = get_router()
 # （QI-ARCH-02 全量上提，2026-11-19：4 个工具体模块级化 + mcp_serve 出口
 # 收拢；工具级字符串缓存裸 get/set 保留（rule 7 例外契约）。
 
+# （QI-BUG-03 修齐，2026-11-23 老板拍板：串缓存工具 mcp_serve 改 dump=False——
+#  _build 产出即单编码 str，出口不再套 dict_to_json，hit/miss 线上格式逐字节一致。）
+
 
 async def get_northbound_flow_signal(
     curr_date: str = "",
@@ -123,7 +126,7 @@ async def get_fund_flow_signal(
             cache.set(cache_key, output, TTL_REALTIME)
         return output
 
-    return mcp_serve("get_fund_flow_signal", _build, "获取个股资金流向失败", dump=dict_to_json)
+    return mcp_serve("get_fund_flow_signal", _build, "获取个股资金流向失败", dump=False)
 
 
 async def get_dragon_tiger_signal(
@@ -163,7 +166,7 @@ async def get_dragon_tiger_signal(
         cache.set(cache_key, output, TTL_DAILY)
         return output
 
-    return mcp_serve("get_dragon_tiger_signal", _build, "获取龙虎榜数据失败", dump=dict_to_json)
+    return mcp_serve("get_dragon_tiger_signal", _build, "获取龙虎榜数据失败", dump=False)
 
 
 async def get_industry_comparison_signal(
@@ -205,7 +208,7 @@ async def get_industry_comparison_signal(
             cache.set(cache_key, output, TTL_DAILY)
         return output
 
-    return mcp_serve("get_industry_comparison_signal", _build, "获取行业对比数据失败", dump=dict_to_json)
+    return mcp_serve("get_industry_comparison_signal", _build, "获取行业对比数据失败", dump=False)
 
 
 def register(mcp: FastMCP):

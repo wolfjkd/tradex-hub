@@ -28,6 +28,9 @@ _router = get_router()
 
 # （QI-ARCH-02 全量上提，2026-11-19：2 个工具体模块级化 + mcp_serve 出口收拢。）
 
+# （QI-BUG-03 修齐，2026-11-23 老板拍板：串缓存工具 mcp_serve 改 dump=False——
+#  _build 产出即单编码 str，出口不再套 dict_to_json，hit/miss 线上格式逐字节一致。）
+
 
 async def get_cb_realtime_data(
     top_n: int = 50,
@@ -61,7 +64,7 @@ async def get_cb_realtime_data(
             cache.set(cache_key, output, TTL_REALTIME)
         return output
 
-    return mcp_serve("get_cb_realtime_data", _build, "获取可转债行情失败", dump=dict_to_json)
+    return mcp_serve("get_cb_realtime_data", _build, "获取可转债行情失败", dump=False)
 
 
 async def get_cb_value_analysis_data(
@@ -96,7 +99,7 @@ async def get_cb_value_analysis_data(
             cache.set(cache_key, output, TTL_DAILY)
         return output
 
-    return mcp_serve("get_cb_value_analysis_data", _build, "获取可转债价值分析失败", dump=dict_to_json)
+    return mcp_serve("get_cb_value_analysis_data", _build, "获取可转债价值分析失败", dump=False)
 
 
 def register(mcp: FastMCP):
