@@ -76,10 +76,10 @@ class TestTdxMcpToolCount:
 
 
 class TestTotalToolCount:
-    def test_total_tool_count_is_192(self):
-        """全量工具数 = 192（注册过程衍生，2026-11-11 裁决① +1 后基线）。"""
+    def test_total_tool_count_is_194(self):
+        """全量工具数 = 194（注册过程衍生；2026-11-27 OFFSRC-00 P01 +2 后基线）。"""
         tools = _registered_tools()
-        assert len(tools) == 192, f"期望工具总数 192，实得 {len(tools)}"
+        assert len(tools) == 194, f"期望工具总数 194，实得 {len(tools)}"
 
     def test_event_driven_six_tools_registered(self):
         """A② 试点背书：上提 6 工具经 register 引用注册真实在册。"""

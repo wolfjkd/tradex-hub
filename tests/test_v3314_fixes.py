@@ -232,7 +232,8 @@ class TestIndependentBackupSources:
         #           → 157（2026-11-07 KPL 批次：kpl_* 4 类型各 1 独占注册）
         #           → 159（2026-11-08 接手清偿：+index_valuation 类型 +em_bond_backup 备源）
         #           → 160（2026-11-11 批次B②：+index_constituents csindex_official 主源）
-        assert len(router.get_registry_report()) == 160
+        #           → 161（2026-11-27 OFFSRC-00 P01：+official_disclosure/official_direct）
+        assert len(router.get_registry_report()) == 161
 
     def test_unsupported_endpoint_raises(self):
         """备源只覆盖部分 endpoint，其余必须显式报错而非静默返回空。"""

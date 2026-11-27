@@ -122,3 +122,8 @@ router.include_router(_shortline_routes.router)
 from . import kpl as _kpl_routes  # noqa: E402
 
 router.include_router(_kpl_routes.router)
+
+# OFFSRC-00 P01（2026-11-27）：境外官方公告端点（/official/disclosures, /official/sources）
+from . import official as _official_routes  # noqa: E402
+
+router.include_router(_official_routes.router)

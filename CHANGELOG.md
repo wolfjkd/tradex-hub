@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ---
 
+## [Unreleased]
+
+### Added（OFFSRC-00 P01：境外官方公告统一框架 + Fed RSS 打样）
+- **新数据类型 `official_disclosure`**（聚合分发模式，与 industry_news「1 类型 12 赛道」同构）：统一字段模型 10 列（source_name/doc_type/publish_time UTC/effective_time/title/summary/url/securities/source_grade/raw_json），`data_sources/official_disclosure_fetchers.py` 纯标准库实现（urllib + xml.etree 零新依赖）；加新源只在 `OFFICIAL_SOURCES` 登记表加行，`_SOURCE_TABLE` 零扰动
+- **Fed 美联储 RSS 首发打样**（`press_all.xml` 直连，2026-11-27 实测 200/2.9s）：议息决议/监管声明官方一手，断源/坏 XML/零条目/关键字段缺失全路径抛 `OfficialDisclosureSourceError`（自定义异常 + raise from，硬约定 #5/#11 合规）
+- **service 层**（`official_disclosure_service.py`）：单源查询断源透传 + 全源聚合显式降级（单源失败进 `failed_sources`，全失败才抛）；UTC 存储 + 北京时间展示双标（`publish_time_cn`/`effective_time_cn`）；TTL_DAILY 对象缓存
+- **MCP 工具 +2**：`get_official_disclosures` / `get_official_sources`（mcp_serve 出口），192→194
+- **REST 端点 +2**：`GET /api/v1/official/disclosures` / `GET /api/v1/official/sources`（serve_envelope 唯一口径），83→85
+- **网络铁律**：默认显式直连（空 ProxyHandler，不读 HTTP(S)_PROXY 环境变量）；专用变量 `OFFSRC_PROXY` 按源显式覆盖（MSCI 等 L3 源将来备用）
+- 新增测试 23 例（fixture 回放真实 RSS 样本，不联网）：解析/异常/分发/service 降级/REST/MCP 出口信封
+
+### Changed（计数断言同步，硬约定 #2）
+- 类型 115→116 / 注册 160→161（test_v3315）/ REST 83→85（test_rest_count）/ MCP 工具 192→194（test_server + test_dashboard_mcp）/ GROUPS 26→27 组（visibility_catalog 新组「境外官方公告」）/ lean enabled 116→118
+- README 六处计数 + badge 全量对齐（`check_readme_counts.py` [OK]）
+
+### ⚠️ 预先存在坏账（本批发现，未修，待立工单）
+- `scripts/generate_tool_docs.py` AST 扫描只识别装饰器形态（`@mcp.tool()`），对 QI-ARCH-02 引用注册形态（`mcp.tool()(_fn)`）全量失效——实跑仅能扫出 36/194。docs/MCP_TOOLS.md 本次手工同步新条目（文件头已注记）；生成器修复需另立工单（AST 需兼容引用注册形态或改读注册表衍生）
+
+---
+
 ## [3.9.6] - 2026-11-23（质检工单全量施工 qc-20261122 + 缓存缺陷修复）
 
 > 依据 [[质检报告-20261122]] 十七票全量施工 + [[19-v3.9.5-质检qc20261122工单全量施工交接文档]]（老板 2026-11-23 五项「按建议」拍板）。区间 f6700a3 → 本版收口 62 commits。批次收尾门：**1463 passed / 0 failed / 5 skipped / 36 deselected**（基线 1285P，净增 178 测试）。台账逐票回写 `.scratch/qc-20261122/ledger.md`。

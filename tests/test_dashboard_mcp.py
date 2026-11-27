@@ -34,19 +34,19 @@ def _isolate(monkeypatch, tmp_path):
 
 def test_catalog_shape():
     data = dash.get_mcp_catalog_data()
-    assert data["total"] == 192
-    assert len(data["groups"]) == 26
+    assert data["total"] == 194  # 2026-11-27 OFFSRC-00 P01 +2（境外官方公告）
+    assert len(data["groups"]) == 27
     assert data["profile"] == "full"  # tmp 无 profile 文件 → full
     assert data["gateway_tools"] == 116
     names = [t["name"] for g in data["groups"] for t in g["tools"]]
-    assert len(names) == 192
+    assert len(names) == 194
 
 
 def test_apply_lean_writes_and_invalidates_cache(monkeypatch):
     monkeypatch.setattr(dash, "_TOOL_COUNT", 190)  # 预置缓存
     out = dash.apply_mcp_preset("lean")
     assert out["preset"] == "lean"
-    assert out["enabled"] == 116
+    assert out["enabled"] == 118  # 194 - 76 hidden（境外官方公告组不在 lean 禁用名单）
     assert dash._TOOL_COUNT is None  # 缓存已失效
     from tradex.tools import mcp_profile_io
 
@@ -60,7 +60,7 @@ def test_apply_lean_writes_and_invalidates_cache(monkeypatch):
 def test_apply_full_clears_hidden(monkeypatch):
     dash.apply_mcp_preset("lean")
     out = dash.apply_mcp_preset("full")
-    assert out["enabled"] == 192
+    assert out["enabled"] == 194
     from tradex.tools import mcp_profile_io
 
     written = json.loads(

@@ -46,6 +46,7 @@ MODULE_GROUPS: dict[str, tuple[str, str, int]] = {
     "market.py": ("L1 数据获取", "市场总览与资金", 160),
     "macro_fx.py": ("L1 数据获取", "宏观与两融", 170),
     "macro_official.py": ("L1 数据获取", "宏观官方源（统计局 / 中债）", 180),
+    "official_disclosure.py": ("L1 数据获取", "境外官方公告（Fed/SEC/FTSE/MSCI 等）", 190),
     "signal_data_base.py": ("L1 数据获取", "信号数据 · 基础", 200),
     "signal_data_flow.py": ("L1 数据获取", "信号数据 · 资金流与龙虎榜", 210),
     "signal_data_board.py": ("L1 数据获取", "信号数据 · 涨停板与情绪", 220),

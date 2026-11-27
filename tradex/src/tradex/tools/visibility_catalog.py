@@ -50,6 +50,9 @@ GROUPS: list[tuple[str, str, list[str]]] = [
         "get_hot_rank", "get_hot_search", "get_xueqiu_hot", "get_hot_keywords",
         "get_hot_stocks", "get_company_announcements", "get_market_sentiment",
     ]),
+    ("境外官方公告", "Fed 议息声明/SEC 中概披露/FTSE·MSCI 指数调整/HKEX 公告（一手官方，OFFSRC-00）", [
+        "get_official_disclosures", "get_official_sources",
+    ]),
     ("技术指标计算", "MACD/KDJ/BOLL/RSI/MA-EMA/ATR", [
         "calculate_macd", "calculate_kdj", "calculate_boll", "calculate_rsi",
         "calculate_ma_ema", "calculate_atr",

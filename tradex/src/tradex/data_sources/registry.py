@@ -53,6 +53,7 @@ from . import cctv_news_fetchers as cctv              # 央视新闻联播
 from . import sw_industry_fetchers as swind           # 申万行业变迁
 from . import industry_news_fetchers as indnews       # 产业链资讯 RSS
 from . import tdx_package_fetchers as tdxpkg          # 通达信官网盘后包（H5）
+from . import official_disclosure_fetchers as od      # 境外官方公告统一源（OFFSRC-00 P01）
 
 # ============================================================
 # 数据源注册表（唯一直接知识源）— 批次C2 数据化（2026-11-11）
@@ -384,6 +385,12 @@ _SOURCE_TABLE: tuple[tuple[str, str, object, int, bool], ...] = (
 # 两融明细：交易所官方一手
     ("margin_trading", "sse_official", exchg.fetch_sse_margin_trading, 50, False),
     ("margin_trading", "szse_official", exchg.fetch_szse_margin_trading, 60, False),
+# ── 境外官方公告（OFFSRC-00 P01，2026-11-27）──
+# 统一类型 official_disclosure：fetcher 内部按 source 参数分发各境外官方源
+# （fed RSS 首发打样；SEC/FTSE/MSCI/HKEX/恒生按工单序 P02-P05 接入）——
+# 聚合分发模式与 industry_news「1 类型 12 赛道」同构，加新源只在
+# OFFICIAL_SOURCES 登记表加行，不动本表（计数断言零扰动）。
+    ("official_disclosure", "official_direct", od.fetch_official_disclosure, 1, False),
 )
 
 

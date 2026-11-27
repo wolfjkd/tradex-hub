@@ -17,9 +17,10 @@ class TestServerSetup:
         落库 2 + 题材 4 + 字段漂移 1）→ 190（2026-11-07 KPL 批次 +4：
         limit_up/sentiment/boards/bidding）.
         数量精确锁定，版本演进需同步更新本断言。
-        测试名 90→192 名实对齐（QI-ARCH-16，2026-11-22：断言早已 192，名沿旧账）。"""
+        测试名 90→192 名实对齐（QI-ARCH-16，2026-11-22：断言早已 192，名沿旧账）。
+        2026-11-27 OFFSRC-00 P01：192→194（境外官方公告 2 工具），名沿旧账不改。"""
         tools = mcp_server._tool_manager._tools
-        assert len(tools) == 192, f"Expected 192 tools, got {len(tools)}"
+        assert len(tools) == 194, f"Expected 194 tools, got {len(tools)}"
 
     # ── V0.1–V0.6 六批手抄清单（QI-ARCH-16 处置注记，2026-11-22）──────────
     # 清单性质：按历史交付批次（V0.1–V0.6）逐批回归守卫——每批交付的工具必须
@@ -141,10 +142,11 @@ class TestServerSetup:
 
     def test_tool_count_per_version(self, mcp_server):
         """SP-2026-10-13-001: tq 源工具 +2 (166→168)；2026-11-06 shortline 批次 +18（168→186）；
-        2026-11-08 中证估值复活 +1（190→191）；2026-11-11 裁决① index_constituents 暴露 +1（191→192）.
+        2026-11-08 中证估值复活 +1（190→191）；2026-11-11 裁决① index_constituents 暴露 +1（191→192）；
+        2026-11-27 OFFSRC-00 P01 境外官方公告 +2（192→194）.
         防重复注册回归。版本演进需同步更新本断言。"""
         tools = mcp_server._tool_manager._tools
-        assert len(tools) == 192
+        assert len(tools) == 194
 
     # ── QI-ARCH-16 集合断言（2026-11-22）：visibility_catalog.GROUPS ↔ 注册全集
     #    对账单点化——GROUPS 是 mcp_profile/TradeX 看板共用分组数据（自称单一
@@ -171,11 +173,11 @@ class TestServerSetup:
         assert not uncataloged, f"注册工具未归组入 visibility_catalog: {uncataloged}"
 
     def test_visibility_catalog_counts(self, mcp_server):
-        """目录计数断言（2026-11-22 实跑口径）：26 组 / 192 项 / 目录无重复。
+        """目录计数断言（2026-11-27 实跑口径）：27 组 / 194 项 / 目录无重复。
 
         与 tests/test_dashboard_mcp.py::test_catalog_shape（dashboard 推导路径）
         互为双保险；此处直测 GROUPS/ALL_TOOLS 数据本体。"""
         from tradex.tools.visibility_catalog import ALL_TOOLS, GROUPS
-        assert len(GROUPS) == 26, f"GROUPS 组数漂移: {len(GROUPS)}"
-        assert len(ALL_TOOLS) == 192, f"GROUPS 目录工具项数漂移: {len(ALL_TOOLS)}"
+        assert len(GROUPS) == 27, f"GROUPS 组数漂移: {len(GROUPS)}"
+        assert len(ALL_TOOLS) == 194, f"GROUPS 目录工具项数漂移: {len(ALL_TOOLS)}"
         assert len(set(ALL_TOOLS)) == len(ALL_TOOLS), "GROUPS 目录有重复工具名"
