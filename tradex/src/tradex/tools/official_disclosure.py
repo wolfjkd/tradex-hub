@@ -28,25 +28,28 @@ def register(mcp: FastMCP) -> None:
         limit: int = 30,
         identifier: str = "",
         form_type: str = "",
+        data: str = "",
+        review_period: str = "",
     ) -> str:
         """
         获取境外官方机构一手公告（OFFSRC-00 专项）。
 
-        当前已接入源：fed（美联储新闻稿 RSS）、sec_edgar（SEC EDGAR 中概股披露，
-        官方 JSON API）。FTSE Russell / MSCI / HKEXnews / 恒生 按 OFFSRC-00
-        工单序 P03-P05 逐个接入。
+        当前已接入源：fed（美联储新闻稿 RSS）、sec_edgar（SEC EDGAR 中概股披露）、
+        msci（MSCI 季度指数评审：China A 名单/期次日历/公告摘要）。FTSE Russell /
+        HKEXnews / 恒生 按 OFFSRC-00 工单序 P04-P05 接入。
 
         Args:
-            source: 源 key，如 "fed" / "sec_edgar"。留空 = 聚合全部已接入源（单源
-                失败自动降级并在 failed_sources 中如实标注）。
+            source: 源 key，如 "fed" / "sec_edgar" / "msci"。留空 = 聚合全部已接入
+                源（单源失败自动降级并在 failed_sources 中如实标注）。
             doc_type: 文档类型过滤：index_review（指数调整）/ filing（监管申报）/
                 press_release（新闻稿）/ macro_release（宏观发布）。留空返回全部。
             limit: 每源最多返回条数，默认 30。
             identifier: 仅 sec_edgar 消费——ticker（如 BABA/PDD）或 10 位内 CIK；
-                留空 = 聚合默认中概观察清单 10 只（BABA/PDD/JD/LI/NIO/BIDU/NTES/
-                TCOM/BEKE/ZTO）。其余源忽略。
-            form_type: 仅 sec_edgar 消费——SEC 文书类型过滤（10-K/10-Q/8-K/20-F/6-K），
-                留空全部。其余源忽略。
+                留空 = 聚合默认中概观察清单 10 只。
+            form_type: 仅 sec_edgar 消费——SEC 文书类型过滤（10-K/10-Q/8-K/20-F/6-K）。
+            data: 仅 msci 消费——list=China A 名单明细（默认）/ dates=未来期次日历
+                （倒计时数据）/ summary=公告摘要哨兵。
+            review_period: 仅 msci 消费——期次，'2026-11' 或 'Nov26'，默认最新期。
 
         Returns:
             JSON：disclosures 列表（title/summary/url/publish_time_utc/publish_time_cn
@@ -58,6 +61,7 @@ def register(mcp: FastMCP) -> None:
             lambda: official_disclosure_service.get_official_disclosures(
                 source=source, doc_type=doc_type, limit=limit,
                 identifier=identifier, form_type=form_type,
+                data=data, review_period=review_period,
             ),
             f"获取境外官方公告失败 (source={source!r})",
             value_error_detail=f"参数错误 (source={source!r})",

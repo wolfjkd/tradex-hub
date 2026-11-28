@@ -30,12 +30,15 @@ def get_disclosures(
     limit: int = Query(30, ge=1, le=100),
     identifier: str = Query("", description="仅 sec_edgar：ticker 或 CIK，留空聚合默认中概清单"),
     form_type: str = Query("", description="仅 sec_edgar：文书类型过滤（10-K/6-K 等），留空全部"),
+    data: str = Query("", description="仅 msci：list=名单明细（默认）/dates=期次日历/summary=公告摘要"),
+    review_period: str = Query("", description="仅 msci：期次 '2026-11' 或 'Nov26'，默认最新期"),
 ) -> Envelope[dict]:
     """境外官方机构一手公告（UTC 存储 + 北京时间双标）。"""
     return serve_envelope(
         lambda: official_disclosure_service.get_official_disclosures(
             source=source, doc_type=doc_type, limit=limit,
             identifier=identifier, form_type=form_type,
+            data=data, review_period=review_period,
         )
     )
 

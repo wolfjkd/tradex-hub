@@ -33,9 +33,11 @@
 
 from __future__ import annotations
 
+import gzip
 import json
 import logging
 import os
+import re
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
@@ -347,6 +349,320 @@ def _fetch_sec_edgar(limit: int, identifier: str = "", form_type: str = "", **kw
 
 
 # ============================================================
+# 源 3：MSCI — index_review（L2 直连静态文件 + PDF 抽取）（OFFSRC-00 P03）
+# ============================================================
+# P00 结论（2026-11-27）：Akamai Challenge 不复现，数据在 app2 静态域——
+#   ① 名单：index_review.html 逐期目录 → MSCI_<Mon><YY>_ChinaAPublicList_EN.pdf
+#     （第 1 页即完整名单纯文本，第 2 页起免责声明）
+#   ② 期次日历：ir_dates.csv（gzip，未来 8 期公布日+生效日）→ P07 倒计时数据源
+#   ③ 摘要哨兵：Announcement 枚举端点 → DocGet/pub_key 直链（pub_key 已是
+#     URL-encoded Base64，拼接时禁止二次编码）
+# ⚠️ ST（Global Standard）PDF 的 China（H股/中概）子集暂不解析：明细按 Region
+#   分节且无 CHINA 行锚点，pypdf 文本流切分脆弱——留 TODO 待结构再评估（R6 范围纪律）。
+
+_MSCI_INDEX_REVIEW_URL = "https://app2.msci.com/eqb/gimi/stdindex/index_review.html"
+_MSCI_IR_DATES_URL = "https://app2.msci.com/eqb/pressreleases/archive/ir_dates.csv"
+_MSCI_ANNOUNCE_ENUM_URL = (
+    "https://app2.msci.com/webapp/index_ann/Announcement"
+    "?doc_type=ANNOUNCEMENT&lang=en&prod_type=STANDARD&visibility=public&format=html"
+)
+_MSCI_DOCGET_URL = "https://app2.msci.com/webapp/index_ann/DocGet?pub_key={pub_key}&lang=en&format=html"
+_MSCI_BASE = "https://app2.msci.com"
+
+_MSCI_MONTH_CODE = {
+    "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
+    "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12,
+}
+_MSCI_MONTH_NAME = {v: k for k, v in _MSCI_MONTH_CODE.items()}
+_MSCI_EN_MONTH_NUM = {
+    m.lower(): i
+    for i, m in enumerate(
+        ("January", "February", "March", "April", "May", "June", "July",
+         "August", "September", "October", "November", "December"), start=1,
+    )
+}
+
+
+def _msci_review_code(review_period: str) -> str:
+    """期次标识归一：'2026-11' → 'Nov26'；'Nov26' 原样。"""
+    code = review_period.strip()
+    m = re.fullmatch(r"(\d{4})-(\d{2})", code)
+    if m:
+        year2 = m.group(1)[2:]
+        month = int(m.group(2))
+        month_abbr = _MSCI_MONTH_NAME.get(month)
+        if month_abbr is None:
+            raise ValueError(f"非法期次月份: {review_period!r}")
+        return f"{month_abbr}{year2}"
+    if re.fullmatch(r"[A-Z][a-z]{2}\d{2}", code) and code[:3] in _MSCI_MONTH_CODE:
+        return code
+    raise ValueError(
+        f"期次格式应为 'YYYY-MM' 或 '<Mon><YY>'（如 2026-11 / Nov26）: {review_period!r}"
+    )
+
+
+def _msci_period_from_code(code: str) -> str:
+    """'Nov26' → '2026-11'（文件名期次 → 规范期次）。"""
+    mm = re.fullmatch(r"([A-Z][a-z]{2})(\d{2})", code)
+    if not mm or mm.group(1) not in _MSCI_MONTH_CODE:
+        raise OfficialDisclosureSourceError(f"MSCI 期次标识无法解析: {code!r}")
+    return f"20{mm.group(2)}-{_MSCI_MONTH_CODE[mm.group(1)]:02d}"
+
+
+def _date_en_to_iso(text: str) -> str:
+    """英文日期 'November 11, 2026' → '2026-11-11'。"""
+    m = re.fullmatch(r"([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})", text.strip())
+    if not m or m.group(1).lower() not in _MSCI_EN_MONTH_NUM:
+        raise OfficialDisclosureSourceError(f"MSCI 英文日期无法解析: {text!r}")
+    return f"{m.group(3)}-{_MSCI_EN_MONTH_NUM[m.group(1).lower()]:02d}-{int(m.group(2)):02d}"
+
+
+def _parse_msci_review_links(html: str) -> list[tuple[str, str]]:
+    """index_review.html → [(期次码 Nov26, ChinaA PDF 相对链接)]，最新在前。"""
+    pairs: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for rel in re.findall(r'href="(/eqb/gimi/stdindex/MSCI_([A-Za-z]{3}\d{2})_ChinaAPublicList(?:_EN)?\.pdf)"', html, re.I):
+        link, code = rel[0], rel[1].capitalize()
+        if code[:3].capitalize() not in _MSCI_MONTH_CODE or code in seen:
+            continue
+        seen.add(code)
+        pairs.append((code, link))
+    if not pairs:
+        raise OfficialDisclosureSourceError(
+            "MSCI 期次目录页未解析到任何 ChinaAPublicList 链接（断源或结构变化）"
+        )
+    return pairs
+
+
+def _parse_msci_chinaa_text(text: str, review_period: str, file_url: str, limit: int) -> pd.DataFrame:
+    """China A 名单 PDF 第 1 页抽取文本 → 统一模型行（每条 add/delete 一行）。
+
+    校验线：明细计数必须与首页 SUMMARY 表一致，不符 = 结构变化抛异常（假数据防线）。
+    securities 恒为 []：PDF 只有英文公司名与 (HK-C) 港股通标记，无 A 股代码——
+    不臆译不伪造代码（诚实空态原则）。
+    """
+    if "MSCI CHINA A INDEX" not in text:
+        raise OfficialDisclosureSourceError(
+            f"MSCI 名单 PDF 不含 'MSCI CHINA A INDEX' 标题（结构变化?）: {file_url}"
+        )
+    m_ann = re.search(r"^[A-Za-z]+,\s+([A-Za-z]+\s+\d{1,2},\s*\d{4})\s*$", text, re.M)
+    if not m_ann:
+        raise OfficialDisclosureSourceError("MSCI 名单 PDF 首行无公布日期（结构变化?）")
+    announce_iso = _date_en_to_iso(m_ann.group(1))
+    m_eff = re.search(
+        r"effective as of the close of business on\s+([A-Za-z]+\s+\d{1,2},\s*\d{4})", text
+    )
+    if not m_eff:
+        raise OfficialDisclosureSourceError("MSCI 名单 PDF 无生效日声明（结构变化?）")
+    effective_iso = _date_en_to_iso(m_eff.group(1))
+
+    # 摘要表计数（MSCI CHINA A INDEX <added> <deleted>）
+    m_sum = re.search(
+        r"MSCI\s+CHINA\s+A\s+INDEX\s+(\d+)\s+(\d+)", text
+    )
+    if not m_sum:
+        raise OfficialDisclosureSourceError("MSCI 名单 PDF 无 China A 摘要计数行（结构变化?）")
+    want_add, want_del = int(m_sum.group(1)), int(m_sum.group(2))
+
+    # 明细区：最后一次出现指数标题之后（首页底部双栏）
+    body_start = text.rfind("MSCI CHINA A INDEX")
+    body = text[body_start:]
+    additions_i = body.find("Additions")
+    if additions_i < 0:
+        raise OfficialDisclosureSourceError("MSCI 名单 PDF 无 Additions 明细区（结构变化?）")
+    lines = body[additions_i + len("Additions"):].splitlines()
+
+    adds: list[str] = []
+    dels: list[str] = []
+    for ln in lines:
+        if len(adds) >= want_add and len(dels) >= want_del:
+            break  # 计数达标即停（后续为说明文字）——比模式匹配终止更稳
+        cells = [c.strip() for c in re.split(r"\s{2,}", ln.strip()) if c.strip()]
+        cells = [c for c in cells if c not in ("Additions", "Deletions")]  # 标题词过滤
+        if not cells:
+            continue
+        if len(cells) == 1 and len(cells[0]) > 60 and not re.search(r"\([A-Z0-9-]+\)\s*$", cells[0]):
+            continue  # 免责声明/说明长句跳过（计数校验兜底）
+        left_set = bool(ln) and not ln[0].isspace()  # 行首空格 = 左栏空缺（仅右栏行）
+        if len(cells) == 2:
+            adds.append(cells[0])
+            dels.append(cells[1])
+        elif len(cells) == 1:
+            (adds if left_set else dels).append(cells[0])
+        else:
+            adds.append(cells[0])
+            dels.append(cells[-1])
+    # 计数校验：与首页 SUMMARY 不一致 = 解析失败（假数据比 5xx 更糟）
+    if len(adds) != want_add or len(dels) != want_del:
+        raise OfficialDisclosureSourceError(
+            f"MSCI China A 名单明细计数不符（结构变化?）：解析 add={len(adds)}/del={len(dels)}"
+            f" vs 摘要 {want_add}/{want_del} — {file_url}"
+        )
+
+    period = _msci_period_from_code(review_period)
+    rows: list[dict] = []
+    for action, names in (("add", adds), ("delete", dels)):
+        for name in names:
+            market_tag = ""
+            m_tag = re.search(r"\(([A-Z0-9-]+)\)\s*$", name)
+            if m_tag:
+                market_tag = m_tag.group(1)
+            rows.append({
+                "source_name": "msci",
+                "doc_type": "index_review",
+                "publish_time": f"{announce_iso}T00:00:00Z",
+                "effective_time": f"{effective_iso}T00:00:00Z",
+                "title": f"MSCI China A Index Review {period}: "
+                         f"{'纳入' if action == 'add' else '剔除'} {name}",
+                "summary": f"{action.upper()} {name} — MSCI China A Index {period} 季度评审"
+                           + (f"（{market_tag}）" if market_tag else ""),
+                "url": file_url,
+                "securities": "[]",
+                "source_grade": "official",
+                "raw_json": json.dumps({
+                    "review_period": period, "action": action,
+                    "security_name_en": name, "market_tag": market_tag,
+                    "file_url": file_url,
+                    "note": "MSCI 官方 PDF 第 1 页原文（英文原名，A 股代码映射未臆译）",
+                }, ensure_ascii=False),
+            })
+    return _rows_to_df(rows).head(limit)
+
+
+def _parse_msci_ir_dates(csv_text: str, limit: int) -> pd.DataFrame:
+    """ir_dates.csv（已解压）→ 未来期次日历（#BOD..#EOD 之间表格）。"""
+    m = re.search(r"#BOD(.*?)#EOD", csv_text, re.S)
+    if not m:
+        raise OfficialDisclosureSourceError("MSCI ir_dates.csv 无 #BOD/#EOD 数据块（结构变化?）")
+    rows: list[dict] = []
+    for line in m.group(1).splitlines():
+        line = line.strip().rstrip(",")
+        if not line or "|" not in line:
+            continue
+        parts = [p.strip().strip('"') for p in line.split("|")]
+        if len(parts) < 4 or parts[0].lower() in ("quarter", ""):
+            continue
+        quarter, event, ann, eff = parts[0], parts[1], parts[2], parts[3]
+        m1 = re.fullmatch(r"(\d{2})-(\d{2})-(\d{4})", ann)
+        m2 = re.fullmatch(r"(\d{2})-(\d{2})-(\d{4})", eff)
+        if not (m1 and m2):
+            continue  # 非日期行跳过
+        ann_iso = f"{m1.group(3)}-{m1.group(1)}-{m1.group(2)}"
+        eff_iso = f"{m2.group(3)}-{m2.group(1)}-{m2.group(2)}"
+        rows.append({
+            "source_name": "msci",
+            "doc_type": "index_review",
+            "publish_time": f"{ann_iso}T00:00:00Z",
+            "effective_time": f"{eff_iso}T00:00:00Z",
+            "title": f"MSCI Index Review {quarter}（{event}）日程",
+            "summary": f"公布 {ann_iso}（北京时间次日凌晨）· 生效 {eff_iso} 收盘后",
+            "url": _MSCI_IR_DATES_URL,
+            "securities": "[]",
+            "source_grade": "official",
+            "raw_json": json.dumps(
+                {"quarter": quarter, "event": event,
+                 "announcement_date": ann_iso, "effective_date": eff_iso},
+                ensure_ascii=False,
+            ),
+        })
+    if not rows:
+        raise OfficialDisclosureSourceError("MSCI ir_dates.csv 解析后零期次（结构变化?）")
+    return _rows_to_df(rows).head(limit)
+
+
+def _parse_msci_announcements(enum_html: str, limit: int) -> pd.DataFrame:
+    """Announcement 枚举 → DocGet 摘要哨兵（每条公告一行：标题+时间+链接）。"""
+    entries = list(dict.fromkeys(
+        re.findall(r'pub_key=([^&"\'\s]+)', enum_html)
+    ))
+    if not entries:
+        raise OfficialDisclosureSourceError(
+            "MSCI Announcement 枚举无 pub_key 直链（断源或结构变化）"
+        )
+    rows: list[dict] = []
+    for pub_key in entries[:limit]:
+        url = _MSCI_DOCGET_URL.format(pub_key=pub_key)
+        doc = _http_get(url).decode("utf-8", errors="replace")
+        m_title = re.search(r"<title>(.*?)</title>", doc, re.S)
+        m_time = re.search(
+            r"Announcement for ([A-Za-z]+ \d{1,2}, \d{4}) at (\d{2}:\d{2}) (?:PM|AM) GMT", doc
+        )
+        title = (m_title.group(1).strip() if m_title else "")[:120]
+        if not title:
+            raise OfficialDisclosureSourceError(f"MSCI DocGet 无标题（结构变化?）: {url}")
+        if m_time:
+            iso_date = _date_en_to_iso(m_time.group(1))
+            publish = f"{iso_date}T{m_time.group(2)}:00Z"
+        else:
+            publish = ""
+        rows.append({
+            "source_name": "msci",
+            "doc_type": "index_review",
+            "publish_time": publish,
+            "effective_time": "",
+            "title": title,
+            "summary": f"MSCI 官方公告（pub_key={pub_key}）",
+            "url": url,
+            "securities": "[]",
+            "source_grade": "official",
+            "raw_json": json.dumps({"pub_key": pub_key}, ensure_ascii=False),
+        })
+    return _rows_to_df(rows)
+
+
+def _fetch_msci(limit: int, data: str = "list", review_period: str = "", **kwargs) -> pd.DataFrame:
+    """MSCI 分发入口。
+
+    data="list"（默认）：最新（或指定期次）China A 名单明细，每条 add/delete 一行；
+    data="dates"：未来期次日历（ir_dates.csv，P07 倒计时数据源）；
+    data="summary"：公告摘要哨兵（Announcement 枚举 + DocGet）。
+    """
+    kind = (data or "list").strip().lower()
+    if kind == "list":
+        links = _parse_msci_review_links(
+            _http_get(_MSCI_INDEX_REVIEW_URL).decode("utf-8", errors="replace")
+        )
+        if review_period and str(review_period).strip():
+            code = _msci_review_code(review_period)
+            match = next((p for p in links if p[0] == code), None)
+            if match is None:
+                raise ValueError(f"期次 {code} 无 China A 名单文件; 可用: {[p[0] for p in links]}")
+        else:
+            match = links[0]
+        file_url = _MSCI_BASE + match[1]
+        pdf_bytes = _http_get(file_url)
+        from pypdf import PdfReader
+        import io as _io
+
+        try:
+            reader = PdfReader(_io.BytesIO(pdf_bytes))
+            text = reader.pages[0].extract_text() or ""
+        except Exception as exc:
+            raise OfficialDisclosureSourceError(
+                f"MSCI 名单 PDF 抽取失败（结构变化?）: {file_url} ({exc})"
+            ) from exc
+        if not text.strip():
+            raise OfficialDisclosureSourceError(
+                f"MSCI 名单 PDF 第 1 页零文本（扫描件或结构变化?）: {file_url}"
+            )
+        return _parse_msci_chinaa_text(text, match[0], file_url, limit)
+    if kind == "dates":
+        raw = _http_get(_MSCI_IR_DATES_URL)
+        try:
+            csv_text = gzip.decompress(raw).decode("utf-8", errors="replace")
+        except Exception:
+            csv_text = raw.decode("utf-8", errors="replace")
+        return _parse_msci_ir_dates(csv_text, limit)
+    if kind == "summary":
+        return _parse_msci_announcements(
+            _http_get(_MSCI_ANNOUNCE_ENUM_URL).decode("utf-8", errors="replace"), limit
+        )
+    raise ValueError(
+        f"未知 msci data 类型: {data!r}; 可用: list | dates | summary"
+    )
+
+
+# ============================================================
 # 源登记表 — P02–P05 接新源在此加行（不动 _SOURCE_TABLE / 计数断言）
 # ============================================================
 
@@ -354,6 +670,7 @@ def _fetch_sec_edgar(limit: int, identifier: str = "", form_type: str = "", **kw
 OFFICIAL_SOURCES: dict[str, tuple[Callable[..., pd.DataFrame], str]] = {
     "fed": (_fetch_fed, "美联储新闻稿 RSS（议息/监管声明，官方一手）"),
     "sec_edgar": (_fetch_sec_edgar, "SEC EDGAR 最近披露（中概股 10-K/10-Q/8-K/6-K，官方 JSON API）"),
+    "msci": (_fetch_msci, "MSCI 季度指数评审（China A 名单 PDF/期次日历/公告摘要，官方一手）"),
 }
 
 

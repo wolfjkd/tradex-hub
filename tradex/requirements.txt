@@ -29,3 +29,5 @@ starlette>=0.37.0
 sse-starlette>=1.6.0
 # 问财 wencai_query 主源（hexin-v token 生成；未装时该源抛错由 router 降级）
 pywencai>=0.13.1
+# MSCI 季度评审名单 PDF 文本抽取（official_disclosure/msci 源，OFFSRC-00 P03）
+pypdf>=4.0
