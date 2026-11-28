@@ -663,6 +663,114 @@ def _fetch_msci(limit: int, data: str = "list", review_period: str = "", **kwarg
 
 
 # ============================================================
+# 源 4：FTSE Russell — index_review（L2 公告 PDF，按 id 直取）（OFFSRC-00 P04）
+# ============================================================
+# P00 结论（2026-11-27）+ 2026-11-28 复测：域名迁 LSEG；公告 getnotice/?id=NNN
+# 直出 PDF 200（含公布日/生效日/期次名，名单在附件 xlsx 需门户登录）。
+# 列表枚举不可达：notices 列表页 JS 渲染 + GetNotices AJAX 端点对脚本请求回
+# SPA 壳（无会话）——故本源按 notice id 直取（id 由人工从 lseg notices 页查询，
+# 如 GEIS Dec2026 = 2622506），不伪造列表（诚实空态原则）。
+
+_FTSE_NOTICE_URL = (
+    "https://research.ftserussell.com/products/index-notices/home/getnotice/?id={notice_id}"
+)
+_FTSE_EN_MONTH_NUM = dict(_MSCI_EN_MONTH_NUM)  # 复用英文月份表
+
+
+def _date_en_dmy_to_iso(text: str) -> str:
+    """英式日期 '21 December 2026' → '2026-12-21'。"""
+    m = re.fullmatch(
+        r"(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})", text.strip()
+    )
+    if not m or m.group(2).lower() not in _FTSE_EN_MONTH_NUM:
+        raise OfficialDisclosureSourceError(f"FTSE 英式日期无法解析: {text!r}")
+    return f"{m.group(3)}-{_FTSE_EN_MONTH_NUM[m.group(2).lower()]:02d}-{int(m.group(1)):02d}"
+
+
+def _parse_ftse_notice_text(text: str, notice_id: str, url: str) -> pd.DataFrame:
+    """FTSE 公告 PDF 首页文本 → 一行公告（期次/公布日/生效日；名单附件需登录不抓）。"""
+    if "ftse russell" not in text.lower() and "ftse" not in text.lower():
+        raise OfficialDisclosureSourceError(
+            f"FTSE 公告 PDF 无 FTSE 标识（结构变化?）: {url}"
+        )
+    m_series = re.search(r"^(FTSE [^\n]+)", text)
+    m_period = re.search(
+        r"([A-Z][a-z]+\s+\d{4}\s+(?:Quarterly|Semi-Annual|Annual)[^\n]*)", text
+    )
+    if not m_period:
+        raise OfficialDisclosureSourceError(f"FTSE 公告无期次标题（结构变化?）: {url}")
+    m_eff = re.search(
+        r"effective on\s+(?:[A-Za-z]+,\s*)?(\d{1,2}\s+[A-Za-z]+\s+\d{4})", text
+    )
+    if not m_eff:
+        raise OfficialDisclosureSourceError(f"FTSE 公告无生效日（结构变化?）: {url}")
+    effective_iso = _date_en_dmy_to_iso(m_eff.group(1))
+    # 公布日 = 标题后第一个独立日期（如 '13 November 2026'）
+    m_ann = re.search(r"(\d{1,2}\s+[A-Za-z]+\s+\d{4})", text)
+    if not m_ann:
+        raise OfficialDisclosureSourceError(f"FTSE 公告无公布日期（结构变化?）: {url}")
+    announce_iso = _date_en_dmy_to_iso(m_ann.group(1))
+    period_title = re.sub(r"\s+", " ", m_period.group(1)).strip()
+    series = re.sub(r"\s+", " ", m_series.group(1)).strip() if m_series else "FTSE Russell"
+
+    return _rows_to_df([{
+        "source_name": "ftse",
+        "doc_type": "index_review",
+        "publish_time": f"{announce_iso}T00:00:00Z",
+        "effective_time": f"{effective_iso}T00:00:00Z",
+        "title": f"FTSE {period_title}（{series}）",
+        "summary": (
+            f"公布 {announce_iso} · 生效 {effective_iso} 收盘后；"
+            "逐只名单为登录门户附件（GetAttachment 需注册），本源不含名单"
+        ),
+        "url": url,
+        "securities": "[]",
+        "source_grade": "official",
+        "raw_json": json.dumps({
+            "notice_id": notice_id, "period_title": period_title,
+            "series": series, "announcement_date": announce_iso,
+            "effective_date": effective_iso,
+            "note": "名单 xlsx 需 FTSE 门户登录（P00 结论），诚实不抓",
+        }, ensure_ascii=False),
+    }])
+
+
+def _fetch_ftse(limit: int, identifier: str = "", **kwargs) -> pd.DataFrame:
+    """FTSE 公告直取（identifier=notice id，支持逗号/分号分隔多个）。"""
+    raw_ids = (identifier or "").strip()
+    if not raw_ids:
+        raise ValueError(
+            "FTSE 源需 notice id（如 identifier='2622506'，多个用逗号分隔）；"
+            "id 请从 lseg.com/en/ftse-russell/index-resources/notices 人工查询"
+            "（列表接口对脚本请求不可达，本源不伪造列表）"
+        )
+    ids = [s for s in re.split(r"[,;\s]+", raw_ids) if s]
+    frames: list[pd.DataFrame] = []
+    for notice_id in ids:
+        if not notice_id.isdigit():
+            raise ValueError(f"FTSE notice id 应为纯数字: {notice_id!r}")
+        url = _FTSE_NOTICE_URL.format(notice_id=notice_id)
+        pdf_bytes = _http_get(url)
+        from pypdf import PdfReader
+        import io as _io
+
+        try:
+            reader = PdfReader(_io.BytesIO(pdf_bytes))
+            text = "\n".join((p.extract_text() or "") for p in reader.pages[:2])
+        except Exception as exc:
+            raise OfficialDisclosureSourceError(
+                f"FTSE 公告 PDF 抽取失败（结构变化?）: {url} ({exc})"
+            ) from exc
+        if not text.strip():
+            raise OfficialDisclosureSourceError(
+                f"FTSE 公告 PDF 零文本（扫描件或结构变化?）: {url}"
+            )
+        frames.append(_parse_ftse_notice_text(text, notice_id, url))
+    df = pd.concat(frames, ignore_index=True)
+    return df.head(limit) if limit and len(df) > limit else df
+
+
+# ============================================================
 # 源登记表 — P02–P05 接新源在此加行（不动 _SOURCE_TABLE / 计数断言）
 # ============================================================
 
@@ -671,6 +779,7 @@ OFFICIAL_SOURCES: dict[str, tuple[Callable[..., pd.DataFrame], str]] = {
     "fed": (_fetch_fed, "美联储新闻稿 RSS（议息/监管声明，官方一手）"),
     "sec_edgar": (_fetch_sec_edgar, "SEC EDGAR 最近披露（中概股 10-K/10-Q/8-K/6-K，官方 JSON API）"),
     "msci": (_fetch_msci, "MSCI 季度指数评审（China A 名单 PDF/期次日历/公告摘要，官方一手）"),
+    "ftse": (_fetch_ftse, "FTSE Russell 指数评审公告（按 notice id 直取，官方一手）"),
 }
 
 

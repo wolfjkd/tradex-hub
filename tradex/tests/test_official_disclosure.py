@@ -22,10 +22,12 @@ from tradex.data_sources.official_disclosure_fetchers import (
     DISCLOSURE_COLUMNS,
     OFFICIAL_SOURCES,
     OfficialDisclosureSourceError,
+    _date_en_dmy_to_iso,
     _date_en_to_iso,
     _msci_period_from_code,
     _msci_review_code,
     _parse_fed_rss,
+    _parse_ftse_notice_text,
     _parse_msci_chinaa_text,
     _parse_msci_ir_dates,
     _parse_msci_review_links,
@@ -34,6 +36,16 @@ from tradex.data_sources.official_disclosure_fetchers import (
     list_official_sources,
     utc_iso_to_cn,
 )
+
+# FTSE 公告 PDF 首页文本（结构对齐 getnotice 真实文件，GEIS Dec2026 期）
+_FTSE_NOTICE_TEXT = """FTSE Global Equity Index Series
+December 2026 Quarterly Changes
+13 November 2026
+FTSE Russell announces that the following quarterly review changes will become effective on Monday, 21 December
+2026 (i.e. after the close of business on Friday, 18 December 2026). The changes can be accessed via the attachment
+below.
+ GEIS_Quarterly_Changes_December_2026.xlsx
+"""
 
 # MSCI China A 名单 PDF 第 1 页抽取文本（结构对齐真实文件；明细数按精简 fixture 自洽 2/5）
 _MSCI_CHINAA_TEXT = """Geneva, November 11, 2026
@@ -303,6 +315,40 @@ class TestMsciParse:
 
 
 # ============================================================
+# 源 4：FTSE 解析（fixture 回放，不联网）
+# ============================================================
+
+
+class TestFtseParse:
+    def test_dmy_date(self):
+        assert _date_en_dmy_to_iso("21 December 2026") == "2026-12-21"
+        assert _date_en_dmy_to_iso("13 November 2026") == "2026-11-13"
+
+    def test_notice_parse(self):
+        df = _parse_ftse_notice_text(_FTSE_NOTICE_TEXT, "2622506", "u")
+        assert len(df) == 1
+        row = df.iloc[0]
+        assert row["source_name"] == "ftse"
+        assert row["doc_type"] == "index_review"
+        assert row["publish_time"] == "2026-11-13T00:00:00Z"
+        assert row["effective_time"] == "2026-12-21T00:00:00Z"
+        assert "December 2026 Quarterly Changes" in row["title"]
+        assert "登录门户" in row["summary"]  # 名单附件需登录，本源诚实不抓
+        import json as _json
+
+        raw = _json.loads(row["raw_json"])
+        assert raw["notice_id"] == "2622506"
+
+    def test_notice_no_effective_raises(self):
+        with pytest.raises(OfficialDisclosureSourceError):
+            _parse_ftse_notice_text("FTSE Russell something without dates", "1", "u")
+
+    def test_fetch_requires_identifier(self):
+        with pytest.raises(ValueError, match="notice id"):
+            fetch_official_disclosure(source="ftse", identifier="", limit=5)
+
+
+# ============================================================
 # 分发入口 + 源登记表
 # ============================================================
 
@@ -334,12 +380,21 @@ class TestDispatch:
 # ============================================================
 
 
-def _stub_route(df_or_exc_by_source: dict):
-    """构造 SmartRouter.route 替身：source → DataFrame 或异常。"""
+def _stub_route(df_or_exc_by_source: dict, default: Exception | None = None):
+    """构造 SmartRouter.route 替身。
+
+    source → DataFrame 或异常；未知源：default 为异常时抛（全失败场景），
+    否则返回默认成功样本（混合场景，加新源不破测试）。
+    """
 
     def _route(data_type, *, source, limit, **kwargs):
         assert data_type == "official_disclosure"
-        item = df_or_exc_by_source[source]
+        if source in df_or_exc_by_source:
+            item = df_or_exc_by_source[source]
+        elif isinstance(default, Exception):
+            raise default
+        else:
+            item = _sample_df(source)
         if isinstance(item, Exception):
             raise item
         return item.head(limit), f"official_direct:{source}"
@@ -394,12 +449,12 @@ class TestOfficialDisclosureService:
 
         monkeypatch.setattr(
             ods._router, "route",
-            _stub_route({
-                "fed": OfficialDisclosureSourceError("fed down"),
-                # 第二个源用于验证聚合不因单源失败而空
-            }),
+            _stub_route(
+                {"fed": OfficialDisclosureSourceError("fed down")},
+                default=OfficialDisclosureSourceError("also down"),
+            ),
         )
-        # 只有 fed 一个已接入源：全失败必须抛（诚实失败，不是空态）
+        # 全部已接入源失败必须抛（诚实失败，不是空态）
         with pytest.raises(RuntimeError, match="全部源失败"):
             ods.get_official_disclosures(source="", limit=10)
 
@@ -412,16 +467,14 @@ class TestOfficialDisclosureService:
             _stub_route({
                 "fed": OfficialDisclosureSourceError("fed down"),
                 "stub2": _sample_df("stub2"),
-                "sec_edgar": _sample_df("sec_edgar"),
-                "msci": _sample_df("msci"),
             }),
         )
         out = ods.get_official_disclosures(source="", limit=10)
-        assert out["count"] == 6  # stub2 2 + sec_edgar 2 + msci 2
+        # 除 fed 外全部成功（未知源走默认样本）→ 每成功源 2 条
+        assert out["count"] == 2 * (len(OFFICIAL_SOURCES) - 1)  # fed 失败不计
         failed = {f["source"]: f["error"] for f in out["failed_sources"]}
         assert failed.get("fed") == "fed down"
         assert {f["source"] for f in out["failed_sources"]} == {"fed"}  # 仅 fed 一个失败源
-        assert {r["source_name"] for r in out["disclosures"]} == {"stub2", "sec_edgar", "msci"}
 
     def test_doc_type_filter(self, monkeypatch):
         from tradex.service import official_disclosure_service as ods
