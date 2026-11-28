@@ -919,7 +919,7 @@ class OfficialDisclosureUnavailableError(OfficialDisclosureSourceError):
 
 
 def _fetch_bea(limit: int, series: str = "", **kwargs) -> pd.DataFrame:
-    """BEA 官方宏观数据（默认 NIPA T10101 GDP 季度，近 3 年）。"""
+    """BEA 官方宏观数据（默认 NIPA T10101 GDP 年度，近 3 年；2026-11-28 实测）。"""
     key = os.environ.get("BEA_API_KEY", "").strip()
     if not key:
         raise OfficialDisclosureUnavailableError(
@@ -927,11 +927,15 @@ def _fetch_bea(limit: int, series: str = "", **kwargs) -> pd.DataFrame:
             "邮箱收 Key 分钟级）"
         )
     table = (series or _BEA_DEFAULT_TABLE).strip().upper()
+    from datetime import datetime as _dt
     from urllib.parse import urlencode
 
+    # 坑：NIPA 不支持 LASTn 关键字（那是 Regional 语义）——必须显式年份列表
+    end_year = _dt.now(timezone.utc).year
+    years = ",".join(str(y) for y in range(end_year - 2, end_year + 1))
     params = {
         "UserID": key, "method": "GetData", "datasetname": "NIPA",
-        "TableName": table, "Frequency": "Q", "Year": "LAST3",
+        "TableName": table, "Frequency": "A", "Year": years,
         "ResultFormat": "JSON",
     }
     payload = _sec_get_json(f"{_BEA_API_URL}?{urlencode(params)}")
@@ -946,25 +950,31 @@ def _fetch_bea(limit: int, series: str = "", **kwargs) -> pd.DataFrame:
     by_series: dict[str, list[tuple[str, str]]] = {}
     for it in data:
         code = str(it.get("SeriesCode") or "")
-        period = str(it.get("TimePeriod") or "")  # YYYYQ1
+        period = str(it.get("TimePeriod") or "")  # YYYY 或 YYYYQ1
         value = str(it.get("DataValue") or "").strip()
         if not code or not period:
             continue
         by_series.setdefault(code, []).append((period, value))
-    for code, points in by_series.items():
-        # 期次升序 → 前值 = 上一期
-        def _period_key(p: str) -> tuple[int, int]:
-            m = re.fullmatch(r"(\d{4})Q(\d)", p)
-            return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
 
+    def _period_key(p: str) -> tuple[int, int]:
+        m = re.fullmatch(r"(\d{4})Q(\d)", p)
+        if m:
+            return (int(m.group(1)), int(m.group(2)))
+        m = re.fullmatch(r"(\d{4})", p)
+        return (int(m.group(1)), 0) if m else (0, 0)
+
+    _Q_END = {"03": "31", "06": "30", "09": "30", "12": "31"}
+    for code, points in by_series.items():
+        # 期次升序 → 前值 = 上一期（兼容年度 YYYY 与季度 YYYYQn）
         points.sort(key=lambda x: _period_key(x[0]))
         for i, (period, value) in enumerate(points):
             prev = points[i - 1][1] if i > 0 else ""
             m = re.fullmatch(r"(\d{4})Q(\d)", period)
-            ref_end = (
-                f"{m.group(1)}-{int(m.group(2)) * 3:02d}-"
-                + {"03": "31", "06": "30", "09": "30", "12": "31"}[f"{int(m.group(2)) * 3:02d}"]
-            ) if m else ""
+            if m:
+                mm = f"{int(m.group(2)) * 3:02d}"
+                ref_end = f"{m.group(1)}-{mm}-{_Q_END[mm]}"
+            else:
+                ref_end = f"{period}-12-31" if re.fullmatch(r"\d{4}", period) else ""
             rows.append({
                 "source_name": "bea",
                 "doc_type": "macro_release",
