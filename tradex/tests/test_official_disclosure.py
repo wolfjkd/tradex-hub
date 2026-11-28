@@ -27,6 +27,8 @@ from tradex.data_sources.official_disclosure_fetchers import (
     _hkex_resolve_stock_id,
     _msci_period_from_code,
     _msci_review_code,
+    OfficialDisclosureUnavailableError,
+    _msci_review_code,
     _parse_fed_rss,
     _parse_ftse_notice_text,
     _parse_hkex_search,
@@ -406,6 +408,45 @@ class TestHkexParse:
         empty = '{"result":"[]","hasNextRow":false,"recordCnt":0}'
         with pytest.raises(OfficialDisclosureSourceError, match="零记录"):
             _parse_hkex_search(empty, limit=10)
+
+
+# ============================================================
+# 源 6/7：BEA/BLS Key 缺失静默语义（不联网）
+# ============================================================
+
+
+class TestBeaBlsKeyGate:
+    def test_bea_missing_key_raises_unavailable(self, monkeypatch):
+        from tradex.data_sources import official_disclosure_fetchers as mod
+
+        monkeypatch.delenv("BEA_API_KEY", raising=False)
+        with pytest.raises(OfficialDisclosureUnavailableError, match="BEA_API_KEY"):
+            mod._fetch_bea(limit=10)
+
+    def test_bls_missing_key_raises_unavailable(self, monkeypatch):
+        from tradex.data_sources import official_disclosure_fetchers as mod
+
+        monkeypatch.delenv("BLS_API_KEY", raising=False)
+        with pytest.raises(OfficialDisclosureUnavailableError, match="BLS_API_KEY"):
+            mod._fetch_bls(limit=10)
+
+    def test_unavailable_degrades_in_aggregate(self, monkeypatch):
+        """Key 缺失 = 聚合模式静默降级进 failed_sources（不拖垮其他源，P08 验收）。"""
+        from tradex.service import official_disclosure_service as ods
+
+        monkeypatch.delenv("BEA_API_KEY", raising=False)
+        monkeypatch.delenv("BLS_API_KEY", raising=False)
+        monkeypatch.setattr(
+            ods._router, "route",
+            _stub_route({
+                "bea": OfficialDisclosureUnavailableError("BEA_API_KEY 未配置"),
+                "bls": OfficialDisclosureUnavailableError("BLS_API_KEY 未配置"),
+            }),
+        )
+        out = ods.get_official_disclosures(source="", limit=5)
+        assert out["count"] > 0  # 其余源照常
+        failed_keys = {f["source"] for f in out["failed_sources"]}
+        assert {"bea", "bls"} <= failed_keys  # Key 缺失源静默降级且可见
 
 
 # ============================================================

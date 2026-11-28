@@ -901,6 +901,170 @@ def _fetch_hkex(limit: int, identifier: str = "", symbol: str = "", title: str =
 
 
 # ============================================================
+# 源 6/7：BEA / BLS — macro_release（L0 官方 API，需免费 Key）（OFFSRC-00 P08）
+# ============================================================
+# 授权边界（主文档 §10.2）：Key 由老板本人申请配环境变量（BEA_API_KEY /
+# BLS_API_KEY）。缺失时本源抛 OfficialDisclosureUnavailableError——聚合模式
+# 进 failed_sources 静默降级（不影响其他源），单源调用明确提示申请路径。
+# publish_time = 数据参考期期末（官方 API 不回发布时间戳，诚实标注不伪造）。
+
+_BEA_API_URL = "https://apps.bea.gov/api/data"
+_BLS_API_URL = "https://api.bls.gov/publicAPI/v2/timeseries/data"
+_BEA_DEFAULT_TABLE = "T10101"  # NIPA 国内生产总值（季度）
+_BLS_DEFAULT_SERIES = ("CES0000000001", "CUUR0000SA0")  # 非农总就业 / CPI-U
+
+
+class OfficialDisclosureUnavailableError(OfficialDisclosureSourceError):
+    """凭据缺失（API Key 未配置）——静默不可用语义，区别于断源。"""
+
+
+def _fetch_bea(limit: int, series: str = "", **kwargs) -> pd.DataFrame:
+    """BEA 官方宏观数据（默认 NIPA T10101 GDP 季度，近 3 年）。"""
+    key = os.environ.get("BEA_API_KEY", "").strip()
+    if not key:
+        raise OfficialDisclosureUnavailableError(
+            "BEA_API_KEY 未配置——本源静默不可用（免费注册：apps.bea.gov/API/signup，"
+            "邮箱收 Key 分钟级）"
+        )
+    table = (series or _BEA_DEFAULT_TABLE).strip().upper()
+    from urllib.parse import urlencode
+
+    params = {
+        "UserID": key, "method": "GetData", "datasetname": "NIPA",
+        "TableName": table, "Frequency": "Q", "Year": "LAST3",
+        "ResultFormat": "JSON",
+    }
+    payload = _sec_get_json(f"{_BEA_API_URL}?{urlencode(params)}")
+    error = payload.get("BEAAPI", {}).get("Error", {})
+    if error:
+        raise OfficialDisclosureSourceError(f"BEA API 错误: {error}")
+    data = payload.get("BEAAPI", {}).get("Results", {}).get("Data", [])
+    if not data:
+        raise OfficialDisclosureSourceError(f"BEA 数据为空（表 {table}?）")
+
+    rows: list[dict] = []
+    by_series: dict[str, list[tuple[str, str]]] = {}
+    for it in data:
+        code = str(it.get("SeriesCode") or "")
+        period = str(it.get("TimePeriod") or "")  # YYYYQ1
+        value = str(it.get("DataValue") or "").strip()
+        if not code or not period:
+            continue
+        by_series.setdefault(code, []).append((period, value))
+    for code, points in by_series.items():
+        # 期次升序 → 前值 = 上一期
+        def _period_key(p: str) -> tuple[int, int]:
+            m = re.fullmatch(r"(\d{4})Q(\d)", p)
+            return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+
+        points.sort(key=lambda x: _period_key(x[0]))
+        for i, (period, value) in enumerate(points):
+            prev = points[i - 1][1] if i > 0 else ""
+            m = re.fullmatch(r"(\d{4})Q(\d)", period)
+            ref_end = (
+                f"{m.group(1)}-{int(m.group(2)) * 3:02d}-"
+                + {"03": "31", "06": "30", "09": "30", "12": "31"}[f"{int(m.group(2)) * 3:02d}"]
+            ) if m else ""
+            rows.append({
+                "source_name": "bea",
+                "doc_type": "macro_release",
+                "publish_time": f"{ref_end}T00:00:00Z" if ref_end else "",
+                "effective_time": "",
+                "title": f"BEA NIPA {table} [{period}] {code}: {value}",
+                "summary": f"实际值 {value}（前值 {prev or '—'}）；参考期期末非发布时间戳",
+                "url": "https://apps.bea.gov/api/data",
+                "securities": "[]",
+                "source_grade": "official",
+                "raw_json": json.dumps({
+                    "series_code": code, "table": table, "reference_period": period,
+                    "actual": value, "previous": prev,
+                    "note": "publish_time 为数据参考期期末（API 不回发布时间戳）",
+                }, ensure_ascii=False),
+            })
+    return _rows_to_df(rows).head(limit)
+
+
+def _fetch_bls(limit: int, series: str = "", **kwargs) -> pd.DataFrame:
+    """BLS 官方宏观数据（默认非农 CES0000000001 + CPI-U CUUR0000SA0，近 3 年）。"""
+    key = os.environ.get("BLS_API_KEY", "").strip()
+    if not key:
+        raise OfficialDisclosureUnavailableError(
+            "BLS_API_KEY 未配置——本源静默不可用（无 Key 直连 403，P00 实测；"
+            "免费注册：data.bls.gov/registrationEngine，需浏览器人工）"
+        )
+    ids = [
+        s.strip().upper()
+        for s in re.split(r"[,;\s]+", (series or " ".join(_BLS_DEFAULT_SERIES)))
+        if s.strip()
+    ]
+    from datetime import datetime as _dt
+
+    end_year = _dt.now(timezone.utc).year
+    body = json.dumps({
+        "seriesid": ids[:25],  # v2 单请求上限 25 系列
+        "startyear": str(end_year - 2), "endyear": str(end_year),
+        "registrationkey": key,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        _BLS_API_URL, data=body,
+        headers={"User-Agent": _UA, "Content-Type": "application/json",
+                 "Accept": "application/json"},
+    )
+    try:
+        with _build_opener().open(req, timeout=_TIMEOUT) as resp:
+            status = getattr(resp, "status", resp.getcode())
+            raw = resp.read()
+    except Exception as exc:
+        raise OfficialDisclosureSourceError(f"BLS API 请求失败: {exc}") from exc
+    if status != 200:
+        raise OfficialDisclosureSourceError(f"BLS API HTTP {status}（bytes={len(raw)}）")
+    payload = json.loads(raw)
+    if str(payload.get("status")) not in ("OK", "REQUEST_SUCCEEDED"):
+        raise OfficialDisclosureSourceError(f"BLS API status 异常: {payload.get('message')}")
+
+    rows: list[dict] = []
+    for s in payload.get("Results", {}).get("series", []):
+        sid = str(s.get("seriesID") or "")
+        points = [
+            (str(d.get("period")), str(d.get("value")), str(d.get("latest") or ""))
+            for d in s.get("data", [])
+        ]
+
+        def _bls_period_key(p: str) -> tuple[int, str]:
+            # M01-M12 月度 / Q01-Q05 季度
+            return p[:4] + p[4:]
+
+        points.sort(key=lambda x: _bls_period_key(x[0]))
+        for i, (period, value, _latest) in enumerate(points):
+            prev = points[i - 1][1] if i > 0 else ""
+            m = re.fullmatch(r"(\d{4})(M(\d{2})|Q(\d))", period)
+            if m:
+                ref_end = (
+                    f"{m.group(1)}-{m.group(3)}-28" if m.group(3)
+                    else f"{m.group(1)}-{int(m.group(4)) * 3:02d}-30"
+                )
+            else:
+                ref_end = ""
+            rows.append({
+                "source_name": "bls",
+                "doc_type": "macro_release",
+                "publish_time": f"{ref_end}T00:00:00Z" if ref_end else "",
+                "effective_time": "",
+                "title": f"BLS {sid} [{period}]: {value}",
+                "summary": f"实际值 {value}（前值 {prev or '—'}）；参考期非发布时间戳",
+                "url": "https://api.bls.gov/publicAPI/v2/timeseries/data",
+                "securities": "[]",
+                "source_grade": "official",
+                "raw_json": json.dumps({
+                    "series_id": sid, "reference_period": period,
+                    "actual": value, "previous": prev,
+                    "note": "publish_time 为数据参考期（API 不回发布时间戳）",
+                }, ensure_ascii=False),
+            })
+    return _rows_to_df(rows).head(limit)
+
+
+# ============================================================
 # 源登记表 — P02–P05 接新源在此加行（不动 _SOURCE_TABLE / 计数断言）
 # ============================================================
 
@@ -911,6 +1075,8 @@ OFFICIAL_SOURCES: dict[str, tuple[Callable[..., pd.DataFrame], str]] = {
     "msci": (_fetch_msci, "MSCI 季度指数评审（China A 名单 PDF/期次日历/公告摘要，官方一手）"),
     "ftse": (_fetch_ftse, "FTSE Russell 指数评审公告（按 notice id 直取，官方一手）"),
     "hkex": (_fetch_hkex, "HKEX 披露易港股公告（按代码/标题关键词查询，官方一手）"),
+    "bea": (_fetch_bea, "BEA 美国经济分析局宏观（GDP 等 NIPA 表，需 BEA_API_KEY）"),
+    "bls": (_fetch_bls, "BLS 美国劳工统计局宏观（非农/CPI，需 BLS_API_KEY）"),
 }
 
 
