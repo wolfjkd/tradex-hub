@@ -18,7 +18,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 - **网络铁律**：默认显式直连（空 ProxyHandler，不读 HTTP(S)_PROXY 环境变量）；专用变量 `OFFSRC_PROXY` 按源显式覆盖（MSCI 等 L3 源将来备用）
 - 新增测试 23 例（fixture 回放真实 RSS 样本，不联网）：解析/异常/分发/service 降级/REST/MCP 出口信封
 
-### Changed（计数断言同步，硬约定 #2）
+### Added（OFFSRC-00 P02–P05/P08：五源逐个接入，2026-11-28 批次）
+- **P02 SEC EDGAR**（c69376f，L0 JSON）：ticker/CIK → submissions JSON → 统一模型；identifier 留空聚合默认中概 10 只（0.12s 间隔防超 10 req/s）；UA 声明身份；官方 ticker 映射进程内缓存
+- **P03 MSCI**（17399ca，L2 直连静态文件）：China A 名单 PDF（pypdf 抽取 + 明细计数与首页 SUMMARY 强校验，不符即抛）/ 期次日历 ir_dates.csv（gzip，未来 8 期）/ 摘要哨兵（Announcement 枚举 + DocGet，pub_key 禁二次编码）；ST-China 子集留 TODO（明细无 CHINA 行锚点，R6 纪律）；新依赖 pypdf 三处同步
+- **P04 FTSE Russell**（4739594）：公告 PDF 按 notice id 直取（列表枚举不可达——GetNotices AJAX 回 SPA 壳，id 人工从 lseg 页查询，不伪造列表）；公布/生效日英式日期解析
+- **P05 HKEX 披露易**（7ceffe2）：两步查询（prefix.do → stockId → titleSearchServlet）；两层 json.loads 解码（unicode_escape 拆 UTF-8 中文，禁用）；DD/MM/YYYY 香港时区 → UTC；恒生指数 SPA 无公开端点留 TODO
+- **P08 BEA/BLS**（8660041，L0 需 Key）：`OfficialDisclosureUnavailableError` 区别于断源——BEA_API_KEY/BLS_API_KEY 缺失聚合静默降级；GDP/非农/CPI 实际值+前值+参考期三件套（publish_time=参考期期末，不伪造发布时刻）；Key 由老板本人申请（主文档 §10.2 授权边界）
+- **extra_params 通用透传**（7ceffe2）：service/MCP/REST 加 JSON 对象参数（hkex 的 title/日期区间走此通道），暴露层参数面收敛
+- TradeX 侧 P06/P07（独立仓）：`/api/calendar/official_disclosures` + `/api/calendar/msci_review` 两端点 + 境外官方公告统一卡 + MSCI 专用卡（交易日口径倒计时 ≤5 日高亮 / 今日收盘被动调仓 / 已生效三态 + 近 4 期历史 Tab）
+
+### Changed（OFFSRC-00 后续批次计数与测试演进）
+- 测试 1486 → **1511**（净增 25，P10 全量门实跑口径：1511P / 0F / 5 skipped / 36 deselected，86s）
+- 测试基座新增 `_stub_route(default=)` 语义（未知源默认成功/全失败可控）
+
+
 - 类型 115→116 / 注册 160→161（test_v3315）/ REST 83→85（test_rest_count）/ MCP 工具 192→194（test_server + test_dashboard_mcp）/ GROUPS 26→27 组（visibility_catalog 新组「境外官方公告」）/ lean enabled 116→118
 - README 六处计数 + badge 全量对齐（`check_readme_counts.py` [OK]）
 

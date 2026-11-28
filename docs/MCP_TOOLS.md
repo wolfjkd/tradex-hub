@@ -127,7 +127,7 @@
 
 | 工具 | 说明 |
 |------|------|
-| `get_official_disclosures` | 获取境外官方机构一手公告（OFFSRC-00 专项）。 |
+| `get_official_disclosures` | 获取境外官方机构一手公告（OFFSRC-00 专项；fed/sec_edgar/msci/ftse/hkex 五源，bea/bls 需 Key）。 |
 | `get_official_sources` | 列出已接入的境外官方公告源清单（OFFSRC-00 专项）。 |
 
 ### 信号数据 · 基础（6 个）
