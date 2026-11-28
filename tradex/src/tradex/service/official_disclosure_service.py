@@ -11,6 +11,7 @@ SEC/FTSE/MSCI/HKEX/HSI 按工单序接入）。本层职责：
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -44,6 +45,7 @@ def get_official_disclosures(
     source: str = "", doc_type: str = "", limit: int = 30,
     identifier: str = "", form_type: str = "",
     data: str = "", review_period: str = "",
+    extra_params: str = "",
 ) -> dict[str, Any]:
     """境外官方公告查询。
 
@@ -52,11 +54,12 @@ def get_official_disclosures(
         doc_type: 文档类型过滤（index_review/filing/press_release/macro_release），
             空返回全部
         limit: 每源最多返回条数
-        identifier: 源特定实体标识（仅 sec_edgar 消费：ticker 或 CIK；其余源忽略）
-        form_type: 源特定文书类型过滤（仅 sec_edgar 消费：如 10-K/6-K；其余源忽略）
-        data: 源特定数据形态（仅 msci 消费：list=名单明细/dates=期次日历/
-            summary=公告摘要；其余源忽略）
-        review_period: 源特定期次（仅 msci 消费：'2026-11' 或 'Nov26'，默认最新期）
+        identifier: 源特定实体标识（sec_edgar=ticker/CIK；hkex=港股代码如 700）
+        form_type: 源特定文书类型过滤（仅 sec_edgar 消费：如 10-K/6-K）
+        data: 源特定数据形态（仅 msci 消费：list/dates/summary）
+        review_period: 源特定期次（仅 msci 消费：'2026-11' 或 'Nov26'）
+        extra_params: JSON 对象字符串，低频源特定参数透传（如 hkex 的
+            {"title": "中期業績", "from_date": "20260601", "to_date": "20261231"}）
 
     Returns:
         dict(source / disclosures / failed_sources / count)
@@ -66,6 +69,15 @@ def get_official_disclosures(
         raise ValueError(f"未知境外官方源: {source!r}; 可用: {sorted(OFFICIAL_SOURCES)}")
 
     def _factory() -> dict[str, Any]:
+        extra: dict[str, Any] = {}
+        if extra_params.strip():
+            try:
+                parsed = json.loads(extra_params)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"extra_params 非法 JSON: {exc}") from exc
+            if not isinstance(parsed, dict):
+                raise ValueError("extra_params 应为 JSON 对象（键值对）")
+            extra = parsed
         wanted = [key] if key else sorted(OFFICIAL_SOURCES)
         disclosures: list[dict] = []
         failed_sources: list[dict] = []
@@ -75,6 +87,7 @@ def get_official_disclosures(
                     "official_disclosure", source=src, limit=limit,
                     identifier=identifier, form_type=form_type,
                     data=data, review_period=review_period,
+                    **extra,
                 )
                 records = _df_to_disclosure_records(df, max_rows=limit)
                 disclosures.extend(records)
@@ -101,7 +114,8 @@ def get_official_disclosures(
 
     return cache.get_or_set(
         f"official_disc:{key}:{doc_type}:{limit}:{identifier.strip().upper()}:"
-        f"{form_type.strip().upper()}:{data.strip().lower()}:{review_period.strip()}",
+        f"{form_type.strip().upper()}:{data.strip().lower()}:{review_period.strip()}:"
+        f"{extra_params.strip()}",
         _factory, TTL_DAILY,
     )
 

@@ -24,10 +24,12 @@ from tradex.data_sources.official_disclosure_fetchers import (
     OfficialDisclosureSourceError,
     _date_en_dmy_to_iso,
     _date_en_to_iso,
+    _hkex_resolve_stock_id,
     _msci_period_from_code,
     _msci_review_code,
     _parse_fed_rss,
     _parse_ftse_notice_text,
+    _parse_hkex_search,
     _parse_msci_chinaa_text,
     _parse_msci_ir_dates,
     _parse_msci_review_links,
@@ -346,6 +348,64 @@ class TestFtseParse:
     def test_fetch_requires_identifier(self):
         with pytest.raises(ValueError, match="notice id"):
             fetch_official_disclosure(source="ftse", identifier="", limit=5)
+
+
+# ============================================================
+# 源 5：HKEX 解析（fixture 回放，不联网）
+# ============================================================
+
+# titleSearchServlet 应答（结构对齐真实出参：result 为转义 JSON 字符串）
+_HKEX_SEARCH_PAYLOAD = (
+    '{"result":"[{\\"NEWS_ID\\":\\"2026111800449\\",\\"TITLE\\":\\"截至二零二六年九月三十日止季度業績公告\\",'
+    '\\"SHORT_TEXT\\":\\"業績公告<br/>季內財務報表\\",\\"LONG_TEXT\\":\\"\\",'
+    '\\"STOCK_CODE\\":\\"00700<br/>80700\\",\\"STOCK_NAME\\":\\"騰訊控股\\",'
+    '\\"FILE_TYPE\\":\\"PDF\\",\\"DATE_TIME\\":\\"18/11/2026 19:15\\",'
+    '\\"FILE_INFO\\":\\"588611 KB\\",\\"FILE_LINK\\":\\"/listedco/listconews/sehk/2026/1118/2026111800449.pdf\\"}]",'
+    '"hasNextRow":false,"sortList":"[[0,0]]","rowRange":100,"lang":"C","loadedRecord":1,"recordCnt":1}'
+)
+
+
+class TestHkexParse:
+    def test_parse_fields_and_tz(self):
+        df = _parse_hkex_search(_HKEX_SEARCH_PAYLOAD, limit=10)
+        assert len(df) == 1
+        row = df.iloc[0]
+        assert row["source_name"] == "hkex"
+        assert row["doc_type"] == "filing"
+        # 18/11/2026 19:15 香港(UTC+8) → 11:15 UTC
+        assert row["publish_time"] == "2026-11-18T11:15:00Z"
+        assert json.loads(row["securities"]) == ["00700", "80700"]  # <br/> 清洗
+        assert "業績公告" in row["summary"]  # 分类噪音清洗
+        assert row["url"].endswith("/listedco/listconews/sehk/2026/1118/2026111800449.pdf")
+
+    def test_bad_result_raises(self):
+        with pytest.raises(OfficialDisclosureSourceError, match="result"):
+            _parse_hkex_search('{"nope":1}', limit=10)
+
+    def test_prefix_stockid_resolution(self, monkeypatch):
+        """prefix.do JSONP → stockId 映射（mock HTTP，700→7609 来自 P00 实测）。"""
+        import tradex.data_sources.official_disclosure_fetchers as mod
+
+        jsonp = (
+            'callback({"more":"1","stockInfo":[{"stockId":7609,'
+            '"code":"00700","name":"騰訊控股"}]})'
+        )
+        monkeypatch.setattr(mod, "_http_get", lambda url, **kw: jsonp.encode("utf-8"))
+        stock_id, code = mod._hkex_resolve_stock_id("700")
+        assert stock_id == 7609
+        assert code == "00700"
+
+    def test_prefix_no_stockid_raises(self, monkeypatch):
+        import tradex.data_sources.official_disclosure_fetchers as mod
+
+        monkeypatch.setattr(mod, "_http_get", lambda url, **kw: b"callback({\"stockInfo\":[]})")
+        with pytest.raises(OfficialDisclosureSourceError, match="stockId"):
+            mod._hkex_resolve_stock_id("999999")
+
+    def test_empty_records_raises(self):
+        empty = '{"result":"[]","hasNextRow":false,"recordCnt":0}'
+        with pytest.raises(OfficialDisclosureSourceError, match="零记录"):
+            _parse_hkex_search(empty, limit=10)
 
 
 # ============================================================

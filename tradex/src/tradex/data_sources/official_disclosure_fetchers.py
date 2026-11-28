@@ -771,6 +771,136 @@ def _fetch_ftse(limit: int, identifier: str = "", **kwargs) -> pd.DataFrame:
 
 
 # ============================================================
+# 源 5：HKEXnews 披露易 — filing（两步查询：prefix.do → titleSearchServlet）
+# ============================================================
+# P00 结论（2026-11-27）契约：symbol → prefix.do 映射内部 stockId（≠代码！
+# 直接传 00700 → recordCnt=0）→ titleSearchServlet（GET）JSON 出参（result
+# 为转义 JSON 字符串，DATE_TIME=DD/MM/YYYY 香港时区，FILE_LINK 相对路径）。
+# 响应 2-4.5s（_TIMEOUT=30 覆盖）；searchType=1 按代码 / 0 按标题关键词。
+
+_HKEX_PREFIX_URL = (
+    "https://www1.hkexnews.hk/search/prefix.do"
+    "?callback=callback&lang=ZH&type=A&name={name}&market=SEHK"
+)
+_HKEX_SEARCH_URL = "https://www1.hkexnews.hk/search/titleSearchServlet.do"
+_HKEX_BASE = "https://www1.hkexnews.hk"
+_HKEX_MARKET = "SEHK"  # SEHK 主板 | GEM 创业板（走 /gem/ 路径）
+
+
+def _hkex_resolve_stock_id(symbol: str) -> tuple[int, str]:
+    """港股代码 → (内部 stockId, 公司名)。prefix.do JSONP 解析。"""
+    name = symbol.strip().lstrip("0") or "0"
+    url = _HKEX_PREFIX_URL.format(name=name)
+    text = _http_get(url).decode("utf-8", errors="replace")
+    m = re.search(
+        r'"stockInfo"\s*:\s*\[\s*\{\s*"stockId"\s*:\s*(\d+)\s*,\s*"code"\s*:\s*"(\d+)"',
+        text,
+    )
+    if not m:
+        raise OfficialDisclosureSourceError(
+            f"HKEX prefix.do 未解析到 stockId（代码不存在或结构变化）: {symbol!r}"
+        )
+    return int(m.group(1)), m.group(2)
+
+
+def _hkex_strip_noise(value: str) -> str:
+    """LONG_TEXT/SHORT_TEXT/STOCK_CODE 内 <br/> 等噪音清洗。"""
+    return re.sub(r"\s*<br\s*/?\s*>", " ", value or "").strip()
+
+
+def _parse_hkex_search(payload_text: str, limit: int) -> pd.DataFrame:
+    """titleSearchServlet 应答文本 → 统一模型行（doc_type=filing）。"""
+    text = payload_text.strip()
+    if not text:
+        raise OfficialDisclosureSourceError("HKEX 查询应答为空（断源或结构变化）")
+    # result 字段 = 转义的 JSON 数组字符串 → 两层 json.loads 解码
+    # （unicode_escape 按 latin-1 语义拆多字节 UTF-8，中文必坏——禁用）
+    try:
+        outer = json.loads(text)
+        result_str = outer.get("result")
+    except json.JSONDecodeError as exc:
+        raise OfficialDisclosureSourceError(
+            f"HKEX 应答非 JSON（结构变化?）: {exc}"
+        ) from exc
+    if not isinstance(result_str, str):
+        raise OfficialDisclosureSourceError("HKEX 应答无 result 字段（结构变化?）")
+    try:
+        items = json.loads(result_str)
+    except json.JSONDecodeError as exc:
+        raise OfficialDisclosureSourceError(
+            f"HKEX result 二次解码失败（结构变化?）: {exc}"
+        ) from exc
+    if not items:
+        raise OfficialDisclosureSourceError("HKEX 查询零记录（代码无公告或参数过窄）")
+
+    rows: list[dict] = []
+    for it in items:
+        date_time = str(it.get("DATE_TIME") or "").strip()
+        # DD/MM/YYYY HH:MM（香港时区 UTC+8）→ UTC ISO
+        m_dt = re.fullmatch(r"(\d{2})/(\d{2})/(\d{4})\s+(\d{2}):(\d{2})", date_time)
+        if not m_dt:
+            continue  # 残缺时间戳跳过，不伪造
+        hk = datetime(
+            int(m_dt.group(3)), int(m_dt.group(2)), int(m_dt.group(1)),
+            int(m_dt.group(4)), int(m_dt.group(5)),
+            tzinfo=timezone(timedelta(hours=8)),
+        )
+        publish_utc = hk.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        file_link = str(it.get("FILE_LINK") or "").strip()
+        title = _hkex_strip_noise(str(it.get("TITLE") or ""))
+        stock_codes = [
+            c for c in _hkex_strip_noise(str(it.get("STOCK_CODE") or "")).split()
+            if c
+        ]
+        category = _hkex_strip_noise(
+            str(it.get("SHORT_TEXT") or it.get("LONG_TEXT") or "")
+        )
+        rows.append({
+            "source_name": "hkex",
+            "doc_type": "filing",
+            "publish_time": publish_utc,
+            "effective_time": "",
+            "title": title,
+            "summary": category or "香港上市公司公告（披露易）",
+            "url": (_HKEX_BASE + file_link) if file_link else "",
+            "securities": json.dumps(stock_codes, ensure_ascii=False),
+            "source_grade": "official",
+            "raw_json": json.dumps(it, ensure_ascii=False),
+        })
+    return _rows_to_df(rows).head(limit)
+
+
+def _fetch_hkex(limit: int, identifier: str = "", symbol: str = "", title: str = "", **kwargs) -> pd.DataFrame:
+    """HKEX 披露易查询（identifier/symbol=港股代码；title=标题关键词走 extra_params，繁体命中率高）。"""
+    sym = (symbol or identifier or "").strip()
+    kw = (title or "").strip()
+    if not sym and not kw:
+        raise ValueError(
+            "HKEX 源需 symbol（港股代码，如 700）或 title（标题关键词，繁体命中率高），"
+            "两者至少其一；全市场流不支持（披露易为查询型接口）"
+        )
+    from_date = str(kwargs.get("from_date", "") or "").replace("-", "")
+    to_date = str(kwargs.get("to_date", "") or "").replace("-", "")
+    params: dict[str, str] = {
+        "sortDir": "0", "optionsDateRange": "0", "category": "0",
+        "market": _HKEX_MARKET, "documentType": "-1",
+        "title": kw, "searchType": "1" if sym else "0",
+        "t1code": "-2", "t2Gcode": "-2", "t2code": "-2",
+        "rowRange": "100", "lang": "zh",
+        "fromDate": from_date, "toDate": to_date,
+    }
+    if sym:
+        stock_id, _code = _hkex_resolve_stock_id(sym)
+        params["stockId"] = str(stock_id)
+    else:
+        params["stockId"] = "-1"
+    from urllib.parse import urlencode
+
+    url = f"{_HKEX_SEARCH_URL}?{urlencode(params)}"
+    return _parse_hkex_search(_http_get(url).decode("utf-8", errors="replace"), limit)
+
+
+# ============================================================
 # 源登记表 — P02–P05 接新源在此加行（不动 _SOURCE_TABLE / 计数断言）
 # ============================================================
 
@@ -780,6 +910,7 @@ OFFICIAL_SOURCES: dict[str, tuple[Callable[..., pd.DataFrame], str]] = {
     "sec_edgar": (_fetch_sec_edgar, "SEC EDGAR 最近披露（中概股 10-K/10-Q/8-K/6-K，官方 JSON API）"),
     "msci": (_fetch_msci, "MSCI 季度指数评审（China A 名单 PDF/期次日历/公告摘要，官方一手）"),
     "ftse": (_fetch_ftse, "FTSE Russell 指数评审公告（按 notice id 直取，官方一手）"),
+    "hkex": (_fetch_hkex, "HKEX 披露易港股公告（按代码/标题关键词查询，官方一手）"),
 }
 
 
