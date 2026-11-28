@@ -23,10 +23,33 @@ from tradex.data_sources.official_disclosure_fetchers import (
     OFFICIAL_SOURCES,
     OfficialDisclosureSourceError,
     _parse_fed_rss,
+    _parse_sec_submissions,
     fetch_official_disclosure,
     list_official_sources,
     utc_iso_to_cn,
 )
+
+# SEC submissions JSON 最小样本（结构对齐 data.sec.gov 真实应答，fixture 回放不联网）
+_SEC_SUBMISSIONS_SAMPLE = {
+    "cik": 1577552,
+    "name": "Alibaba Group Holding Ltd",
+    "tickers": ["BABA"],
+    "filings": {
+        "recent": {
+            "form": ["6-K", "20-F", "6-K", "4"],
+            "filingDate": ["2026-11-23", "2026-08-20", "2026-11-06", "2026-11-01"],
+            "accessionNumber": [
+                "0001104659-26-111111", "0001104659-26-222222",
+                "0001104659-26-333333", "0001104659-26-444444",
+            ],
+            "primaryDocument": [
+                "form6k.htm", "form20f.htm", "form6k_b.htm", "",
+            ],
+            "primaryDocDescription": ["FORM 6-K", "ANNUAL REPORT", "FORM 6-K", ""],
+            "reportDate": ["2026-09-30", "2026-03-31", "", ""],
+        }
+    },
+}
 
 # 真实样本（2026-11-27 直连实测 fed press_all.xml 截取，fixture 回放不联网）
 _FED_RSS_SAMPLE = b"""<?xml version="1.0" encoding="utf-8" ?>
@@ -127,6 +150,46 @@ class TestFedRssParse:
         )
         with pytest.raises(OfficialDisclosureSourceError, match="pubDate"):
             _parse_fed_rss(broken, limit=10)
+
+
+# ============================================================
+# 源 2：SEC EDGAR 解析（fixture 回放，不联网）
+# ============================================================
+
+
+class TestSecEdgarParse:
+    def test_parse_sample_fields(self):
+        df = _parse_sec_submissions(_SEC_SUBMISSIONS_SAMPLE, limit=10)
+        assert list(df.columns) == list(DISCLOSURE_COLUMNS)
+        assert len(df) == 4
+        row = df.iloc[0]  # filingDate 降序无关——解析保持上游顺序，取首行即最新
+        assert row["source_name"] == "sec_edgar"
+        assert row["doc_type"] == "filing"
+        assert row["publish_time"] == "2026-11-23T00:00:00Z"
+        assert row["effective_time"] == "2026-09-30T00:00:00Z"
+        assert row["source_grade"] == "official"
+        assert json.loads(row["securities"]) == ["BABA"]
+        assert "6-K" in row["title"]
+        assert row["url"].endswith("form6k.htm")
+        raw = json.loads(row["raw_json"])
+        assert raw["entity"] == "Alibaba Group Holding Ltd"
+
+    def test_form_type_filter(self):
+        df = _parse_sec_submissions(_SEC_SUBMISSIONS_SAMPLE, limit=10, form_type="6-K")
+        assert len(df) == 2
+        assert (df["raw_json"].map(lambda s: json.loads(s)["form"] == "6-K")).all()
+
+    def test_limit_truncates(self):
+        df = _parse_sec_submissions(_SEC_SUBMISSIONS_SAMPLE, limit=2)
+        assert len(df) == 2
+
+    def test_url_construction(self):
+        df = _parse_sec_submissions(_SEC_SUBMISSIONS_SAMPLE, limit=10)
+        assert "/Archives/edgar/data/1577552/000110465926111111/form6k.htm" in df.iloc[0]["url"]
+
+    def test_empty_recent_raises(self):
+        with pytest.raises(OfficialDisclosureSourceError, match="recent"):
+            _parse_sec_submissions({"cik": 1, "filings": {"recent": {}}}, limit=10)
 
 
 # ============================================================
@@ -239,12 +302,15 @@ class TestOfficialDisclosureService:
             _stub_route({
                 "fed": OfficialDisclosureSourceError("fed down"),
                 "stub2": _sample_df("stub2"),
+                "sec_edgar": _sample_df("sec_edgar"),
             }),
         )
         out = ods.get_official_disclosures(source="", limit=10)
-        assert out["count"] == 2
-        assert out["failed_sources"] == [{"source": "fed", "error": "fed down"}]
-        assert all(r["source_name"] == "stub2" for r in out["disclosures"])
+        assert out["count"] == 4  # stub2 2 条 + sec_edgar 2 条
+        failed = {f["source"]: f["error"] for f in out["failed_sources"]}
+        assert failed.get("fed") == "fed down"
+        assert {f["source"] for f in out["failed_sources"]} == {"fed"}  # 仅 fed 一个失败源
+        assert {r["source_name"] for r in out["disclosures"]} == {"stub2", "sec_edgar"}
 
     def test_doc_type_filter(self, monkeypatch):
         from tradex.service import official_disclosure_service as ods

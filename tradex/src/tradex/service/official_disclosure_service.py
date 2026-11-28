@@ -42,6 +42,7 @@ def _df_to_disclosure_records(df: pd.DataFrame, max_rows: int) -> list[dict]:
 
 def get_official_disclosures(
     source: str = "", doc_type: str = "", limit: int = 30,
+    identifier: str = "", form_type: str = "",
 ) -> dict[str, Any]:
     """境外官方公告查询。
 
@@ -50,6 +51,8 @@ def get_official_disclosures(
         doc_type: 文档类型过滤（index_review/filing/press_release/macro_release），
             空返回全部
         limit: 每源最多返回条数
+        identifier: 源特定实体标识（仅 sec_edgar 消费：ticker 或 CIK；其余源忽略）
+        form_type: 源特定文书类型过滤（仅 sec_edgar 消费：如 10-K/6-K；其余源忽略）
 
     Returns:
         dict(source / disclosures / failed_sources / count)
@@ -66,6 +69,7 @@ def get_official_disclosures(
             try:
                 df, route_src = _router.route(
                     "official_disclosure", source=src, limit=limit,
+                    identifier=identifier, form_type=form_type,
                 )
                 records = _df_to_disclosure_records(df, max_rows=limit)
                 disclosures.extend(records)
@@ -91,7 +95,8 @@ def get_official_disclosures(
         }
 
     return cache.get_or_set(
-        f"official_disc:{key}:{doc_type}:{limit}", _factory, TTL_DAILY
+        f"official_disc:{key}:{doc_type}:{limit}:{identifier.strip().upper()}:{form_type.strip().upper()}",
+        _factory, TTL_DAILY,
     )
 
 

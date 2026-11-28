@@ -22,17 +22,20 @@ router = APIRouter(prefix="/official", tags=["official"])
 
 @router.get("/disclosures", response_model=Envelope[dict])
 def get_disclosures(
-    source: str = Query("", description="源 key（fed/...），留空 = 聚合全部已接入源"),
+    source: str = Query("", description="源 key（fed/sec_edgar/...），留空 = 聚合全部已接入源"),
     doc_type: str = Query(
         "",
         description="文档类型过滤：index_review/filing/press_release/macro_release，留空全部",
     ),
     limit: int = Query(30, ge=1, le=100),
+    identifier: str = Query("", description="仅 sec_edgar：ticker 或 CIK，留空聚合默认中概清单"),
+    form_type: str = Query("", description="仅 sec_edgar：文书类型过滤（10-K/6-K 等），留空全部"),
 ) -> Envelope[dict]:
     """境外官方机构一手公告（UTC 存储 + 北京时间双标）。"""
     return serve_envelope(
         lambda: official_disclosure_service.get_official_disclosures(
-            source=source, doc_type=doc_type, limit=limit
+            source=source, doc_type=doc_type, limit=limit,
+            identifier=identifier, form_type=form_type,
         )
     )
 

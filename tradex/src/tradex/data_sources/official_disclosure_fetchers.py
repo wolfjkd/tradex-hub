@@ -194,12 +194,166 @@ def _fetch_fed(limit: int, **kwargs) -> pd.DataFrame:
 
 
 # ============================================================
+# 源 2：SEC EDGAR — filing（官方 JSON API，L0）（OFFSRC-00 P02，2026-11-28）
+# ============================================================
+
+# SEC 公平访问政策要求声明请求方身份（UA = 软件名 + 联系方式），并限 10 req/s；
+# 本仓单次调用天然低于限流，聚合默认清单时每只间隔 _SEC_RATE_GAP 秒。
+_SEC_UA = "tradex-hub data fetcher wolfjkd/tradex-hub"
+_SEC_SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik:0>10}.json"
+_SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
+_SEC_ARCHIVE_URL = "https://www.sec.gov/Archives/edgar/data/{cik}/{acc_nodash}/{doc}"
+_SEC_RATE_GAP = 0.12  # 聚合多 CIK 时请求间隔（≈8 req/s < 10 req/s 上限）
+# 中概默认观察清单（ADR/二次上市代表；identifier 留空时的聚合口径）
+_SEC_DEFAULT_ADRS = (
+    "BABA", "PDD", "JD", "LI", "NIO", "BIDU", "NTES", "TCOM", "BEKE", "ZTO",
+)
+
+# ticker→CIK 映射进程内缓存（官方文件 ~1MB，进程生命周期一次）
+_ticker_map_cache: dict[str, tuple[int, str]] | None = None
+
+
+def _sec_opener() -> urllib.request.OpenerDirector:
+    """SEC 专用 opener：显式直连 + 声明 UA（公平访问政策）。"""
+    return urllib.request.build_opener(
+        urllib.request.ProxyHandler({}), urllib.request.HTTPSHandler()
+    )
+
+
+def _sec_get_json(url: str) -> dict:
+    req = urllib.request.Request(
+        url, headers={"User-Agent": _SEC_UA, "Accept": "application/json"}
+    )
+    try:
+        with _sec_opener().open(req, timeout=_TIMEOUT) as resp:
+            status = getattr(resp, "status", resp.getcode())
+            body = resp.read()
+    except Exception as exc:
+        raise OfficialDisclosureSourceError(f"SEC EDGAR 请求失败: {url} ({exc})") from exc
+    if status != 200:
+        raise OfficialDisclosureSourceError(
+            f"SEC EDGAR HTTP {status}: {url}（bytes={len(body)}）"
+        )
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise OfficialDisclosureSourceError(
+            f"SEC EDGAR 响应非 JSON（结构变化?）: {url}"
+        ) from exc
+
+
+def _sec_ticker_map() -> dict[str, tuple[int, str]]:
+    """ticker → (CIK, 公司名称)，官方映射文件进程内缓存。"""
+    global _ticker_map_cache
+    if _ticker_map_cache is None:
+        data = _sec_get_json(_SEC_TICKERS_URL)
+        mapping: dict[str, tuple[int, str]] = {}
+        for entry in data.values():
+            ticker = str(entry.get("ticker") or "").upper()
+            if ticker:
+                mapping[ticker] = (int(entry["cik_str"]), str(entry.get("title") or ""))
+        if not mapping:
+            raise OfficialDisclosureSourceError("SEC ticker 映射解析后为空（结构变化?）")
+        _ticker_map_cache = mapping
+    return _ticker_map_cache
+
+
+def _sec_resolve_cik(identifier: str) -> tuple[int, str]:
+    """identifier → (CIK, 名称)。纯数字按 CIK 直用；否则按 ticker 查官方映射。"""
+    ident = identifier.strip()
+    if ident.isdigit():
+        return int(ident), ""
+    cik, name = _sec_ticker_map().get(ident.upper(), (0, ""))
+    if not cik:
+        raise ValueError(
+            f"ticker {ident!r} 未在 SEC 官方映射中找到（检查代码或直接给 CIK）"
+        )
+    return cik, name
+
+
+def _parse_sec_submissions(payload: dict, limit: int, form_type: str = "") -> pd.DataFrame:
+    """解析 submissions JSON 的 filings.recent → 统一模型（doc_type=filing）。"""
+    recent = (payload.get("filings") or {}).get("recent") or {}
+    forms = recent.get("form") or []
+    if not forms:
+        raise OfficialDisclosureSourceError(
+            "SEC submissions filings.recent 为空（断源或结构变化）"
+        )
+    cik = int(payload.get("cik") or 0)
+    entity = str(payload.get("name") or "")
+    ticker = str((payload.get("tickers") or [""])[0] or "").upper()
+    want = (form_type or "").strip().upper() or None
+
+    rows: list[dict] = []
+    for i, form in enumerate(forms):
+        if want is not None and str(form).upper() != want:
+            continue
+        filing_date = str(recent.get("filingDate", [""] * len(forms))[i] or "")
+        if not filing_date:
+            continue  # 无 filingDate 的残缺条目跳过（不伪造时间）
+        accession = str(recent.get("accessionNumber", [""] * len(forms))[i] or "")
+        primary_doc = str(recent.get("primaryDocument", [""] * len(forms))[i] or "")
+        report_date = str(recent.get("reportDate", [""] * len(forms))[i] or "")
+        desc = str(recent.get("primaryDocDescription", [""] * len(forms))[i] or "").strip()
+        url = (
+            _SEC_ARCHIVE_URL.format(cik=cik, acc_nodash=accession.replace("-", ""), doc=primary_doc)
+            if accession and primary_doc
+            else ""
+        )
+        raw_item = {
+            "form": str(form), "filingDate": filing_date, "reportDate": report_date,
+            "accessionNumber": accession, "primaryDocument": primary_doc,
+            "primaryDocDescription": desc, "entity": entity,
+        }
+        rows.append({
+            "source_name": "sec_edgar",
+            "doc_type": "filing",
+            "publish_time": f"{filing_date}T00:00:00Z",
+            "effective_time": f"{report_date}T00:00:00Z" if report_date else "",
+            "title": f"{entity}: {form} {desc or primary_doc}".strip(),
+            "summary": desc or primary_doc,
+            "url": url,
+            "securities": json.dumps([ticker] if ticker else [], ensure_ascii=False),
+            "source_grade": "official",
+            "raw_json": json.dumps(raw_item, ensure_ascii=False),
+        })
+        if len(rows) >= limit:
+            break
+    return _rows_to_df(rows)
+
+
+def _fetch_sec_edgar(limit: int, identifier: str = "", form_type: str = "", **kwargs) -> pd.DataFrame:
+    """SEC EDGAR 最近披露（identifier=ticker/CIK；留空聚合默认中概 10 只）。"""
+    import time as _time
+
+    if identifier and str(identifier).strip():
+        cik, _name = _sec_resolve_cik(identifier)
+        payload = _sec_get_json(_SEC_SUBMISSIONS_URL.format(cik=cik))
+        return _parse_sec_submissions(payload, limit, form_type=form_type)
+    # 聚合默认清单：每只取 min(limit, 5) 条，间隔 _SEC_RATE_GAP 防超 10 req/s
+    per = max(1, min(limit, 5))
+    frames: list[pd.DataFrame] = []
+    for i, ticker in enumerate(_SEC_DEFAULT_ADRS):
+        if i:
+            _time.sleep(_SEC_RATE_GAP)
+        cik, _name = _sec_resolve_cik(ticker)
+        payload = _sec_get_json(_SEC_SUBMISSIONS_URL.format(cik=cik))
+        frames.append(_parse_sec_submissions(payload, per, form_type=form_type))
+    return _rows_to_df(
+        pd.concat(frames, ignore_index=True)
+        .sort_values("publish_time", ascending=False)
+        .to_dict(orient="records")
+    )
+
+
+# ============================================================
 # 源登记表 — P02–P05 接新源在此加行（不动 _SOURCE_TABLE / 计数断言）
 # ============================================================
 
 # value = (分发函数, 一句话说明)。函数签名统一 (limit, **kwargs) -> DataFrame。
 OFFICIAL_SOURCES: dict[str, tuple[Callable[..., pd.DataFrame], str]] = {
     "fed": (_fetch_fed, "美联储新闻稿 RSS（议息/监管声明，官方一手）"),
+    "sec_edgar": (_fetch_sec_edgar, "SEC EDGAR 最近披露（中概股 10-K/10-Q/8-K/6-K，官方 JSON API）"),
 }
 
 
